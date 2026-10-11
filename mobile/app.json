@@ -2,7 +2,7 @@
   "expo": {
     "name": "ग्रंथ प्रबंधन",
     "slug": "granth-prabandhan",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -15,7 +15,7 @@
     },
     "android": {
       "package": "com.wnm.granthprabandhan",
-      "versionCode": 21,
+      "versionCode": 20,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
@@ -37,7 +37,7 @@
       ]
     ],
     "extra": {
-      "resourceVersion": "1.0.0"
+      "resourceVersion": "1.0.1"
     }
   }
 }
