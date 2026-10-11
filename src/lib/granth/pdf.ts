@@ -142,7 +142,7 @@ async function fitShot(shot: Shot): Promise<Shot> {
   const maxEdge = 1800;
   if (shot.kind === "jpg" && shot.w <= maxEdge && shot.h <= maxEdge && shot.bytes.length < 1_100_000) return shot;
   try {
-    const bitmap = await createImageBitmap(new Blob([Uint8Array.from(shot.bytes)]));
+    const bitmap = await createImageBitmap(new Blob([shot.bytes]));
     const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
@@ -249,7 +249,7 @@ async function embedShot(doc: PdfDoc, shot: Shot): Promise<PDFImage> {
     if (shot.kind === "png") return await doc.embedPng(shot.bytes);
     return await doc.embedJpg(shot.bytes);
   } catch {
-    const bitmap = await createImageBitmap(new Blob([Uint8Array.from(shot.bytes)]));
+    const bitmap = await createImageBitmap(new Blob([shot.bytes]));
     const canvas = document.createElement("canvas");
     canvas.width = bitmap.width;
     canvas.height = bitmap.height;
@@ -590,7 +590,7 @@ async function paintPage(
 }
 
 async function shotCanvas(shot: Shot) {
-  const img = await createImageBitmap(new Blob([Uint8Array.from(shot.bytes)], { type: shot.kind === "png" ? "image/png" : "image/jpeg" }));
+  const img = await createImageBitmap(new Blob([shot.bytes], { type: shot.kind === "png" ? "image/png" : "image/jpeg" }));
   const max = 900;
   const scale = Math.min(1, max / Math.max(img.width, img.height));
   const canvas = document.createElement("canvas");
@@ -639,7 +639,7 @@ async function previewJpeg(canvas: HTMLCanvasElement): Promise<Blob | null> {
   ctx.fillRect(0, 0, out.width, out.height);
   ctx.drawImage(canvas, 0, 0, out.width, out.height);
   try {
-    return new Blob([Uint8Array.from(await canvasBlob(out, "image/jpeg", 0.82))], { type: "image/jpeg" });
+    return new Blob([await canvasBlob(out, "image/jpeg", 0.82)], { type: "image/jpeg" });
   } catch {
     return null;
   }
@@ -653,7 +653,7 @@ export async function buildBookPdf(pages: BookPage[], style: PdfStyle = "fill90"
   const mode = styleOf(style);
   const shots: Array<Shot | null> = new Array(source.length);
   let cursor = 0;
-  const readers = Array.from({ length: Math.min(4, source.length) }, async () => {
+  const readers = Array.from({ length: Math.min(6, source.length) }, async () => {
     while (cursor < source.length) {
       const index = cursor;
       cursor += 1;
@@ -696,7 +696,7 @@ export async function buildBookPdf(pages: BookPage[], style: PdfStyle = "fill90"
   if (bytes.length < 64 || bytes[0] !== 0x25 || bytes[1] !== 0x50 || bytes[2] !== 0x44 || bytes[3] !== 0x46) {
     throw new Error("PDF खाली रह गई");
   }
-  return new Blob([Uint8Array.from(bytes)], { type: "application/pdf" });
+  return new Blob([bytes], { type: "application/pdf" });
 }
 
 export async function buildCardPdf(input: CardPdfInput, style: PdfStyle = "fill90", options: PdfBuildOptions = {}): Promise<Blob> {

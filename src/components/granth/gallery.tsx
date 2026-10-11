@@ -6,6 +6,7 @@ import type { GalleryFolder, GalleryItem } from "@/lib/granth/types";
 import { openBlob, ping, saveBlob, shareBlob } from "@/lib/granth/files";
 import { pushCloser } from "@/lib/granth/back";
 import { IconBox } from "./ui";
+import { PinchView } from "./zoom";
 
 function BlobView({ blob, alt, className }: { blob: Blob; alt: string; className?: string }) {
   const [src, setSrc] = useState("");
@@ -169,7 +170,9 @@ export function GalleryScreen() {
               <div className="pdf-tile">PDF</div>
             )}
             <h3 className="card-title">{item.title}</h3>
-            {item.kind !== "pdf" && item.text ? <p className="card-desc">{item.text}</p> : null}
+            {item.text ? <p className="card-desc">{item.text}</p> : null}
+            {item.topic ? <p className="fine">{item.topic}</p> : null}
+            {item.granth ? <p className="fine">{item.granth}</p> : null}
             <p className="fine">{new Date(item.createdAt).toLocaleDateString("hi-IN")}</p>
             <div className="card-meta" onClick={(event) => event.stopPropagation()}>
               <button
@@ -237,7 +240,9 @@ export function GalleryScreen() {
           </button>
           <div className="lightbox-scroll">
             {open.kind === "image" ? (
-              <BlobView className="lightbox-img" alt={open.title} blob={open.blob} />
+              <PinchView>
+                <BlobView className="lightbox-img" alt={open.title} blob={open.blob} />
+              </PinchView>
             ) : null}
             <article className="note-card">
               <h3>{open.title}</h3>

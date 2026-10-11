@@ -20,6 +20,8 @@ type GranthWindow = Window & {
   __granthOpenMiss?: (name: string) => void;
   __granthShareHit?: (name: string) => void;
   __granthShareMiss?: (name: string) => void;
+  __granthExportHit?: (name: string) => void;
+  __granthExportMiss?: (name: string) => void;
 };
 
 function nativeBridge(): NativeBridge | null {
@@ -77,20 +79,13 @@ export function openMail(email: string) {
   window.location.href = `mailto:${email}`;
 }
 
-async function blobBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const parts: string[] = [];
-  const size = 32766;
+async function chunkBase64(bytes: Uint8Array): Promise<string> {
+  let binary = "";
+  const size = 0x8000;
   for (let index = 0; index < bytes.length; index += size) {
-    let binary = "";
-    const slice = bytes.subarray(index, index + size);
-    for (let offset = 0; offset < slice.length; offset += 0x8000) {
-      binary += String.fromCharCode(...slice.subarray(offset, offset + 0x8000));
-    }
-    parts.push(btoa(binary));
-    if (parts.length % 6 === 0) await new Promise((resolve) => window.setTimeout(resolve, 0));
+    binary += String.fromCharCode(...bytes.subarray(index, index + size));
   }
-  return parts.join("");
+  return btoa(binary);
 }
 
 const openBlobs = new Map<string, Blob>();
@@ -107,32 +102,21 @@ function rememberOpen(name: string, blob: Blob) {
   };
 }
 
-async function sendChunks(blob: Blob, name: string, data: string, mode: "save" | "share" | "open") {
+async function handoff(blob: Blob, name: string, mode: "save" | "share" | "open") {
   const bridge = nativeBridge();
-  if (!bridge) return false;
-  const size = 96_000;
-  const total = Math.max(1, Math.ceil(data.length / size));
+  if (!bridge || blob.size < 64) return false;
+  const raw = 48_000;
+  const total = Math.max(1, Math.ceil(blob.size / raw));
   const id = `${Date.now()}-${name}`;
   const type = mode === "share" ? "share-chunk" : mode === "open" ? "open-chunk" : "save-chunk";
+  const mime = blob.type || (name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
   for (let index = 0; index < total; index += 1) {
-    bridge.postMessage(JSON.stringify({
-      type,
-      id,
-      name,
-      mime: blob.type || (name.endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
-      index,
-      total,
-      data: data.slice(index * size, (index + 1) * size),
-    }));
-    if (index % 2 === 1) await new Promise((resolve) => window.setTimeout(resolve, 12));
+    const slice = blob.slice(index * raw, (index + 1) * raw);
+    const data = await chunkBase64(new Uint8Array(await slice.arrayBuffer()));
+    bridge.postMessage(JSON.stringify({ type, id, name, mime, index, total, data }));
+    if (index % 6 === 5) await new Promise((resolve) => window.setTimeout(resolve, 0));
   }
   return true;
-}
-
-async function handoff(blob: Blob, name: string, mode: "save" | "share" | "open") {
-  if (blob.size < 64) return false;
-  const data = nativeBridge() ? await blobBase64(blob) : "";
-  return Boolean(data && await sendChunks(blob, name, data, mode));
 }
 
 export function deliverFile(blob: Blob, fileName: string) {
@@ -155,37 +139,41 @@ export function deliverFile(blob: Blob, fileName: string) {
   return job;
 }
 
-function askShareSaved(name: string) {
+async function waitSaved(fileName: string) {
+  const pending = saving.get(fileName);
+  if (!pending) return;
+  try {
+    await pending;
+  } catch {
+    /* fall through and use the bytes we still have */
+  }
+}
+
+function askReady(name: string, type: "share-saved" | "export-saved") {
   const bridge = nativeBridge();
   if (!bridge) return Promise.resolve(false);
   return new Promise<boolean>((resolve) => {
-    const timer = window.setTimeout(() => resolve(false), 1500);
+    const timer = window.setTimeout(() => resolve(false), 4000);
     const host = window as GranthWindow;
-    host.__granthShareHit = (hit) => {
-      if (hit !== name) return;
+    const finish = (ok: boolean) => {
       window.clearTimeout(timer);
-      resolve(true);
+      resolve(ok);
     };
-    host.__granthShareMiss = (miss) => {
-      if (miss !== name) return;
-      window.clearTimeout(timer);
-      resolve(false);
-    };
-    bridge.postMessage(JSON.stringify({ type: "share-saved", name }));
+    if (type === "share-saved") {
+      host.__granthShareHit = (hit) => { if (hit === name) finish(true); };
+      host.__granthShareMiss = (miss) => { if (miss === name) finish(false); };
+    } else {
+      host.__granthExportHit = (hit) => { if (hit === name) finish(true); };
+      host.__granthExportMiss = (miss) => { if (miss === name) finish(false); };
+    }
+    bridge.postMessage(JSON.stringify({ type, name }));
   });
 }
 
 export async function shareBlob(blob: Blob, fileName: string) {
   if (nativeBridge()) {
-    const pending = saving.get(fileName);
-    if (pending) {
-      try {
-        await pending;
-      } catch {
-        /* share the bytes anyway */
-      }
-    }
-    if (!(await askShareSaved(fileName))) await handoff(blob, fileName, "share");
+    await waitSaved(fileName);
+    if (!(await askReady(fileName, "share-saved"))) await handoff(blob, fileName, "share");
     return;
   }
   const file = new File([blob], fileName, { type: blob.type || "application/pdf" });
@@ -205,6 +193,7 @@ export async function shareBlob(blob: Blob, fileName: string) {
 export async function openBlob(blob: Blob, fileName: string) {
   const bridge = nativeBridge();
   if (bridge) {
+    await waitSaved(fileName);
     rememberOpen(fileName, blob);
     bridge.postMessage(JSON.stringify({ type: "open-saved", name: fileName }));
     return;
@@ -213,6 +202,10 @@ export async function openBlob(blob: Blob, fileName: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export function saveBlob(blob: Blob, fileName: string) {
-  deliverFile(blob, fileName);
+export async function saveBlob(blob: Blob, fileName: string) {
+  if (nativeBridge()) {
+    await waitSaved(fileName);
+    if (await askReady(fileName, "export-saved")) return;
+  }
+  await deliverFile(blob, fileName);
 }

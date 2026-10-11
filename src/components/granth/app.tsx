@@ -357,6 +357,7 @@ export function GranthApp() {
               </button>
             </div>
             <div className="mast-tools">
+              <PdfDock />
               <button className="gallery-btn" type="button" aria-label="Gallery" onClick={() => go("#/gallery")}>
                 <Images />
               </button>
@@ -381,7 +382,6 @@ export function GranthApp() {
           </div>
         </div>
       </header>
-      <PdfDock />
 
       <button
         className={`hamburger ${menuOpen ? "open" : ""}`}

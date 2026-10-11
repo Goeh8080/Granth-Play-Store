@@ -27,6 +27,7 @@ type OpenUrl = { type: "open-url"; url: string };
 type OpenSaved = { type: "open-saved"; name: string };
 type ShareText = { type: "share-text"; title?: string; text?: string; url?: string };
 type ShareSaved = { type: "share-saved"; name: string };
+type ExportSaved = { type: "export-saved"; name: string };
 type ExitApp = { type: "exit-app" };
 
 const BRIDGE = `(function(){
@@ -258,9 +259,9 @@ function openDeepLink(view: WebView | null, url: string) {
 }
 
 async function onBridge(raw: string, view: WebView | null, parts: Map<string, string[]>) {
-  let message: SaveChunk | NetRequest | OpenMail | OpenUrl | OpenSaved | ShareText | ShareSaved | ExitApp;
+  let message: SaveChunk | NetRequest | OpenMail | OpenUrl | OpenSaved | ShareText | ShareSaved | ExportSaved | ExitApp;
   try {
-    message = JSON.parse(raw) as SaveChunk | NetRequest | OpenMail | OpenUrl | OpenSaved | ShareText | ShareSaved | ExitApp;
+    message = JSON.parse(raw) as SaveChunk | NetRequest | OpenMail | OpenUrl | OpenSaved | ShareText | ShareSaved | ExportSaved | ExitApp;
   } catch {
     return;
   }
@@ -277,6 +278,10 @@ async function onBridge(raw: string, view: WebView | null, parts: Map<string, st
   }
   if (message.type === "share-saved") {
     await shareSaved(message.name, view);
+    return;
+  }
+  if (message.type === "export-saved") {
+    await exportSaved(message.name, view);
     return;
   }
   if (message.type === "open-saved") {
@@ -414,6 +419,21 @@ async function shareSaved(rawName: string, view: WebView | null) {
   if (await Sharing.isAvailableAsync()) {
     await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: name });
   }
+}
+
+async function exportSaved(rawName: string, view: WebView | null) {
+  const name = safeName(rawName);
+  const uri = documentDirectory ? `${documentDirectory}Granth/${name}` : "";
+  const info = uri ? await getInfoAsync(uri).catch(() => null) : null;
+  const size = info && "exists" in info && info.exists && "size" in info ? Number(info.size) : 0;
+  const ready = size > 64;
+  view?.injectJavaScript(
+    `window.__granthExport${ready ? "Hit" : "Miss"}&&window.__granthExport${ready ? "Hit" : "Miss"}(${JSON.stringify(rawName)});true;`,
+  );
+  if (!ready || !uri) return;
+  const writer = NativeModules.GranthDownloads as { copyToDownloads?: (path: string, name: string, mime: string) => Promise<string> } | undefined;
+  const mime = name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg";
+  if (writer?.copyToDownloads) await writer.copyToDownloads(uri, name, mime).catch(() => undefined);
 }
 
 async function openSaved(rawName: string, view: WebView | null) {

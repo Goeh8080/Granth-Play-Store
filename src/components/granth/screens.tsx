@@ -17,6 +17,7 @@ import { mediaPath, mediaUrl, youtubeId } from "@/lib/granth/media";
 import { enqueuePdf, markGranthsOffline, useOfflineIds } from "@/lib/granth/pdf-jobs";
 import { PDF_STYLES, rememberPdfStyle, savedPdfStyle, type PdfStyle } from "@/lib/granth/pdf-style";
 import type { BookPage } from "@/lib/granth/pdf";
+import { PinchView } from "./zoom";
 import { useGranth } from "@/lib/granth/store";
 import { useSearchMetric } from "@/lib/granth/metrics";
 import type { AppRoute, Granth, Praman, Topic } from "@/lib/granth/types";
@@ -582,7 +583,7 @@ async function renderSpecs(
   const total = Math.max(1, specs.length);
   const ready = await readImages(specs.map((spec) => mediaPath(spec.path)).filter((path): path is string => Boolean(path)));
   let loaded = 0;
-  const blobs = await mapPool(specs, 6, async (spec) => {
+  const blobs = await mapPool(specs, 8, async (spec) => {
     if (isCancelled()) return null;
     const blob = await loadShot(spec.path, ready);
     loaded += 1;
@@ -1326,81 +1327,10 @@ export function Lightbox({ paths, onClose }: { paths: string[]; onClose: () => v
       </button>
       <div className="lightbox-scroll">
         {paths.map((path) => (
-          <ZoomShot key={path} path={path} />
+          <PinchView key={path}>
+            <MediaImage path={path} alt="प्रमाण" className="lightbox-img" />
+          </PinchView>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function ZoomShot({ path }: { path: string }) {
-  const view = useRef({ scale: 1, x: 0, y: 0, pointers: new Map<number, { x: number; y: number }>(), pinch: 0, base: 1, panX: 0, panY: 0, lastTap: 0 });
-  const [transform, setTransform] = useState("translate(0px, 0px) scale(1)");
-  const paint = () => {
-    const shot = view.current;
-    setTransform(`translate(${shot.x}px, ${shot.y}px) scale(${shot.scale})`);
-  };
-  const pinchDistance = () => {
-    const pts = [...view.current.pointers.values()];
-    if (pts.length < 2) return 0;
-    return Math.hypot((pts[0]?.x ?? 0) - (pts[1]?.x ?? 0), (pts[0]?.y ?? 0) - (pts[1]?.y ?? 0));
-  };
-  return (
-    <div
-      className="zoom-stage"
-      onPointerDown={(event) => {
-        const shot = view.current;
-        shot.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-        event.currentTarget.setPointerCapture(event.pointerId);
-        if (shot.pointers.size === 2) {
-          shot.pinch = pinchDistance();
-          shot.base = shot.scale;
-        } else if (shot.pointers.size === 1) {
-          shot.panX = event.clientX - shot.x;
-          shot.panY = event.clientY - shot.y;
-          const now = Date.now();
-          if (now - shot.lastTap < 280) {
-            shot.scale = shot.scale > 1.2 ? 1 : 2.6;
-            shot.x = 0;
-            shot.y = 0;
-            paint();
-          }
-          shot.lastTap = now;
-        }
-      }}
-      onPointerMove={(event) => {
-        const shot = view.current;
-        if (!shot.pointers.has(event.pointerId)) return;
-        shot.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-        if (shot.pointers.size >= 2 && shot.pinch > 0) {
-          const next = pinchDistance() / shot.pinch;
-          shot.scale = Math.min(5, Math.max(1, shot.base * next));
-          if (shot.scale === 1) {
-            shot.x = 0;
-            shot.y = 0;
-          }
-          paint();
-          return;
-        }
-        if (shot.scale > 1) {
-          shot.x = event.clientX - shot.panX;
-          shot.y = event.clientY - shot.panY;
-          paint();
-        }
-      }}
-      onPointerUp={(event) => {
-        view.current.pointers.delete(event.pointerId);
-      }}
-      onPointerCancel={(event) => {
-        view.current.pointers.delete(event.pointerId);
-      }}
-    >
-      <div className="zoom-tools">
-        <button type="button" onClick={() => { view.current.scale = Math.min(5, view.current.scale + 0.6); paint(); }}>+</button>
-        <button type="button" onClick={() => { view.current.scale = Math.max(1, view.current.scale - 0.6); if (view.current.scale === 1) { view.current.x = 0; view.current.y = 0; } paint(); }}>−</button>
-      </div>
-      <div className="zoom-frame" style={{ transform }}>
-        <MediaImage path={path} alt="प्रमाण" className="lightbox-img" />
       </div>
     </div>
   );
