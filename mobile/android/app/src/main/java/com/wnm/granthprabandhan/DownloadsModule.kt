@@ -25,6 +25,16 @@ class DownloadsModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
   private fun fileOf(path: String): File = File(path.removePrefix("file://"))
 
   @ReactMethod
+  fun getAppVersion(promise: Promise) {
+    try {
+      val info = reactApplicationContext.packageManager.getPackageInfo(reactApplicationContext.packageName, 0)
+      promise.resolve(info.versionName ?: "")
+    } catch (error: Exception) {
+      promise.reject("version", error.message, error)
+    }
+  }
+
+  @ReactMethod
   fun beginWrite(path: String, promise: Promise) {
     try {
       val file = fileOf(path)

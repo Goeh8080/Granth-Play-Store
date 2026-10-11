@@ -34,6 +34,16 @@ function rememberLayout(cols: 1 | 2) {
 }
 
 export function SettingsSheet({ onClose }: { onClose: () => void }) {
+  const [shownVersion, setShownVersion] = useState(APP_VERSION);
+  useEffect(() => {
+    const read = () => {
+      const value = (window as Window & { __granthVersion?: string }).__granthVersion;
+      if (value) setShownVersion(value);
+    };
+    read();
+    window.addEventListener("granth-version", read);
+    return () => window.removeEventListener("granth-version", read);
+  }, []);
   const [look, setLook] = useState<UiLook>((localStorage.getItem("granth-look") as UiLook) || "classic");
   const [cols, setCols] = useState<1 | 2>(Number(localStorage.getItem("ui-cols")) === 1 ? 1 : 2);
   const [pdf, setPdf] = useState<PdfStyle>(savedPdfStyle());
@@ -95,7 +105,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
             if (taps.current >= 5) setSecret(true);
           }}
         >
-          Version {APP_VERSION}
+          Version {shownVersion}
         </button>
         {secret ? (
           <section className="set-block">

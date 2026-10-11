@@ -194,6 +194,11 @@ function Shell() {
           webReady.current = true;
           web.current?.injectJavaScript(BRIDGE);
           web.current?.injectJavaScript(pad);
+          const reader = NativeModules.GranthDownloads as { getAppVersion?: () => Promise<string> } | undefined;
+          void reader?.getAppVersion?.().then((version) => {
+            if (!version) return;
+            web.current?.injectJavaScript(`window.__granthVersion=${JSON.stringify(version)};window.dispatchEvent(new Event("granth-version"));true;`);
+          });
           if (pendingLink.current && sentLink.current !== pendingLink.current) {
             const url = pendingLink.current;
             const hash = hashFromShareUrl(url);
