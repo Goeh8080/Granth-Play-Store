@@ -39,8 +39,8 @@ object GranthBack {
 
   fun tune(activity: ComponentActivity) {
     val web = find(activity.window?.decorView) ?: return
-    web.settings.setSupportZoom(false)
-    web.settings.builtInZoomControls = false
+    web.settings.setSupportZoom(true)
+    web.settings.builtInZoomControls = true
     web.settings.displayZoomControls = false
     web.isFocusable = true
     web.isFocusableInTouchMode = true

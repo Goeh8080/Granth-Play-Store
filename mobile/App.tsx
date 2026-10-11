@@ -185,7 +185,8 @@ function Shell() {
           web.current?.reload();
         }}
         setSupportMultipleWindows={false}
-        setBuiltInZoomControls={false}
+        setBuiltInZoomControls
+        setDisplayZoomControls={false}
         scalesPageToFit={false}
         injectedJavaScriptBeforeContentLoaded={BRIDGE}
         injectedJavaScript={pad}
