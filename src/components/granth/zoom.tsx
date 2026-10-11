@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 
 export function PinchView({ children }: { children: ReactNode }) {
+  const stage = useRef<HTMLDivElement>(null);
   const view = useRef({
     scale: 1,
     x: 0,
@@ -16,9 +17,27 @@ export function PinchView({ children }: { children: ReactNode }) {
     lastX: 0,
     lastY: 0,
     panning: false,
+    blockPan: false,
   });
   const [transform, setTransform] = useState("translate(0px, 0px) scale(1)");
+  const clamp = () => {
+    const shot = view.current;
+    const box = stage.current;
+    if (shot.scale <= 1.02) {
+      shot.scale = 1;
+      shot.x = 0;
+      shot.y = 0;
+      return;
+    }
+    const width = box?.clientWidth ?? 320;
+    const height = box?.clientHeight ?? 480;
+    const maxX = ((shot.scale - 1) * width) / 2;
+    const maxY = ((shot.scale - 1) * height) / 2;
+    shot.x = Math.min(maxX, Math.max(-maxX, shot.x));
+    shot.y = Math.min(maxY, Math.max(-maxY, shot.y));
+  };
   const paint = () => {
+    clamp();
     const shot = view.current;
     setTransform(`translate(${shot.x}px, ${shot.y}px) scale(${shot.scale})`);
   };
@@ -35,16 +54,29 @@ export function PinchView({ children }: { children: ReactNode }) {
       y: ((pts[0]?.y ?? 0) + (pts[1]?.y ?? 0)) / 2,
     };
   };
+  const center = () => {
+    const shot = view.current;
+    shot.scale = 1;
+    shot.x = 0;
+    shot.y = 0;
+    shot.pinching = false;
+    shot.panning = false;
+    shot.blockPan = false;
+    paint();
+  };
   return (
     <div
+      ref={stage}
       className="zoom-stage"
       onPointerDown={(event) => {
         const shot = view.current;
+        if (shot.pointers.size === 0) shot.blockPan = false;
         shot.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         event.currentTarget.setPointerCapture(event.pointerId);
         shot.panning = false;
         if (shot.pointers.size >= 2) {
           shot.pinching = true;
+          shot.blockPan = true;
           shot.pinch = pinchDistance();
           shot.base = shot.scale;
           const mid = midpoint();
@@ -61,8 +93,8 @@ export function PinchView({ children }: { children: ReactNode }) {
         if (shot.pointers.size >= 2 && shot.pinch > 0) {
           const next = pinchDistance() / shot.pinch;
           const mid = midpoint();
-          shot.scale = Math.min(5, Math.max(1, shot.base * next));
-          if (shot.scale <= 1.02) {
+          shot.scale = Math.min(4, Math.max(1, shot.base * next));
+          if (shot.scale <= 1.05) {
             shot.scale = 1;
             shot.x = 0;
             shot.y = 0;
@@ -73,7 +105,7 @@ export function PinchView({ children }: { children: ReactNode }) {
           paint();
           return;
         }
-        if (shot.pinching || shot.scale <= 1) return;
+        if (shot.pinching || shot.blockPan || shot.scale <= 1) return;
         const point = shot.pointers.get(event.pointerId);
         if (!point) return;
         if (!shot.panning) {
@@ -91,14 +123,22 @@ export function PinchView({ children }: { children: ReactNode }) {
       onPointerUp={(event) => {
         const shot = view.current;
         shot.pointers.delete(event.pointerId);
-        shot.pinching = shot.pointers.size >= 2;
         shot.panning = false;
+        if (shot.pointers.size < 2) {
+          shot.pinching = false;
+          shot.blockPan = true;
+          if (shot.scale <= 1.08) center();
+          else paint();
+        }
       }}
       onPointerCancel={(event) => {
         const shot = view.current;
         shot.pointers.delete(event.pointerId);
         shot.pinching = false;
         shot.panning = false;
+        shot.blockPan = true;
+        if (shot.scale <= 1.08) center();
+        else paint();
       }}
     >
       <div className="zoom-frame" style={{ transform }}>

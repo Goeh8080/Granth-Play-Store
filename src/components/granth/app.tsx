@@ -304,6 +304,14 @@ export function GranthApp() {
     const now = Date.now();
     if (lastGo.current.hash === hash && now - lastGo.current.at < 400) return;
     lastGo.current = { hash, at: now };
+    const until = now + 500;
+    const stopGhost = (event: Event) => {
+      window.removeEventListener("click", stopGhost, true);
+      if (Date.now() > until) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.addEventListener("click", stopGhost, true);
     pendingHash.current = hash;
     skipPop.current = now + 450;
     captureListPlace();

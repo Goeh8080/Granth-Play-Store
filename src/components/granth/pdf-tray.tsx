@@ -110,9 +110,8 @@ export function PdfDock() {
             {active ? <span>{active}</span> : null}
           </button>
           {open && task ? (
-            <>
-              <div className="pdf-shade" onClick={() => setOpen(false)} />
-              <div className="pdf-deck" role="dialog" aria-label="PDF प्रगति" onClick={(event) => event.stopPropagation()}>
+            <div className="pdf-pop" role="presentation" onClick={() => setOpen(false)}>
+              <div className="pdf-deck pdf-deck-center" role="dialog" aria-modal="true" aria-label="PDF प्रगति" onClick={(event) => event.stopPropagation()}>
                 <div className="pdf-deck-top">
                   <strong>
                     {index + 1}/{tasks.length}
@@ -160,7 +159,7 @@ export function PdfDock() {
                   </div>
                 ) : null}
               </div>
-            </>
+            </div>
           ) : null}
         </div>
       ) : null}

@@ -700,12 +700,14 @@ main {
   background: transparent;
 }
 
-.pdf-deck.pdf-deck-float {
-  position: fixed;
-  right: auto;
+.pdf-deck-center {
+  position: relative;
   top: auto;
-  z-index: 81;
-  width: min(420px, 92vw);
+  right: auto;
+  width: min(440px, 92vw);
+  max-height: min(86vh, 720px);
+  overflow: auto;
+  z-index: 91;
 }
 
 .pdf-arrow {
@@ -773,6 +775,15 @@ main {
 .pdf-deck p {
   font-size: 14px;
   margin-top: 4px;
+}
+
+.pdf-pop .pdf-deck {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: min(440px, 92vw);
+  max-height: min(86vh, 720px);
+  overflow: auto;
 }
 
 .pdf-deck-top,
