@@ -1116,6 +1116,10 @@ main {
   color: var(--color-paper);
 }
 
+.granth-grid {
+  overflow-anchor: none;
+}
+
 .granth-grid.cols-1 {
   grid-template-columns: minmax(0, 1fr);
 }

@@ -119,11 +119,15 @@ function patch(id: string, next: Partial<PdfTask>) {
   emitTasks();
 }
 
+let progressFloor = 0;
+
 function percentFor(phase: PdfPhase, done: number, total: number) {
   if (phase === "done") return 100;
   if (phase === "save") return 99;
-  if (phase === "cancelled" || phase === "error") return Math.min(99, Math.round((done / Math.max(1, total)) * 100));
-  return Math.min(99, Math.round((done / Math.max(1, total)) * 100));
+  const ratio = done / Math.max(1, total);
+  const value = phase === "images" ? Math.round(ratio * 15) : Math.round(ratio * 99);
+  progressFloor = Math.max(progressFloor, Math.min(99, value));
+  return progressFloor;
 }
 
 function estimateEta(startedAt: number, percent: number) {
@@ -188,7 +192,8 @@ async function pump() {
       queue = queue.slice(1);
       if (!next || next.cancelled) continue;
       const startedAt = Date.now();
-      patch(next.id, { phase: "images", startedAt, percent: 1, done: 0, total: 1 });
+      progressFloor = 0;
+      patch(next.id, { phase: "pages", startedAt, percent: 0, done: 0, total: 1 });
       try {
         const blob = await next.run({
           isCancelled: () => next.cancelled,

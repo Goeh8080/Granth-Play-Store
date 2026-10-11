@@ -314,7 +314,8 @@ export function GranthApp() {
     window.addEventListener("click", stopGhost, true);
     pendingHash.current = hash;
     skipPop.current = now + 450;
-    captureListPlace();
+    const granthId = new URLSearchParams((hash.split("?")[1] || "").split("#")[0]).get("granth") || "";
+    captureListPlace(granthId ? { id: granthId } : undefined);
     const current = window.location.hash || "#/dashboard";
     if (current === hash) {
       setRoute(parseHash(hash));

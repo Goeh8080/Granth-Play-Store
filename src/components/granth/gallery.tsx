@@ -170,10 +170,14 @@ export function GalleryScreen() {
               <div className="pdf-tile">PDF</div>
             )}
             <h3 className="card-title">{item.title}</h3>
-            {item.text ? <p className="card-desc">{item.text}</p> : null}
-            {item.topic ? <p className="fine">{item.topic}</p> : null}
-            {item.granth ? <p className="fine">{item.granth}</p> : null}
-            <p className="fine">{new Date(item.createdAt).toLocaleDateString("hi-IN")}</p>
+            {item.kind === "pdf" ? null : (
+              <>
+                {item.text ? <p className="card-desc">{item.text}</p> : null}
+                {item.topic ? <p className="fine">{item.topic}</p> : null}
+                {item.granth ? <p className="fine">{item.granth}</p> : null}
+                <p className="fine">{new Date(item.createdAt).toLocaleDateString("hi-IN")}</p>
+              </>
+            )}
             <div className="card-meta" onClick={(event) => event.stopPropagation()}>
               <button
                 type="button"

@@ -651,45 +651,60 @@ export async function buildBookPdf(pages: BookPage[], style: PdfStyle = "fill90"
   const fontsPromise = ensureFonts();
   const source = pages.length ? pages : [{ title: "कोई प्रमाण नहीं" }];
   const mode = styleOf(style);
-  const shots: Array<Shot | null> = new Array(source.length);
+  const font = await Promise.all([fontsPromise, fontPromise]).then(() => fontPromise);
+  const shots: Array<Shot | null | undefined> = new Array(source.length);
   let cursor = 0;
+  let painted = 0;
+  let painting = false;
+  const paintReady = async () => {
+    if (painting) return;
+    painting = true;
+    try {
+      while (painted < source.length && shots[painted] !== undefined) {
+        if (options.isCancelled?.()) throw new DOMException("cancelled", "AbortError");
+        const index = painted;
+        painted += 1;
+        const input = source[index] ?? { title: "ग्रंथ" };
+        const before = doc.getPageCount();
+        const shot = shots[index] ?? null;
+        const preview = index === 0 && options.onPreview
+          ? async (canvas: HTMLCanvasElement) => {
+              const blob = await previewJpeg(canvas);
+              if (blob) options.onPreview?.(blob);
+            }
+          : undefined;
+        try {
+          await paintPage(doc, input, shot, mode, preview);
+        } catch (error) {
+          if (options.isCancelled?.() || (error instanceof DOMException && error.name === "AbortError")) throw error;
+          const page = doc.addPage([595.28, 841.89]);
+          page.drawRectangle({ x: 0, y: 0, width: 595.28, height: 841.89, color: rgb(1, 0.984, 0.953) });
+        }
+        if (mode !== "original" || input.topicCover) {
+          const made = doc.getPages();
+          for (let pageIndex = before; pageIndex < made.length; pageIndex += 1) {
+            const page = made[pageIndex];
+            if (page) stampAt(page, pageIndex + 1, font);
+          }
+        }
+        options.onPage?.(index + 1, source.length);
+      }
+    } finally {
+      painting = false;
+    }
+    if (painted < source.length && shots[painted] !== undefined) await paintReady();
+  };
   const readers = Array.from({ length: Math.min(6, source.length) }, async () => {
     while (cursor < source.length) {
       const index = cursor;
       cursor += 1;
       if (options.isCancelled?.()) return;
-      shots[index] = await readShot(source[index]?.imageBlob);
+      shots[index] = (await readShot(source[index]?.imageBlob)) ?? null;
+      if (index === painted) await paintReady();
     }
   });
-  await Promise.all([fontsPromise, fontPromise, ...readers]);
-  const font = await fontPromise;
-  for (let index = 0; index < source.length; index += 1) {
-    if (options.isCancelled?.()) throw new DOMException("cancelled", "AbortError");
-    const input = source[index] ?? { title: "ग्रंथ" };
-    const before = doc.getPageCount();
-    const shot = shots[index] ?? null;
-    const preview = index === 0 && options.onPreview
-      ? async (canvas: HTMLCanvasElement) => {
-          const blob = await previewJpeg(canvas);
-          if (blob) options.onPreview?.(blob);
-        }
-      : undefined;
-    try {
-      await paintPage(doc, input, shot, mode, preview);
-    } catch (error) {
-      if (options.isCancelled?.() || (error instanceof DOMException && error.name === "AbortError")) throw error;
-      const page = doc.addPage([595.28, 841.89]);
-      page.drawRectangle({ x: 0, y: 0, width: 595.28, height: 841.89, color: rgb(1, 0.984, 0.953) });
-    }
-    if (mode !== "original" || input.topicCover) {
-      const made = doc.getPages();
-      for (let pageIndex = before; pageIndex < made.length; pageIndex += 1) {
-        const page = made[pageIndex];
-        if (page) stampAt(page, pageIndex + 1, font);
-      }
-    }
-    options.onPage?.(index + 1, source.length);
-  }
+  await Promise.all(readers);
+  await paintReady();
   if (options.isCancelled?.()) throw new DOMException("cancelled", "AbortError");
   if (doc.getPageCount() === 0) doc.addPage([595.28, 841.89]);
   const bytes = await doc.save();

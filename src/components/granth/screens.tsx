@@ -58,15 +58,20 @@ async function shareLink(title: string, hash: string) {
 
 function readPlace(key: string) {
   try {
-    const parsed = JSON.parse(localStorage.getItem(key) || sessionStorage.getItem(key) || "null") as { y?: number; count?: number } | null;
+    const parsed = JSON.parse(localStorage.getItem(key) || sessionStorage.getItem(key) || "null") as { y?: number; count?: number; id?: string; anchor?: number } | null;
     if (!parsed || typeof parsed.y !== "number") return null;
-    return { y: parsed.y, count: Math.max(8, Number(parsed.count) || 8) };
+    return {
+      y: parsed.y,
+      count: Math.max(8, Number(parsed.count) || 8),
+      id: typeof parsed.id === "string" ? parsed.id : "",
+      anchor: typeof parsed.anchor === "number" ? parsed.anchor : 0,
+    };
   } catch {
     return null;
   }
 }
 
-function writePlace(key: string, value: { y: number; count: number }) {
+function writePlace(key: string, value: { y: number; count: number; id?: string; anchor?: number }) {
   const raw = JSON.stringify(value);
   try {
     localStorage.setItem(key, raw);
@@ -80,14 +85,26 @@ function writePlace(key: string, value: { y: number; count: number }) {
   }
 }
 
-let activeSave: (() => void) | null = null;
+let activeSave: ((hint?: { id?: string }) => void) | null = null;
 let lastScrollAt = 0;
 if (typeof window !== "undefined") {
   window.addEventListener("scroll", () => { lastScrollAt = Date.now(); }, { passive: true });
 }
 
-export function captureListPlace() {
-  activeSave?.();
+export function captureListPlace(hint?: { id?: string }) {
+  activeSave?.(hint);
+}
+
+function pinPlace(saved: { y: number; id?: string; anchor?: number } | null) {
+  if (saved?.id) {
+    const card = document.querySelector(`[data-granth="${CSS.escape(saved.id)}"]`);
+    if (card) {
+      const delta = card.getBoundingClientRect().top - (saved.anchor ?? 0);
+      if (Math.abs(delta) > 1) window.scrollTo(0, window.scrollY + delta);
+      return;
+    }
+  }
+  window.scrollTo(0, saved ? saved.y : 0);
 }
 
 function useRememberList(storageKey: string, active: boolean, query: string) {
@@ -95,7 +112,7 @@ function useRememberList(storageKey: string, active: boolean, query: string) {
   const totalRef = useRef(0);
   const yRef = useRef(0);
   const frozen = useRef(false);
-  const place = useRef<{ y: number; count: number } | null>(null);
+  const place = useRef<{ y: number; count: number; id?: string; anchor?: number } | null>(null);
   const seen = useRef("");
   const restored = useRef(false);
   const token = active && !query ? storageKey : "";
@@ -110,30 +127,47 @@ function useRememberList(storageKey: string, active: boolean, query: string) {
     const saved = place.current;
     if (saved && countRef.current < Math.min(saved.count, totalRef.current || saved.count)) return;
     restored.current = true;
-    window.scrollTo(0, saved ? saved.y : 0);
+    pinPlace(saved);
   });
   useEffect(() => {
     if (!token) return;
     let timer = 0;
-    const persist = () => writePlace(storageKey, { y: yRef.current, count: countRef.current });
-    const snapshot = () => {
+    const persist = (hint?: { id?: string }) => {
+      const id = hint?.id || "";
+      const card = id ? document.querySelector(`[data-granth="${CSS.escape(id)}"]`) : null;
+      const anchor = card ? card.getBoundingClientRect().top : 0;
+      writePlace(storageKey, { y: yRef.current, count: countRef.current, id, anchor });
+    };
+    const snapshot = (hint?: { id?: string }) => {
       if (frozen.current) return;
       yRef.current = window.scrollY;
       frozen.current = true;
-      persist();
+      persist(hint);
     };
     activeSave = snapshot;
     const onScroll = () => {
       if (frozen.current) return;
       yRef.current = window.scrollY;
       window.clearTimeout(timer);
-      timer = window.setTimeout(persist, 120);
+      timer = window.setTimeout(() => persist(), 120);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
+    const saved = place.current;
+    const timers: number[] = [];
+    const onLoad = (event: Event) => {
+      if (!(event.target instanceof HTMLImageElement)) return;
+      pinPlace(saved);
+    };
+    if (saved?.id) {
+      document.addEventListener("load", onLoad, true);
+      for (const wait of [40, 160, 400]) timers.push(window.setTimeout(() => pinPlace(saved), wait));
+    }
     return () => {
       if (!frozen.current) persist();
       window.clearTimeout(timer);
+      for (const wait of timers) window.clearTimeout(wait);
       window.removeEventListener("scroll", onScroll);
+      document.removeEventListener("load", onLoad, true);
       if (activeSave === snapshot) activeSave = null;
     };
   }, [storageKey, token]);
@@ -455,11 +489,10 @@ export function GranthScreen({
   const granths = useGranth((state) => state.granths);
   const [query, setQuery] = useState("");
   const search = useDeferredValue(query);
-  const [cols, setCols] = useState<1 | 2 | 3>(2);
-  useEffect(() => {
+  const [cols, setCols] = useState<1 | 2 | 3>(() => {
     const saved = Number(localStorage.getItem("granth-cols"));
-    if (saved === 1 || saved === 2 || saved === 3) setCols(saved);
-  }, []);
+    return saved === 1 || saved === 2 || saved === 3 ? saved : 2;
+  });
   const docs = useMemo(() => {
     const map = new Map<string, PreparedDoc>();
     for (const granth of granths) map.set(granth.id, prepareFields([granth.title, granth.author, granth.description]));
@@ -581,6 +614,8 @@ async function renderSpecs(
   onPreview?: (blob: Blob) => void,
 ) {
   const total = Math.max(1, specs.length);
+  report("pages", 0, total);
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
   const ready = await readImages(specs.map((spec) => mediaPath(spec.path)).filter((path): path is string => Boolean(path)));
   let loaded = 0;
   const blobs = await mapPool(specs, 8, async (spec) => {
@@ -975,7 +1010,7 @@ function GranthCard({
   const proofs = Number(granth.pramanCount) || 0;
   const link = granth.granthURL?.trim();
   return (
-    <article className="card granth-card" {...bindOpen(onOpen)}>
+    <article className="card granth-card" data-granth={granth.id} {...bindOpen(onOpen)}>
       <div className="card-header">
         <h3 className="card-title">
           <span>

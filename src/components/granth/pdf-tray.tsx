@@ -37,7 +37,12 @@ async function keepInApp(task: PdfTask) {
 function pdfFacts(task: PdfTask, now: number) {
   const end = task.finishedAt || (task.phase === "done" ? now : now);
   const elapsed = formatClock(Math.max(0, end - task.startedAt));
-  const pages = task.total > 1 || task.phase === "pages" || task.phase === "done" ? `${task.phase === "done" ? task.total : task.done}/${task.total} पृष्ठ` : "";
+  const pages =
+    task.phase === "pages" || task.phase === "done"
+      ? `${task.phase === "done" ? task.total : task.done}/${task.total} पृष्ठ`
+      : task.phase === "images"
+        ? `${task.done}/${task.total} चित्र`
+        : "";
   return [pages, `${elapsed} लगे`, formatEta(task.etaMs, task.phase)].filter(Boolean).join(" · ");
 }
 

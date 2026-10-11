@@ -15,7 +15,7 @@
     },
     "android": {
       "package": "com.wnm.granthprabandhan",
-      "versionCode": 19,
+      "versionCode": 20,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
