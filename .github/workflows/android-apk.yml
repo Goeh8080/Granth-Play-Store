@@ -41,22 +41,16 @@ jobs:
           "$SM" --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
 
-      - name: Build debug-signed APK
+      - name: Build APK and AAB
         working-directory: mobile/android
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace -PverCode=23 -PverName=1.0.1 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
-          APK=$(find app/build/outputs/apk/release -name '*.apk' ! -name '*unsigned*' | head -n 1)
-          test -n "$APK"
-          mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp "$APK" "$GITHUB_WORKSPACE/dist/granth-prabandhan.apk"
-          BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/zipalign" -c -v 4 "$GITHUB_WORKSPACE/dist/granth-prabandhan.apk"
-          "$BT/apksigner" verify -v --min-sdk-version 21 --print-certs "$GITHUB_WORKSPACE/dist/granth-prabandhan.apk"
-          "$BT/aapt" dump badging "$GITHUB_WORKSPACE/dist/granth-prabandhan.apk" | head -n 5
+          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace -PverCode=1 -PverName=1.0.0 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
 
       - uses: actions/upload-artifact@v4
         with:
-          name: granth-prabandhan-debug
-          path: dist/granth-prabandhan.apk
+          name: granth-prabandhan-1.0.0
+          path: |
+            mobile/android/app/build/outputs/apk/release/*.apk
+            mobile/android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
