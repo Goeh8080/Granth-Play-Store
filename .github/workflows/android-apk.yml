@@ -41,20 +41,49 @@ jobs:
           "$SM" --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
 
-      - name: Build both versions
+      - name: Build debug-signed APK
         working-directory: mobile/android
         run: |
           chmod +x ./gradlew
-          mkdir -p "$GITHUB_WORKSPACE/dist/1.0.0" "$GITHUB_WORKSPACE/dist/1.0.1"
-          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace -PverCode=1 -PverName=1.0.0 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
-          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/dist/1.0.0/granth-prabandhan-1.0.0.apk"
-          cp app/build/outputs/bundle/release/*.aab "$GITHUB_WORKSPACE/dist/1.0.0/granth-prabandhan-1.0.0.aab"
-          ./gradlew clean assembleRelease bundleRelease --no-daemon --stacktrace -PverCode=20 -PverName=1.0.1 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
-          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/dist/1.0.1/granth-prabandhan-1.0.1.apk"
-          cp app/build/outputs/bundle/release/*.aab "$GITHUB_WORKSPACE/dist/1.0.1/granth-prabandhan-1.0.1.aab"
+          ./gradlew assembleRelease --no-daemon --stacktrace -PverCode=22 -PverName=1.0.1 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+          APK=$(find app/build/outputs/apk/release -name '*.apk' ! -name '*unsigned*' | head -n 1)
+          test -n "$APK"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          mkdir -p "$GITHUB_WORKSPACE/dist" /tmp/apkwork
+          python3 - "$APK" << 'PY'
+          import sys, zipfile
+          from pathlib import Path
+          src = zipfile.ZipFile(sys.argv[1])
+          out = Path("/tmp/apkwork/stripped.apk")
+          out.parent.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(out, "w") as dest:
+              for info in src.infolist():
+                  if info.filename.startswith("META-INF/"):
+                      continue
+                  data = src.read(info.filename)
+                  new = zipfile.ZipInfo(filename=info.filename, date_time=info.date_time)
+                  new.compress_type = info.compress_type
+                  new.external_attr = info.external_attr
+                  dest.writestr(new, data)
+          print("stripped", out.stat().st_size)
+          PY
+          "$BT/zipalign" -f -p 4 /tmp/apkwork/stripped.apk /tmp/apkwork/aligned.apk
+          "$BT/apksigner" sign \
+            --ks app/debug.keystore \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled true \
+            --out "$GITHUB_WORKSPACE/dist/granth-prabandhan.apk" \
+            /tmp/apkwork/aligned.apk
+          "$BT/apksigner" verify -v --print-certs "$GITHUB_WORKSPACE/dist/granth-prabandhan.apk"
+          "$BT/aapt" dump badging "$GITHUB_WORKSPACE/dist/granth-prabandhan.apk" | head -n 5
 
       - uses: actions/upload-artifact@v4
         with:
-          name: granth-both
-          path: dist/**/*
+          name: granth-prabandhan-debug
+          path: dist/granth-prabandhan.apk
           if-no-files-found: error
