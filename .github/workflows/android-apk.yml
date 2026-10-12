@@ -45,7 +45,7 @@ jobs:
         working-directory: mobile/android
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace -PverCode=1 -PverName=1.0.0 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace -PverCode=15 -PverName=1.0.0 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
 
       - uses: actions/upload-artifact@v4
         with:
