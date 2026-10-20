@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from "react";
-import { noteEvent } from "./metrics";
 
 export type PdfPhase = "queue" | "images" | "pages" | "save" | "done" | "error" | "cancelled";
 
@@ -23,12 +22,15 @@ export type PdfTask = {
   blob?: Blob;
   preview?: Blob;
   size?: number;
+  /** Pictures that could not be loaded; their pages carry a placeholder. */
+  missing?: number;
 };
 
 type RunContext = {
   report: (phase: PdfPhase, done: number, total: number) => void;
   isCancelled: () => boolean;
   setPreview: (blob: Blob | undefined) => void;
+  setMissing: (count: number) => void;
 };
 
 type Queued = {
@@ -114,6 +116,23 @@ export function markGranthsOffline(ids: string[]) {
   emitOffline();
 }
 
+/**
+ * Replace the offline set with the granths whose images are all stored.
+ * Called after the background image cache finishes, so the "ऑफलाइन" badge
+ * is never shown for a granth that would open without pictures.
+ */
+export function setOfflineGranths(ids: string[]) {
+  const next = new Set(ids.filter(Boolean));
+  if (next.size === offlineIds.size && [...next].every((id) => offlineIds.has(id))) return;
+  offlineIds = next;
+  try {
+    localStorage.setItem(OFFLINE_KEY, JSON.stringify([...offlineIds]));
+  } catch {
+    /* ignore */
+  }
+  emitOffline();
+}
+
 function patch(id: string, next: Partial<PdfTask>) {
   tasks = tasks.map((task) => (task.id === id ? { ...task, ...next } : task));
   emitTasks();
@@ -164,11 +183,43 @@ export function enqueuePdf(input: {
     etaMs: null,
     startedAt: Date.now(),
   };
-  tasks = [task, ...tasks].slice(0, 12);
+  tasks = trimTasks([task, ...tasks]);
   queue.push({ id, cancelled: false, retried: false, run: input.run });
   emitTasks();
   void pump();
   return id;
+}
+
+const KEEP_TASKS = 12;
+const KEEP_BLOBS = 3;
+
+function finished(task: PdfTask) {
+  return task.phase === "done" || task.phase === "error" || task.phase === "cancelled";
+}
+
+/**
+ * Never drop a task that is still queued or running (its result would be lost),
+ * and only keep the PDF bytes of the newest few finished tasks in memory; older
+ * ones are already in the app gallery.
+ */
+function trimTasks(list: PdfTask[]) {
+  let kept = list;
+  if (kept.length > KEEP_TASKS) {
+    const overflow = kept.length - KEEP_TASKS;
+    const drop = new Set(
+      kept
+        .filter(finished)
+        .slice(-overflow)
+        .map((task) => task.id),
+    );
+    kept = kept.filter((task) => !drop.has(task.id));
+  }
+  let blobs = 0;
+  return kept.map((task) => {
+    if (!task.blob) return task;
+    blobs += 1;
+    return blobs > KEEP_BLOBS ? { ...task, blob: undefined } : task;
+  });
 }
 
 export function cancelPdf(id: string) {
@@ -200,6 +251,7 @@ async function pump() {
           setPreview: (preview) => {
             if (preview) patch(next.id, { preview });
           },
+          setMissing: (missing) => patch(next.id, { missing }),
           report: (phase, done, total) => {
             if (next.cancelled) return;
             const percent = percentFor(phase, done, total);
@@ -212,10 +264,9 @@ async function pump() {
         }
         patch(next.id, { phase: "done", percent: 100, etaMs: 0, blob, size: blob.size, finishedAt: Date.now() });
         const saved = tasks.find((task) => task.id === next.id);
-        if (saved) {
-          readyListener?.(saved);
-          noteEvent("pdf_download", saved.granthId || saved.id, saved.fileName);
-        }
+        if (saved) readyListener?.(saved);
+        tasks = trimTasks(tasks);
+        emitTasks();
       } catch (error) {
         if (next.cancelled || (error instanceof DOMException && error.name === "AbortError")) {
           patch(next.id, { phase: "cancelled", etaMs: 0 });

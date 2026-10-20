@@ -1,7 +1,6 @@
-import { ChevronDown, ChevronLeft, ChevronRight, FolderDown, Share2, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Images, Share2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { saveGalleryItem } from "@/lib/granth/db";
-import { deliverFile, openBlob, ping, shareBlob } from "@/lib/granth/files";
+import { deliverFile, inNativeApp, openBlob, shareBlob } from "@/lib/granth/files";
 import { pushCloser } from "@/lib/granth/back";
 import {
   cancelPdf,
@@ -13,25 +12,10 @@ import {
   type PdfTask,
 } from "@/lib/granth/pdf-jobs";
 
-async function keepInApp(task: PdfTask) {
-  if (!task.blob) return;
-  const agreed = window.confirm(`क्या आप इस PDF को ऐप गैलरी में सेव करना चाहते हैं?\n${task.fileName}`);
-  if (!agreed) return;
-  await saveGalleryItem({
-    id: task.galleryId,
-    kind: "pdf",
-    title: task.title,
-    text: task.text,
-    topic: task.topic,
-    granth: task.granth,
-    folderId: "",
-    createdAt: Date.now(),
-    size: task.blob.size,
-    fileName: task.fileName,
-    blob: task.blob,
-    preview: task.preview,
-  });
-  ping("ऐप गैलरी में सेव हो गया");
+/** Every finished PDF is already stored in the app gallery; this just takes the user there. */
+function showInGallery() {
+  // Go through the app's own navigation (a raw location.hash change would be read as Back).
+  window.dispatchEvent(new CustomEvent("granth-go", { detail: "#/gallery" }));
 }
 
 function pdfFacts(task: PdfTask, now: number) {
@@ -55,7 +39,7 @@ export function PdfDock() {
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
   const [ready, setReady] = useState<PdfTask | null>(null);
-  const [onDevice, setOnDevice] = useState(false);
+  const [onDevice, setOnDevice] = useState<"saving" | "saved" | "failed">("saving");
   const [sharing, setSharing] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const openedFor = useRef("");
@@ -68,9 +52,10 @@ export function PdfDock() {
       listenPdfReady((task) => {
         setReady(task);
         setOpen(false);
-        setOnDevice(false);
+        setOnDevice("saving");
         if (!task.blob) return;
-        void deliverFile(task.blob, task.fileName).then(() => setOnDevice(true));
+        // Resolves only after the native side really wrote the file (or the browser download started).
+        void deliverFile(task.blob, task.fileName).then((reply) => setOnDevice(reply.ok ? "saved" : "failed"));
       }),
     [],
   );
@@ -124,7 +109,7 @@ export function PdfDock() {
                   <span>{task.percent}%</span>
                 </div>
                 <h3>{task.title}</h3>
-                <div className="pdf-meter" aria-hidden="true">
+                <div className="pdf-meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={task.percent} aria-label="PDF प्रगति">
                   <span style={{ width: `${task.percent}%` }} />
                 </div>
                 <p>{pdfFacts(task, now)}</p>
@@ -158,8 +143,8 @@ export function PdfDock() {
                     <button type="button" className="pdf-back" disabled={sharing} onClick={() => shareNow(task)}>
                       <Share2 /> {sharing ? "खुल रहा है…" : "शेयर"}
                     </button>
-                    <button type="button" className="pdf-back" onClick={() => void keepInApp(task)}>
-                      <FolderDown /> सेव
+                    <button type="button" className="pdf-back" onClick={() => { setOpen(false); showInGallery(); }}>
+                      <Images /> गैलरी में देखें
                     </button>
                   </div>
                 ) : null}
@@ -178,7 +163,16 @@ export function PdfDock() {
             <p>
               {ready.total} पृष्ठ · {formatClock(Math.max(0, (ready.finishedAt || now) - ready.startedAt))} · {formatBytes(ready.size || ready.blob.size)}
             </p>
-            <p>{onDevice ? "Downloads और फ़ाइल मैनेजर में सेव हो गया" : "डिवाइस में सेव हो रहा है"}</p>
+            <p role="status" aria-live="polite">
+              {onDevice === "saved"
+                ? inNativeApp()
+                  ? "Downloads और फ़ाइल मैनेजर में सेव हो गया · ऐप गैलरी में भी है"
+                  : "डाउनलोड हो गया · ऐप गैलरी में भी है"
+                : onDevice === "failed"
+                  ? "फ़ोन में सेव नहीं हुआ — ऐप गैलरी में है, वहाँ से फिर सेव करें"
+                  : "डिवाइस में सेव हो रहा है…"}
+            </p>
+            {ready.missing ? <p className="pdf-warn">{ready.missing} चित्र नहीं मिले — उनकी जगह सूचना पेज लगाया है</p> : null}
             <div className="pdf-actions">
               <button type="button" className="pdf-ok" onClick={() => void openBlob(ready.blob as Blob, ready.fileName)}>
                 PDF खोलें
@@ -186,8 +180,8 @@ export function PdfDock() {
               <button type="button" className="pdf-back" disabled={sharing} onClick={() => shareNow(ready)}>
                 <Share2 /> {sharing ? "खुल रहा है…" : "शेयर"}
               </button>
-              <button type="button" className="pdf-back" onClick={() => void keepInApp(ready)}>
-                <FolderDown /> सेव
+              <button type="button" className="pdf-back" onClick={() => { setReady(null); showInGallery(); }}>
+                <Images /> गैलरी में देखें
               </button>
             </div>
           </div>
