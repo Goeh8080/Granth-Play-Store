@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { readImage, saveGalleryItem, writeImage } from "@/lib/granth/db";
 import { mediaPath, mediaUrl } from "@/lib/granth/media";
 import { ping, saveBlob } from "@/lib/granth/files";
 import { isImageBlob } from "@/lib/granth/store";
+import { sizedImage, watchNear } from "@/lib/granth/thumbs";
 
 type SaveMeta = {
   title: string;
@@ -22,6 +23,16 @@ type MediaImageProps = {
   eager?: boolean;
 };
 
+/** Longest edge (px) each kind of list picture is decoded at. 0 = original (lightbox zoom). */
+function edgeFor(className: string | undefined, eager: boolean | undefined) {
+  if (eager) return 0;
+  const names = (className ?? "").split(/\s+/);
+  if (names.includes("thumb")) return 224;
+  if (names.includes("cover")) return 720;
+  if (names.includes("proof")) return 1080;
+  return 0;
+}
+
 async function loadBlob(path: string): Promise<Blob | null> {
   const cached = await readImage(path).catch(() => null);
   if (cached) return cached;
@@ -38,31 +49,45 @@ export function MediaImage({ path, alt, className, onClick, onView, save, eager 
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [near, setNear] = useState(Boolean(eager));
+  const holder = useRef<HTMLSpanElement | null>(null);
+  const edge = edgeFor(className, eager);
+
+  // Start work only when the picture is close to the screen.
+  useEffect(() => {
+    if (near || !normalized) return;
+    const node = holder.current;
+    if (!node) return;
+    return watchNear(node, () => setNear(true));
+  }, [near, normalized]);
 
   useEffect(() => {
-    if (!normalized) return;
-    let blobUrl: string | null = null;
+    if (!normalized || !near) return;
+    let release: (() => void) | null = null;
     let cancel = false;
     setFailed(false);
     void (async () => {
       try {
-        const blob = await loadBlob(normalized);
-        if (cancel) return;
-        if (!blob) {
+        const sized = await sizedImage(normalized, edge, () => loadBlob(normalized));
+        if (cancel) {
+          sized?.release();
+          return;
+        }
+        if (!sized) {
           setFailed(true);
           return;
         }
-        blobUrl = URL.createObjectURL(blob);
-        setSrc(blobUrl);
+        release = sized.release;
+        setSrc(sized.url);
       } catch {
         if (!cancel) setFailed(true);
       }
     })();
     return () => {
       cancel = true;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      release?.();
     };
-  }, [normalized, attempt]);
+  }, [normalized, attempt, near, edge]);
 
   // Coming back online retries pictures that failed while offline.
   useEffect(() => {
@@ -90,7 +115,7 @@ export function MediaImage({ path, alt, className, onClick, onView, save, eager 
       </span>
     );
   }
-  if (!src) return <div className={`img-skeleton ${className ?? ""}`} aria-hidden="true" />;
+  if (!src) return <span ref={holder} className={`img-skeleton ${className ?? ""}`} aria-hidden="true" />;
 
   const onSave = async () => {
     if (!save) return;

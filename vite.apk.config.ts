@@ -3,9 +3,9 @@ import { join, resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
-import { appVersion } from "./vite.config";
+import { appVersion } from "./vite.config.ts";
 
-const outDir = resolve(__dirname, "mobile/android/app/src/main/assets/web");
+const outDir = resolve(import.meta.dirname, "mobile/android/app/src/main/assets/web");
 
 function inlineBundle(): Plugin {
   return {
@@ -29,7 +29,7 @@ function inlineBundle(): Plugin {
 }
 
 export default defineConfig({
-  root: resolve(__dirname, "apk-shell"),
+  root: resolve(import.meta.dirname, "apk-shell"),
   base: "./",
   define: {
     "import.meta.env.VITE_APP_VERSION": JSON.stringify(appVersion()),
@@ -39,7 +39,7 @@ export default defineConfig({
   },
   plugins: [react(), tailwindcss(), inlineBundle()],
   resolve: {
-    alias: { "@": resolve(__dirname, "src") },
+    alias: { "@": resolve(import.meta.dirname, "src") },
   },
   build: {
     outDir,
@@ -47,9 +47,9 @@ export default defineConfig({
     cssCodeSplit: false,
     assetsInlineLimit: 100_000_000,
     modulePreload: false,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        inlineDynamicImports: true,
+        codeSplitting: false,
       },
     },
   },

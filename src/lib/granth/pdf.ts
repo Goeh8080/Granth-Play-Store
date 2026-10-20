@@ -1,7 +1,7 @@
 import { PDFDocument, rgb, StandardFonts, type PDFDocument as PdfDoc, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import type { PdfStyle } from "@/lib/granth/pdf-style";
 import { PAGE_MAX_EDGE, PAGE_QUALITY, prepareShot, type Shot } from "@/lib/granth/pdf-image";
-import ImageWorker from "@/lib/granth/pdf-image.worker.ts?worker&inline";
+import { shotPool } from "@/lib/granth/image-pool";
 
 export type { PdfStyle } from "@/lib/granth/pdf-style";
 
@@ -65,69 +65,6 @@ function ensureFonts() {
 
 /* ---------------------------------------------------------- image workers */
 
-type Pending = { resolve: (shot: Shot | null) => void; timer: number };
-
-class ShotPool {
-  private workers: Worker[] = [];
-  private broken = false;
-  private next = 0;
-  private seq = 0;
-  private pending = new Map<number, Pending>();
-
-  constructor(size: number) {
-    try {
-      for (let index = 0; index < size; index += 1) {
-        const worker = new ImageWorker();
-        worker.onmessage = (event: MessageEvent<{ id: number; shot: Shot | null }>) => {
-          const job = this.pending.get(event.data.id);
-          if (!job) return;
-          this.pending.delete(event.data.id);
-          window.clearTimeout(job.timer);
-          job.resolve(event.data.shot);
-        };
-        worker.onerror = () => {
-          this.broken = true;
-        };
-        this.workers.push(worker);
-      }
-    } catch {
-      this.broken = true;
-    }
-  }
-
-  /** Decode/downscale off the main thread; falls back to the main thread if workers are unavailable. */
-  prepare(blob: Blob): Promise<Shot | null> {
-    const worker = this.workers[this.next % Math.max(1, this.workers.length)];
-    this.next += 1;
-    if (this.broken || !worker) return prepareShot(blob, PAGE_MAX_EDGE, PAGE_QUALITY);
-    const id = (this.seq += 1);
-    return new Promise<Shot | null>((resolve) => {
-      const timer = window.setTimeout(() => {
-        // A wedged worker must never stall the PDF: do this one on the main thread.
-        this.pending.delete(id);
-        resolve(prepareShot(blob, PAGE_MAX_EDGE, PAGE_QUALITY));
-      }, 20_000);
-      this.pending.set(id, { resolve, timer });
-      try {
-        worker.postMessage({ id, blob, maxEdge: PAGE_MAX_EDGE, quality: PAGE_QUALITY });
-      } catch {
-        window.clearTimeout(timer);
-        this.pending.delete(id);
-        this.broken = true;
-        resolve(prepareShot(blob, PAGE_MAX_EDGE, PAGE_QUALITY));
-      }
-    });
-  }
-}
-
-let pool: ShotPool | null = null;
-function shotPool() {
-  if (!pool) {
-    const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 4 : 4;
-    pool = new ShotPool(Math.max(1, Math.min(3, cores - 1)));
-  }
-  return pool;
-}
 
 /* Page-ready pictures survive between PDFs (same granth covers appear in many topics). */
 const SHOT_CACHE_BYTES = 40 * 1024 * 1024;

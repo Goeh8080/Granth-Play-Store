@@ -7,7 +7,7 @@ import {
   Share2,
   X,
 } from "lucide-react";
-import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { sortPramans } from "@/lib/granth/order";
 import { prepareFields, rankPrepared, type PreparedDoc } from "@/lib/granth/search";
 import { readImage, readImages, saveGalleryItem, writeImage } from "@/lib/granth/db";
@@ -475,7 +475,22 @@ export function TopicScreen({ go }: { go: (hash: string) => void }) {
   );
 }
 
-function TopicCard({
+
+/**
+ * Cards re-render only when their data changes. Their callbacks only capture
+ * ids and stable navigation helpers, so a card may keep the first ones it got.
+ * Without this every new batch of a long list re-rendered all mounted cards.
+ */
+function sameCardData(prev: Record<string, unknown>, next: Record<string, unknown>) {
+  for (const key of Object.keys(next)) {
+    const value = next[key];
+    if (typeof value === "function") continue;
+    if (!Object.is(prev[key], value)) return false;
+  }
+  return true;
+}
+
+const TopicCard = memo(function TopicCard({
   topic,
   index,
   total,
@@ -525,7 +540,7 @@ function TopicCard({
       </div>
     </article>
   );
-}
+}, sameCardData);
 
 export function GranthScreen({
   go,
@@ -972,7 +987,7 @@ export function PdfHost() {
   );
 }
 
-function GranthCard({
+const GranthCard = memo(function GranthCard({
   granth,
   index,
   total,
@@ -1062,7 +1077,7 @@ function GranthCard({
       </div>
     </article>
   );
-}
+}, sameCardData);
 
 export function PramanScreen({
   route,
@@ -1202,7 +1217,7 @@ export function PramanScreen({
   );
 }
 
-function PramanCard({
+const PramanCard = memo(function PramanCard({
   praman,
   index,
   total,
@@ -1320,7 +1335,7 @@ function PramanCard({
       </div>
     </article>
   );
-}
+}, sameCardData);
 
 function Empty({ title, body }: { title: string; body: string }) {
   return (
