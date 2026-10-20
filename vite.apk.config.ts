@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { appVersion } from "./vite.config";
 
 const outDir = resolve(__dirname, "mobile/android/app/src/main/assets/web");
 
@@ -30,6 +31,12 @@ function inlineBundle(): Plugin {
 export default defineConfig({
   root: resolve(__dirname, "apk-shell"),
   base: "./",
+  define: {
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(appVersion()),
+  },
+  worker: {
+    format: "es",
+  },
   plugins: [react(), tailwindcss(), inlineBundle()],
   resolve: {
     alias: { "@": resolve(__dirname, "src") },

@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PDF_STYLES, rememberPdfStyle, savedPdfStyle, type PdfStyle } from "@/lib/granth/pdf-style";
 
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION: string = import.meta.env.VITE_APP_VERSION || "1.0.2";
 
 export type UiLook = "classic" | "combo" | "glass" | "neu" | "clay" | "material" | "flat" | "bento";
 
@@ -105,7 +105,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
             if (taps.current >= 5) setSecret(true);
           }}
         >
-          Version {shownVersion}
+          संस्करण {shownVersion}
         </button>
         {secret ? (
           <section className="set-block">
