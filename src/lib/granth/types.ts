@@ -44,7 +44,7 @@ export type Praman = {
   granth_auther: string;
 };
 
-export type Panel = "dashboard" | "topics" | "granths" | "pramans" | "gallery" | "feedback" | "admin";
+export type Panel = "dashboard" | "topics" | "granths" | "pramans" | "gallery";
 
 export type AppRoute = {
   panel: Panel;

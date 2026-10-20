@@ -11,6 +11,7 @@ import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState
 import { sortPramans } from "@/lib/granth/order";
 import { prepareFields, rankPrepared, type PreparedDoc } from "@/lib/granth/search";
 import { readImage, readImages, saveGalleryItem, writeImage } from "@/lib/granth/db";
+import { isImageBlob, useGranth } from "@/lib/granth/store";
 import { openExternal, publicLink, shareLink as sharePublic } from "@/lib/granth/files";
 import { pushCloser } from "@/lib/granth/back";
 import { mediaPath, mediaUrl, youtubeId } from "@/lib/granth/media";
@@ -18,33 +19,82 @@ import { enqueuePdf, markGranthsOffline, useOfflineIds } from "@/lib/granth/pdf-
 import { PDF_STYLES, rememberPdfStyle, savedPdfStyle, type PdfStyle } from "@/lib/granth/pdf-style";
 import type { BookPage } from "@/lib/granth/pdf";
 import { PinchView } from "./zoom";
-import { useGranth } from "@/lib/granth/store";
-import { useSearchMetric } from "@/lib/granth/metrics";
 import type { AppRoute, Granth, Praman, Topic } from "@/lib/granth/types";
 import { MediaImage } from "./media-image";
 import { IconBox, RichText } from "./ui";
 
+/**
+ * Render a long list in growing slices. The observer is re-armed after every
+ * batch: IntersectionObserver only reports *changes*, so when the sentinel was
+ * still inside the 1200px margin after a batch rendered (short cards, fast
+ * fling) the old code never fired again and the list stopped growing — the
+ * "scroll limit" users saw at 16/24/… items.
+ */
 function useSlice(resetKey: string, total: number, step = 18, keep?: number) {
   const [count, setCount] = useState(() => Math.max(step, keep ?? step));
   const ref = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     setCount(Math.max(step, keep ?? step));
   }, [resetKey, step, keep]);
+  const shown = Math.min(count, total);
   useEffect(() => {
     const node = ref.current;
-    if (!node) return;
+    if (!node || shown >= total) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
-          setCount((value) => Math.min(total, value + step));
+          observer.disconnect();
+          setCount((value) => Math.min(total, Math.max(value, shown) + step));
         }
       },
-      { rootMargin: "640px" },
+      { rootMargin: "1200px 0px" },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [resetKey, step, total]);
-  return { count: Math.min(count, total), ref };
+  }, [resetKey, step, total, shown]);
+  return { count: shown, ref };
+}
+
+function cardKeys(onOpen: () => void) {
+  return {
+    tabIndex: 0,
+    onKeyDown(event: React.KeyboardEvent) {
+      if (event.target !== event.currentTarget) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onOpen();
+      }
+    },
+  };
+}
+
+/** Column choice per screen; Settings → लेआउट updates every open screen at once. */
+function useCols<T extends number>(key: string, allowed: readonly T[], fallback: T) {
+  const read = () => {
+    try {
+      const saved = Number(localStorage.getItem(key)) as T;
+      return allowed.includes(saved) ? saved : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  const [cols, setCols] = useState<T>(() => (typeof window === "undefined" ? fallback : read()));
+  useEffect(() => {
+    setCols(read());
+    const onLayout = () => setCols(read());
+    window.addEventListener("granth-layout", onLayout);
+    return () => window.removeEventListener("granth-layout", onLayout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const pick = (next: T) => {
+    setCols(next);
+    try {
+      localStorage.setItem(key, String(next));
+    } catch {
+      /* private mode */
+    }
+  };
+  return [cols, pick] as const;
 }
 
 async function shareLink(title: string, hash: string) {
@@ -227,8 +277,8 @@ export function Dashboard({ go }: { go: (hash: string) => void }) {
             <Landmark />
           </IconBox>
           <div>
-            <h2>Dashboard</h2>
-            <p className="subtitle">Overview of your Granth collection</p>
+            <h2>मुख्य पृष्ठ</h2>
+            <p className="subtitle">आपके ग्रंथ संग्रह का सार</p>
           </div>
         </div>
       </header>
@@ -239,7 +289,7 @@ export function Dashboard({ go }: { go: (hash: string) => void }) {
           </IconBox>
           <div>
             <div className="dash-num">{topics || "—"}</div>
-            <div className="dash-lbl">Topics</div>
+            <div className="dash-lbl">विषय</div>
           </div>
         </button>
         <button className="dash-card" type="button" onPointerUp={(event) => { if (event.pointerType !== "mouse") go("#/granths"); }} onClick={() => go("#/granths")}>
@@ -248,7 +298,7 @@ export function Dashboard({ go }: { go: (hash: string) => void }) {
           </IconBox>
           <div>
             <div className="dash-num">{granths || "—"}</div>
-            <div className="dash-lbl">Granths</div>
+            <div className="dash-lbl">ग्रंथ</div>
           </div>
         </button>
         <button className="dash-card" type="button" onPointerUp={(event) => { if (event.pointerType !== "mouse") go("#/pramans"); }} onClick={() => go("#/pramans")}>
@@ -280,13 +330,9 @@ export function TopicScreen({ go }: { go: (hash: string) => void }) {
   const topics = useGranth((state) => state.topics);
   const [query, setQuery] = useState("");
   const search = useDeferredValue(query);
-  const [cols, setCols] = useState<1 | 2>(2);
+  const [cols, setCols] = useCols<1 | 2>("topic-cols", [1, 2], 2);
   const [multiOpen, setMultiOpen] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
-  useEffect(() => {
-    const saved = Number(localStorage.getItem("topic-cols"));
-    if (saved === 1 || saved === 2) setCols(saved);
-  }, []);
   const docs = useMemo(() => {
     const map = new Map<string, PreparedDoc>();
     for (const topic of topics) map.set(topic.id, prepareFields([topic.title, topic.description]));
@@ -300,7 +346,6 @@ export function TopicScreen({ go }: { go: (hash: string) => void }) {
   const memory = useRememberList("topic-list-place", true, search);
   const { count, ref } = useSlice(`${search}|${cols}`, filtered.length, cols === 1 ? 12 : 16, memory.keep);
   memory.track(count, filtered.length);
-  useSearchMetric(search, filtered.length);
   const total = filtered.length;
   useEffect(() => {
     if (!multiOpen) return;
@@ -318,12 +363,12 @@ export function TopicScreen({ go }: { go: (hash: string) => void }) {
             <ClipboardList />
           </IconBox>
           <div>
-            <h2>Topics</h2>
+            <h2>विषय</h2>
             <p className="subtitle">विषय / प्रश्नोत्तरी</p>
           </div>
         </div>
         <button type="button" className="multi-pdf" onClick={() => setMultiOpen(true)}>
-          Multiple topic PDF
+          कई विषयों की PDF
         </button>
         </div>
         <div className="granth-tools">
@@ -334,10 +379,7 @@ export function TopicScreen({ go }: { go: (hash: string) => void }) {
                 type="button"
                 className={cols === size ? "active" : ""}
                 aria-pressed={cols === size}
-                onClick={() => {
-                  setCols(size);
-                  localStorage.setItem("topic-cols", String(size));
-                }}
+                onClick={() => setCols(size)}
               >
                 {size}×{size}
               </button>
@@ -353,6 +395,8 @@ export function TopicScreen({ go }: { go: (hash: string) => void }) {
               className="form-control"
               value={query}
               lang="hi"
+              type="search"
+              aria-label="विषय खोजें"
               placeholder="विषय खोजें — mans, गीता, मृत्यु"
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -373,14 +417,18 @@ export function TopicScreen({ go }: { go: (hash: string) => void }) {
         ))}
       </div>
       {filtered.length === 0 ? (
-        <Empty title="कोई विषय नहीं" body="सिंक पूरा होने पर विषय यहाँ दिखेंगे।" />
+        search.trim() ? (
+          <Empty title="कोई परिणाम नहीं" body={`“${search.trim()}” से कोई विषय नहीं मिला। दूसरा शब्द आज़माएँ।`} />
+        ) : (
+          <Empty title="कोई विषय नहीं" body="सिंक पूरा होने पर विषय यहाँ दिखेंगे।" />
+        )
       ) : null}
       <div ref={ref} className="scroll-sentinel" />
       {multiOpen ? (
         <div className="pdf-pop" role="presentation" onClick={() => setMultiOpen(false)}>
-          <div className="pdf-sheet multi-sheet" role="dialog" aria-modal="true" aria-label="Multiple topic PDF" onClick={(event) => event.stopPropagation()}>
+          <div className="pdf-sheet multi-sheet" role="dialog" aria-modal="true" aria-label="कई विषयों की PDF" onClick={(event) => event.stopPropagation()}>
             <div className="pdf-sheet-head">
-              <h3>Multiple topic PDF</h3>
+              <h3>कई विषयों की PDF</h3>
               <button type="button" className="pill" onClick={() => setMultiOpen(false)}>
                 <X /> पीछे
               </button>
@@ -413,7 +461,7 @@ export function TopicScreen({ go }: { go: (hash: string) => void }) {
               {topics.map((topic, index) => {
                 const on = picked.includes(topic.id);
                 return (
-                  <button key={topic.id} type="button" className={on ? "multi-row on" : "multi-row"} onClick={() => toggleTopic(topic.id)}>
+                  <button key={topic.id} type="button" className={on ? "multi-row on" : "multi-row"} aria-pressed={on} onClick={() => toggleTopic(topic.id)}>
                     <span>{on ? "✓" : index + 1}</span>
                     <strong>{topic.title}</strong>
                   </button>
@@ -444,7 +492,7 @@ function TopicCard({
 }) {
   const proofs = Number(topic.praman_count) || 0;
   return (
-    <article className="card topic-card" {...bindOpen(onOpen)}>
+    <article className="card topic-card" aria-label={topic.title} {...bindOpen(onOpen)} {...cardKeys(onOpen)}>
       <div className="card-header">
         <h3 className="card-title">
           <span>
@@ -469,9 +517,9 @@ function TopicCard({
           </button>
         ) : null}
         <button className="pill" type="button" onClick={onShare}>
-          <Share2 /> Share
+          <Share2 /> शेयर
         </button>
-        <button className="pill pill-maroon" type="button" onClick={onPdf}>
+        <button className="pill pill-maroon" type="button" aria-label={`${topic.title} की PDF`} onClick={onPdf}>
           PDF
         </button>
       </div>
@@ -489,10 +537,7 @@ export function GranthScreen({
   const granths = useGranth((state) => state.granths);
   const [query, setQuery] = useState("");
   const search = useDeferredValue(query);
-  const [cols, setCols] = useState<1 | 2 | 3>(() => {
-    const saved = Number(localStorage.getItem("granth-cols"));
-    return saved === 1 || saved === 2 || saved === 3 ? saved : 2;
-  });
+  const [cols, pickCols] = useCols<1 | 2 | 3>("granth-cols", [1, 2, 3], 2);
   const docs = useMemo(() => {
     const map = new Map<string, PreparedDoc>();
     for (const granth of granths) map.set(granth.id, prepareFields([granth.title, granth.author, granth.description]));
@@ -507,11 +552,6 @@ export function GranthScreen({
   const memory = useRememberList("granth-list-place", true, search);
   const { count, ref } = useSlice(`${search}|${cols}`, filtered.length, step, memory.keep);
   memory.track(count, filtered.length);
-  useSearchMetric(search, filtered.length);
-  const pickCols = (next: 1 | 2 | 3) => {
-    setCols(next);
-    localStorage.setItem("granth-cols", String(next));
-  };
   return (
     <section>
       <header className="page-header sticky-bar">
@@ -520,8 +560,8 @@ export function GranthScreen({
             <Library />
           </IconBox>
           <div>
-            <h2>Granths</h2>
-            <p className="subtitle">Sacred texts and scriptures</p>
+            <h2>ग्रंथ</h2>
+            <p className="subtitle">पवित्र ग्रंथ और शास्त्र</p>
           </div>
         </div>
         <div className="granth-tools">
@@ -543,6 +583,8 @@ export function GranthScreen({
               className="form-control"
               value={query}
               lang="hi"
+              type="search"
+              aria-label="ग्रंथ खोजें"
               placeholder="ग्रंथ का नाम — gita, kabir"
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -565,22 +607,38 @@ export function GranthScreen({
           />
         ))}
       </div>
-      {filtered.length === 0 ? <Empty title="कोई ग्रंथ नहीं" body="सिंक के बाद पवित्र ग्रंथ यहाँ खुलेंगे।" /> : null}
+      {filtered.length === 0 ? (
+        search.trim() ? (
+          <Empty title="कोई परिणाम नहीं" body={`“${search.trim()}” से कोई ग्रंथ नहीं मिला। दूसरा शब्द आज़माएँ।`} />
+        ) : (
+          <Empty title="कोई ग्रंथ नहीं" body="सिंक के बाद पवित्र ग्रंथ यहाँ खुलेंगे।" />
+        )
+      ) : null}
       <div ref={ref} className="scroll-sentinel" />
     </section>
   );
 }
 
-async function loadShot(path: string | null | undefined, ready?: Map<string, Blob>): Promise<Blob | null> {
+/** Picture for a PDF page: IndexedDB copy first, network second, never throws. */
+async function loadShot(path: string, ready?: Map<string, Blob>): Promise<Blob | null> {
   const safe = mediaPath(path);
   if (!safe) return null;
-  const cached = ready?.get(safe) ?? (await readImage(safe));
-  if (cached && cached.size > 32) return cached;
-  const response = await fetch(mediaUrl(safe));
-  if (!response.ok) return null;
-  const blob = await response.blob();
-  if (blob.size > 32) void writeImage(safe, blob);
-  return blob.size > 32 ? blob : null;
+  try {
+    const cached = ready?.get(safe) ?? (await readImage(safe));
+    if (cached && cached.size > 32) return cached;
+  } catch {
+    /* fall through to the network */
+  }
+  try {
+    const response = await fetch(mediaUrl(safe));
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    if (!isImageBlob(blob)) return null;
+    void writeImage(safe, blob).catch(() => undefined);
+    return blob;
+  } catch {
+    return null;
+  }
 }
 
 function pdfName(title: string, fallback: string) {
@@ -590,48 +648,27 @@ function pdfName(title: string, fallback: string) {
 
 type PageSpec = BookPage & { path?: string | null };
 
-async function mapPool<T, R>(items: T[], limit: number, task: (item: T, index: number) => Promise<R>): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor;
-      cursor += 1;
-      const item = items[index];
-      if (item === undefined) continue;
-      out[index] = await task(item, index);
-    }
-  });
-  if (workers.length) await Promise.all(workers);
-  return out;
-}
-
 async function renderSpecs(
   specs: PageSpec[],
   style: PdfStyle,
   report: (phase: "images" | "pages", done: number, total: number) => void,
   isCancelled: () => boolean,
   onPreview?: (blob: Blob) => void,
+  onMissing?: (count: number) => void,
 ) {
   const total = Math.max(1, specs.length);
   report("pages", 0, total);
-  await new Promise((resolve) => window.setTimeout(resolve, 0));
-  const ready = await readImages(specs.map((spec) => mediaPath(spec.path)).filter((path): path is string => Boolean(path)));
-  let loaded = 0;
-  const blobs = await mapPool(specs, 8, async (spec) => {
-    if (isCancelled()) return null;
-    const blob = await loadShot(spec.path, ready);
-    loaded += 1;
-    report("images", loaded, total);
-    return blob;
-  });
+  // One IndexedDB read for every cached picture of the document.
+  const ready = await readImages(specs.map((spec) => mediaPath(spec.path)).filter((path): path is string => Boolean(path))).catch(
+    () => new Map<string, Blob>(),
+  );
   if (isCancelled()) throw new DOMException("cancelled", "AbortError");
-  const pages: BookPage[] = specs.map((spec, index) => ({
+  const pages: BookPage[] = specs.map((spec) => ({
     title: spec.title,
     subtitle: spec.subtitle,
     body: spec.body,
     meta: spec.meta,
-    imageBlob: blobs[index] ?? null,
+    imagePath: mediaPath(spec.path),
     cover: spec.cover,
     topicCover: spec.topicCover,
   }));
@@ -639,6 +676,8 @@ async function renderSpecs(
   return buildBookPdf(pages, style, {
     isCancelled,
     onPreview,
+    onMissing,
+    loadImage: (path) => loadShot(path, ready),
     onPage: (done, pagesTotal) => report("pages", done, pagesTotal),
   });
 }
@@ -745,43 +784,87 @@ function topicBundle(topic: Topic) {
   return { proofs, specs, granthIds };
 }
 
-function beginTopicsPdf(topics: Topic[]) {
-  if (!topics.length) return;
-  const style = savedPdfStyle();
-  const bundles = topics.map(topicBundle);
-  const specs = bundles.flatMap((bundle) => bundle.specs);
-  const granthIds = [...new Set(bundles.flatMap((bundle) => bundle.granthIds))];
-  const title = topics.length === 1 ? topics[0]?.title || "विषय" : `${topics.length} विषय`;
-  const fileName = pdfName(title, `topics-${Date.now()}`);
+type PdfMeta = {
+  /** One id for the queue entry and the gallery copy, so a PDF is never stored twice. */
+  galleryId: string;
+  title: string;
+  fileName: string;
+  topic: string;
+  granth: string;
+  granthId?: string;
+  text: string;
+  galleryText: string;
+  granthIds: string[];
+};
+
+function runPdfJob(specs: PageSpec[], style: PdfStyle, meta: PdfMeta) {
   enqueuePdf({
-    title,
-    fileName,
-    galleryId: `pdf-topics-${Date.now()}`,
-    topic: topics.map((topic) => topic.title).join(" · "),
-    granth: "",
-    text: topics.map((topic) => topic.title).join("\n"),
-    run: async ({ report, isCancelled, setPreview }) => {
+    title: meta.title,
+    fileName: meta.fileName,
+    galleryId: meta.galleryId,
+    topic: meta.topic,
+    granth: meta.granth,
+    granthId: meta.granthId,
+    text: meta.text,
+    run: async ({ report, isCancelled, setPreview, setMissing }) => {
       let preview: Blob | undefined;
-      const blob = await renderSpecs(specs, style, report, isCancelled, (shot) => {
-        preview = shot;
-        setPreview(shot);
-      });
+      let missing = 0;
+      const blob = await renderSpecs(
+        specs,
+        style,
+        report,
+        isCancelled,
+        (shot) => {
+          preview = shot;
+          setPreview(shot);
+        },
+        (count) => {
+          missing = count;
+          setMissing(count);
+        },
+      );
       report("save", specs.length, specs.length);
       try {
-        await storePdf(blob, fileName, {
-          id: `pdf-topics-${Date.now()}`,
-          title,
-          text: topics.map((topic) => topic.description).filter(Boolean).join("\n"),
-          topic: topics.map((topic) => topic.title).join(" · "),
-          granth: "",
+        // The PDF lands in the app gallery automatically (the "सेव" button later just opens it there).
+        await storePdf(blob, meta.fileName, {
+          id: meta.galleryId,
+          title: meta.title,
+          text: meta.galleryText,
+          topic: meta.topic,
+          granth: meta.granth,
           preview,
         });
       } catch {
-        /* device copy is the one that must open */
+        /* the device copy is the one that must open, even if gallery storage is full */
       }
-      markGranthsOffline(granthIds);
+      // Only claim "offline" when every picture really made it into the PDF.
+      if (missing === 0) markGranthsOffline(meta.granthIds);
       return blob;
     },
+  });
+}
+
+function beginTopicsPdf(topics: Topic[], style: PdfStyle = savedPdfStyle()) {
+  if (!topics.length) return;
+  const bundles = topics.map(topicBundle);
+  const specs = bundles.flatMap((bundle) => bundle.specs);
+  const titles = topics.map((topic) => topic.title).join(" · ");
+  const title = topics.length === 1 ? topics[0]?.title || "विषय" : `${topics.length} विषय`;
+  const stamp = Date.now();
+  runPdfJob(specs, style, {
+    galleryId: topics.length === 1 ? `pdf-topic-${topics[0]?.id}` : `pdf-topics-${stamp}`,
+    title,
+    fileName: pdfName(title, topics.length === 1 ? `topic-${topics[0]?.id}` : `topics-${stamp}`),
+    topic: titles,
+    granth: "",
+    text: [
+      ...topics.map((topic) => topic.title),
+      ...bundles.flatMap((bundle) => bundle.proofs.map((praman) => praman.title)),
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    galleryText: topics.map((topic) => topic.description).filter(Boolean).join("\n"),
+    granthIds: [...new Set(bundles.flatMap((bundle) => bundle.granthIds))],
   });
 }
 
@@ -791,135 +874,33 @@ function beginPdf(job: PdfJob, style: PdfStyle) {
       useGranth.getState().pramans.filter((praman) => praman.granth_id === job.granth.id),
       job.granth.title,
     );
-    const specs = [...coverSpecs(job.granth), ...proofs.map(pramanSpec)];
-    const fileName = pdfName(job.granth.title, `granth-${job.granth.id}`);
-    enqueuePdf({
-      title: job.granth.title,
-      fileName,
+    runPdfJob([...coverSpecs(job.granth), ...proofs.map(pramanSpec)], style, {
       galleryId: `pdf-granth-${job.granth.id}`,
+      title: job.granth.title,
+      fileName: pdfName(job.granth.title, `granth-${job.granth.id}`),
       topic: "",
       granth: job.granth.title,
       granthId: job.granth.id,
       text: [job.granth.description, ...proofs.map((praman) => praman.title)].filter(Boolean).join("\n"),
-      run: async ({ report, isCancelled, setPreview }) => {
-        let preview: Blob | undefined;
-        const blob = await renderSpecs(specs, style, report, isCancelled, (shot) => {
-          preview = shot;
-          setPreview(shot);
-        });
-        report("save", specs.length, specs.length);
-        try {
-          await storePdf(blob, fileName, {
-            id: `pdf-granth-${job.granth.id}`,
-            title: job.granth.title,
-            text: job.granth.description,
-            topic: "",
-            granth: job.granth.title,
-            preview,
-          });
-        } catch {
-          /* device file still saves if the gallery copy is too large */
-        }
-        markGranthsOffline([job.granth.id]);
-        return blob;
-      },
+      galleryText: job.granth.description,
+      granthIds: [job.granth.id],
     });
     return;
   }
   if (job.kind === "topic") {
-    const state = useGranth.getState();
-    const proofs = sortPramans(state.pramans.filter((praman) => praman.topic_id === job.topic.id));
-    const byId = new Map(state.granths.map((granth) => [granth.id, granth]));
-    const specs: PageSpec[] = [
-      {
-        title: job.topic.title,
-        subtitle: "विषय",
-        body: job.topic.description || "",
-        meta: `${proofs.length} प्रमाण`,
-        topicCover: true,
-      },
-    ];
-    const granthIds: string[] = [];
-    const seen = new Set<string>();
-    for (const praman of proofs) {
-      if (!seen.has(praman.granth_id)) {
-        seen.add(praman.granth_id);
-        granthIds.push(praman.granth_id);
-        const granth = byId.get(praman.granth_id);
-        if (granth) specs.push(...coverSpecs(granth));
-      }
-      specs.push(pramanSpec(praman));
-    }
-    const fileName = pdfName(job.topic.title, `topic-${job.topic.id}`);
-    enqueuePdf({
-      title: job.topic.title,
-      fileName,
-      galleryId: `pdf-topic-${job.topic.id}`,
-      topic: job.topic.title,
-      granth: "",
-      text: [job.topic.description, ...proofs.map((praman) => praman.title)].filter(Boolean).join("\n"),
-      run: async ({ report, isCancelled, setPreview }) => {
-        let preview: Blob | undefined;
-        const blob = await renderSpecs(specs, style, report, isCancelled, (shot) => {
-          preview = shot;
-          setPreview(shot);
-        });
-        report("save", specs.length, specs.length);
-        try {
-          await storePdf(blob, fileName, {
-            id: `pdf-topic-${job.topic.id}`,
-            title: job.topic.title,
-            text: job.topic.description,
-            topic: job.topic.title,
-            granth: "",
-            preview,
-          });
-        } catch {
-          /* device copy is the one that must open */
-        }
-        markGranthsOffline(granthIds);
-        return blob;
-      },
-    });
+    beginTopicsPdf([job.topic], style);
     return;
   }
-  const fileName = pdfName(job.title, job.id);
-  enqueuePdf({
-    title: job.title,
-    fileName,
+  runPdfJob([{ title: job.title, subtitle: job.subtitle, body: job.body, meta: job.meta, path: job.image }], style, {
     galleryId: `pdf-${job.id}`,
+    title: job.title,
+    fileName: pdfName(job.title, job.id),
     topic: job.topic,
     granth: job.granth,
     granthId: job.granthId,
     text: job.body,
-    run: async ({ report, isCancelled, setPreview }) => {
-      let preview: Blob | undefined;
-      const blob = await renderSpecs(
-        [{ title: job.title, subtitle: job.subtitle, body: job.body, meta: job.meta, path: job.image }],
-        style,
-        report,
-        isCancelled,
-        (shot) => {
-          preview = shot;
-          setPreview(shot);
-        },
-      );
-      report("save", 1, 1);
-      try {
-        await storePdf(blob, fileName, {
-          id: `pdf-${job.id}`,
-          title: job.title,
-          text: job.body,
-          topic: job.topic,
-          granth: job.granth,
-          preview,
-        });
-      } catch {
-        /* keep the file even if gallery storage rejects it */
-      }
-      if (job.granthId) markGranthsOffline([job.granthId]);
-      return blob;
-    },
+    galleryText: job.body,
+    granthIds: [],
   });
 }
 
@@ -1010,7 +991,7 @@ function GranthCard({
   const proofs = Number(granth.pramanCount) || 0;
   const link = granth.granthURL?.trim();
   return (
-    <article className="card granth-card" data-granth={granth.id} {...bindOpen(onOpen)}>
+    <article className="card granth-card" data-granth={granth.id} aria-label={granth.title} {...bindOpen(onOpen)} {...cardKeys(onOpen)}>
       <div className="card-header">
         <h3 className="card-title">
           <span>
@@ -1052,7 +1033,7 @@ function GranthCard({
             onShare();
           }}
         >
-          <Share2 /> Share
+          <Share2 /> शेयर
         </button>
         {link ? (
           <button
@@ -1064,7 +1045,7 @@ function GranthCard({
               openExternal(link);
             }}
           >
-            Original PDF
+            मूल PDF
           </button>
         ) : null}
         <button
@@ -1097,11 +1078,7 @@ export function PramanScreen({
   const granths = useGranth((state) => state.granths);
   const [query, setQuery] = useState("");
   const search = useDeferredValue(query);
-  const [cols, setCols] = useState<1 | 2>(2);
-  useEffect(() => {
-    const saved = Number(localStorage.getItem("praman-cols"));
-    if (saved === 1 || saved === 2) setCols(saved);
-  }, []);
+  const [cols, setCols] = useCols<1 | 2>("praman-cols", [1, 2], 2);
   const topic = topics.find((item) => item.id === route.topicId);
   const granth = granths.find((item) => item.id === route.granthId);
   const docs = useMemo(() => {
@@ -1140,7 +1117,6 @@ export function PramanScreen({
   const step = cols === 1 ? 8 : 12;
   const { count, ref } = useSlice(resetKey, ranked.length, step, memory.keep);
   memory.track(count, ranked.length);
-  useSearchMetric(search, ranked.length);
 
   return (
     <section>
@@ -1161,10 +1137,8 @@ export function PramanScreen({
                 key={size}
                 type="button"
                 className={cols === size ? "active" : ""}
-                onClick={() => {
-                  setCols(size);
-                  localStorage.setItem("praman-cols", String(size));
-                }}
+                aria-pressed={cols === size}
+                onClick={() => setCols(size)}
               >
                 {size}×{size}
               </button>
@@ -1175,6 +1149,8 @@ export function PramanScreen({
               className="form-control"
               value={query}
               lang="hi"
+              type="search"
+              aria-label="प्रमाण खोजें"
               placeholder="प्रमाण खोजें — mans, मृत्यु"
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -1215,7 +1191,11 @@ export function PramanScreen({
         ))}
       </div>
       {ranked.length === 0 ? (
-        <Empty title="कोई प्रमाण नहीं" body="इस चयन में प्रमाण नहीं मिले, या सिंक अभी चल रहा है।" />
+        search.trim() ? (
+          <Empty title="कोई परिणाम नहीं" body={`“${search.trim()}” से कोई प्रमाण नहीं मिला। दूसरा शब्द आज़माएँ।`} />
+        ) : (
+          <Empty title="कोई प्रमाण नहीं" body="इस चयन में प्रमाण नहीं मिले, या सिंक अभी चल रहा है।" />
+        )
       ) : null}
       <div ref={ref} className="scroll-sentinel" />
     </section>
@@ -1251,14 +1231,14 @@ function PramanCard({
         <div className="thumb-row">
           <MediaImage
             path={praman.granth_image}
-            alt=""
+            alt={praman.granth_title ? `${praman.granth_title} — आवरण` : "ग्रंथ आवरण"}
             className="thumb"
             onClick={() => onOpen(shots)}
             save={{ title: praman.granth_title, text: praman.title, topic: praman.topic_title, granth: praman.granth_title }}
           />
           <MediaImage
             path={praman.editorImagePath}
-            alt=""
+            alt={praman.granth_title ? `${praman.granth_title} — प्रकाशन` : "प्रकाशन विवरण"}
             className="thumb"
             onClick={() => onOpen(shots)}
           />
@@ -1314,7 +1294,7 @@ function PramanCard({
             <Library /> {index}/{total}
           </span>
           <button className="pill" type="button" onClick={onShare}>
-            <Share2 /> Share
+            <Share2 /> शेयर
           </button>
           <button
             className="pill pill-maroon"
@@ -1360,10 +1340,10 @@ export function Lightbox({ paths, onClose }: { paths: string[]; onClose: () => v
       <button className="lightbox-close" type="button" onClick={onClose}>
         <X /> बंद
       </button>
-      <div className="lightbox-scroll">
+      <div className="lightbox-scroll" tabIndex={-1}>
         {paths.map((path) => (
           <PinchView key={path}>
-            <MediaImage path={path} alt="प्रमाण" className="lightbox-img" />
+            <MediaImage path={path} alt="प्रमाण" className="lightbox-img" eager />
           </PinchView>
         ))}
       </div>

@@ -5,6 +5,7 @@
 @import "@fontsource/noto-sans-devanagari/devanagari-400.css";
 @import "@fontsource/noto-sans-devanagari/devanagari-500.css";
 @import "@fontsource/noto-sans-devanagari/devanagari-600.css";
+@import "@fontsource/noto-sans-devanagari/devanagari-700.css";
 @import "@fontsource/yatra-one/devanagari-400.css";
 @import "@fontsource/yatra-one/latin-400.css";
 @import "@fontsource/tiro-devanagari-sanskrit/devanagari-400.css";
@@ -485,7 +486,8 @@ nav {
 main {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 16px 16px 72px;
+  /* Room for the floating "ऊपर" button / toast and the gesture bar, so the last card is never covered. */
+  padding: 16px 16px calc(96px + var(--apk-bottom, 0px) + env(safe-area-inset-bottom, 0px));
 }
 
 .scroll-rail {
@@ -577,6 +579,7 @@ main {
   box-shadow: 0 16px 40px rgba(74, 44, 10, 0.28);
   max-height: min(86vh, 720px);
   overflow: auto;
+  overscroll-behavior: contain;
   animation: sheet-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -707,6 +710,7 @@ main {
   width: min(440px, 92vw);
   max-height: min(86vh, 720px);
   overflow: auto;
+  overscroll-behavior: contain;
   z-index: 91;
 }
 
@@ -784,6 +788,7 @@ main {
   width: min(440px, 92vw);
   max-height: min(86vh, 720px);
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .pdf-deck-top,
@@ -842,8 +847,9 @@ main {
   position: sticky;
   top: 0;
   z-index: 24;
-  background: color-mix(in srgb, var(--color-cream) 90%, white);
-  backdrop-filter: blur(12px);
+  /* Solid paper instead of backdrop blur: a blurred sticky bar is re-rendered on
+     every scroll frame and was the main cause of jank on low-end Android. */
+  background: color-mix(in srgb, var(--color-cream) 94%, white);
   padding-top: 8px;
   padding-bottom: 8px;
 }
@@ -1468,7 +1474,8 @@ main {
   height: min(78vh, 920px);
   position: relative;
   overflow: hidden;
-  touch-action: none;
+  /* Vertical swipes scroll the lightbox; pinch is handled in JS. */
+  touch-action: pan-y;
   display: grid;
   place-items: center;
   flex: none;
@@ -1541,7 +1548,12 @@ main {
 }
 
 .lightbox-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(16px + var(--apk-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1556,9 +1568,12 @@ main {
   object-fit: contain;
   border-radius: 12px;
   background: var(--color-paper);
-  touch-action: none;
   user-select: none;
   pointer-events: none;
+}
+
+.zoom-stage.zoomed {
+  touch-action: none;
 }
 
 .scroll-sentinel {
@@ -2106,6 +2121,7 @@ button.logo-icon {
 .settings-sheet {
   max-height: min(86vh, 720px);
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .set-block {
@@ -2209,4 +2225,92 @@ html.ui-combo .dash-card {
   background: none;
   padding: 8px 0;
   color: var(--color-muted);
+}
+
+/* ---- review fixes ---------------------------------------------------- */
+
+html {
+  /* No rubber-band "pull" past the ends and no pull-to-refresh inside the app. */
+  overscroll-behavior-y: none;
+}
+
+.toast-idle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.toast {
+  bottom: calc(24px + var(--apk-bottom, 0px));
+}
+
+.to-top {
+  margin-bottom: var(--apk-bottom, 0px);
+}
+
+/* Off-screen praman cards skip rendering work until they come near the viewport. */
+.praman-grid > .praman-card,
+.gallery-grid > .gallery-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 520px;
+}
+
+.shot-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.shot.thumb .shot-open {
+  height: 100%;
+}
+
+.shot-missing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  padding: 12px;
+  border: 1px dashed var(--color-gold);
+  border-radius: 10px;
+  background: var(--color-cream-dark);
+  color: var(--color-maroon);
+  text-align: center;
+  font-weight: 600;
+}
+
+.shot.thumb.shot-missing {
+  min-height: 0;
+  padding: 2px;
+  gap: 2px;
+  font-size: 9px;
+}
+
+.shot.thumb.shot-missing .pill {
+  padding: 2px 4px;
+  font-size: 9px;
+  min-height: 0;
+}
+
+.pdf-warn {
+  color: var(--color-maroon);
+  font-weight: 700;
+}
+
+.card:focus-visible,
+.gallery-card:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid var(--color-saffron);
+  outline-offset: 2px;
 }

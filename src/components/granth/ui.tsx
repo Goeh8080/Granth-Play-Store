@@ -23,9 +23,12 @@ export function ScrollRail({ hidden = false }: { hidden?: boolean }) {
   const [canScroll, setCanScroll] = useState(false);
   const drag = useRef<{ y: number; scroll: number } | null>(null);
   const hideTimer = useRef<number | null>(null);
+  /** Removes the window listeners of an in-progress drag (pointerup, pointercancel or unmount). */
+  const stopDrag = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopDrag.current?.(), []);
 
   const reveal = () => {
-    setShow(true);
+    setShow((value) => value || true);
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
       if (!drag.current) setShow(false);
@@ -34,41 +37,60 @@ export function ScrollRail({ hidden = false }: { hidden?: boolean }) {
 
   useEffect(() => {
     let frame = 0;
-    const update = () => {
+    // Layout reads (scrollHeight, header rects) are cached and refreshed only on
+    // resize/content change, or while the masthead is still on screen. Reading
+    // them on every scroll frame forced a synchronous layout per frame and made
+    // long lists stutter on low-end phones.
+    const metrics = { chrome: 96, max: 0, view: 0, scrollHeight: 1 };
+    const measureChrome = () => {
       let chrome = 8;
-      for (const node of document.querySelectorAll<HTMLElement>(".mast, nav, .sync-strip, .offline-ask")) {
+      for (const node of document.querySelectorAll<HTMLElement>(".mast, nav, .sync-strip")) {
         const rect = node.getBoundingClientRect();
         if (rect.bottom > 4 && rect.top < window.innerHeight * 0.45) chrome = Math.max(chrome, rect.bottom + 8);
       }
-      setRailTop(chrome);
-      const track = trackRef.current?.clientHeight ?? Math.max(1, window.innerHeight - chrome - 40);
-      const scrollHeight = document.documentElement.scrollHeight;
-      const view = window.innerHeight;
-      const max = Math.max(0, scrollHeight - view);
-      setCanScroll(max > 8);
-      const height = max <= 1 ? track : Math.max(64, Math.min(track, (view / scrollHeight) * track));
-      const top = max <= 1 ? 0 : (window.scrollY / max) * Math.max(0, track - height);
-      setThumb({ top: Number.isFinite(top) ? top : 0, height });
+      metrics.chrome = Math.round(chrome);
     };
-    const schedule = () => {
+    const measure = () => {
+      metrics.scrollHeight = document.documentElement.scrollHeight;
+      metrics.view = window.innerHeight;
+      metrics.max = Math.max(0, metrics.scrollHeight - metrics.view);
+      measureChrome();
+    };
+    const paint = () => {
+      setRailTop((value) => (value === metrics.chrome ? value : metrics.chrome));
+      const can = metrics.max > 8;
+      setCanScroll((value) => (value === can ? value : can));
+      const track = trackRef.current?.clientHeight ?? Math.max(1, metrics.view - metrics.chrome - 40);
+      const height = metrics.max <= 1 ? track : Math.max(64, Math.min(track, (metrics.view / metrics.scrollHeight) * track));
+      const raw = metrics.max <= 1 ? 0 : (window.scrollY / metrics.max) * Math.max(0, track - height);
+      const top = Number.isFinite(raw) ? Math.round(raw) : 0;
+      const h = Math.round(height);
+      setThumb((value) => (value.top === top && value.height === h ? value : { top, height: h }));
+    };
+    const schedule = (full: boolean) => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(update);
+      frame = requestAnimationFrame(() => {
+        if (full) measure();
+        else if (window.scrollY < 600) measureChrome();
+        paint();
+      });
     };
     const onScroll = () => {
       reveal();
-      schedule();
+      schedule(false);
     };
-    schedule();
-    const observer = new ResizeObserver(schedule);
+    const onResize = () => schedule(true);
+    schedule(true);
+    const observer = new ResizeObserver(onResize);
     observer.observe(document.body);
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", schedule);
+    window.addEventListener("resize", onResize);
     return () => {
       cancelAnimationFrame(frame);
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
       observer.disconnect();
       window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", schedule);
+      window.removeEventListener("resize", onResize);
     };
   }, []);
 
@@ -103,13 +125,18 @@ export function ScrollRail({ hidden = false }: { hidden?: boolean }) {
           const track = event.currentTarget;
           track.setPointerCapture(event.pointerId);
           jump(event.clientY);
+          stopDrag.current?.();
           const move = (next: PointerEvent) => jump(next.clientY);
           const up = () => {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
+            stopDrag.current = null;
           };
-          window.addEventListener("pointermove", move);
+          stopDrag.current = up;
+          window.addEventListener("pointermove", move, { passive: true });
           window.addEventListener("pointerup", up);
+          window.addEventListener("pointercancel", up);
         }}
       >
         <div
@@ -128,13 +155,19 @@ export function ScrollRail({ hidden = false }: { hidden?: boolean }) {
               const travel = Math.max(1, track.clientHeight - thumb.height);
               window.scrollTo({ top: start.scroll + ((next.clientY - start.y) / travel) * max });
             };
+            stopDrag.current?.();
             const up = () => {
               drag.current = null;
               window.removeEventListener("pointermove", move);
               window.removeEventListener("pointerup", up);
+              window.removeEventListener("pointercancel", up);
+              stopDrag.current = null;
+              reveal();
             };
-            window.addEventListener("pointermove", move);
+            stopDrag.current = up;
+            window.addEventListener("pointermove", move, { passive: true });
             window.addEventListener("pointerup", up);
+            window.addEventListener("pointercancel", up);
           }}
         >
           <span className="scroll-grip" />

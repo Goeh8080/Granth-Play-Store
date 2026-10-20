@@ -10,18 +10,12 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as OpenRouteImport } from './routes/open'
 import { Route as ApiGranthRouteImport } from './routes/api/granth'
 import { Route as ApiMediaRouteImport } from './routes/api/media'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OpenRoute = OpenRouteImport.update({
-  id: '/open',
-  path: '/open',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiGranthRoute = ApiGranthRouteImport.update({
@@ -37,34 +31,30 @@ const ApiMediaRoute = ApiMediaRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/open': typeof OpenRoute
   '/api/granth': typeof ApiGranthRoute
   '/api/media': typeof ApiMediaRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/open': typeof OpenRoute
   '/api/granth': typeof ApiGranthRoute
   '/api/media': typeof ApiMediaRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/open': typeof OpenRoute
   '/api/granth': typeof ApiGranthRoute
   '/api/media': typeof ApiMediaRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/open' | '/api/granth' | '/api/media'
+  fullPaths: '/' | '/api/granth' | '/api/media'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/open' | '/api/granth' | '/api/media'
-  id: '__root__' | '/' | '/open' | '/api/granth' | '/api/media'
+  to: '/' | '/api/granth' | '/api/media'
+  id: '__root__' | '/' | '/api/granth' | '/api/media'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  OpenRoute: typeof OpenRoute
   ApiGranthRoute: typeof ApiGranthRoute
   ApiMediaRoute: typeof ApiMediaRoute
 }
@@ -76,13 +66,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/open': {
-      id: '/open'
-      path: '/open'
-      fullPath: '/open'
-      preLoaderRoute: typeof OpenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/granth': {
@@ -104,7 +87,6 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  OpenRoute: OpenRoute,
   ApiGranthRoute: ApiGranthRoute,
   ApiMediaRoute: ApiMediaRoute,
 }

@@ -20,6 +20,9 @@ export function PinchView({ children }: { children: ReactNode }) {
     blockPan: false,
   });
   const [transform, setTransform] = useState("translate(0px, 0px) scale(1)");
+  // Not zoomed → the browser keeps vertical panning (touch-action: pan-y), so a
+  // finger on a picture scrolls the lightbox to the next picture instead of being swallowed.
+  const [zoomed, setZoomed] = useState(false);
   const clamp = () => {
     const shot = view.current;
     const box = stage.current;
@@ -40,6 +43,7 @@ export function PinchView({ children }: { children: ReactNode }) {
     clamp();
     const shot = view.current;
     setTransform(`translate(${shot.x}px, ${shot.y}px) scale(${shot.scale})`);
+    setZoomed(shot.scale > 1);
   };
   const points = () => [...view.current.pointers.values()];
   const pinchDistance = () => {
@@ -67,12 +71,12 @@ export function PinchView({ children }: { children: ReactNode }) {
   return (
     <div
       ref={stage}
-      className="zoom-stage"
+      className={`zoom-stage${zoomed ? " zoomed" : ""}`}
       onPointerDown={(event) => {
         const shot = view.current;
         if (shot.pointers.size === 0) shot.blockPan = false;
         shot.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-        event.currentTarget.setPointerCapture(event.pointerId);
+        if (shot.scale > 1 || shot.pointers.size >= 2) event.currentTarget.setPointerCapture(event.pointerId);
         shot.panning = false;
         if (shot.pointers.size >= 2) {
           shot.pinching = true;

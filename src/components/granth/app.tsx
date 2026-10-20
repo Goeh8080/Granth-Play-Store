@@ -1,9 +1,8 @@
 import { ClipboardList, Image as ImageIcon, Images, Landmark, Library, Menu, RefreshCw, Settings, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { closeTop, pushCloser } from "@/lib/granth/back";
-import { deliverFile, type ToastPayload } from "@/lib/granth/files";
-import { noteEvent } from "@/lib/granth/metrics";
-import { markGranthsOffline } from "@/lib/granth/pdf-jobs";
+import { deliverFile, exitNativeApp, ping, type ToastPayload } from "@/lib/granth/files";
+import { imageProgressLabel } from "@/lib/granth/offline-plan";
 import { useGranth } from "@/lib/granth/store";
 import type { AppRoute, Panel } from "@/lib/granth/types";
 import { Dashboard, GranthScreen, Lightbox, PdfHost, PramanScreen, TopicScreen, captureListPlace } from "./screens";
@@ -13,9 +12,9 @@ import { applySavedLook, SettingsSheet } from "./settings";
 import { MalaMark, ScrollRail } from "./ui";
 
 const NAV: Array<{ panel: Panel; hash: string; label: string; icon: typeof Landmark }> = [
-  { panel: "dashboard", hash: "#/dashboard", label: "Dashboard", icon: Landmark },
-  { panel: "topics", hash: "#/topics", label: "Topics", icon: ClipboardList },
-  { panel: "granths", hash: "#/granths", label: "Granths", icon: Library },
+  { panel: "dashboard", hash: "#/dashboard", label: "मुख्य पृष्ठ", icon: Landmark },
+  { panel: "topics", hash: "#/topics", label: "विषय", icon: ClipboardList },
+  { panel: "granths", hash: "#/granths", label: "ग्रंथ", icon: Library },
   { panel: "pramans", hash: "#/pramans", label: "प्रमाण", icon: ImageIcon },
 ];
 
@@ -52,10 +51,16 @@ function formatWhen(stamp: number | null): string {
   }).format(stamp);
 }
 
-function leaveApp() {
-  const bridge = (window as unknown as { ReactNativeWebView?: { postMessage: (raw: string) => void } }).ReactNativeWebView;
-  bridge?.postMessage(JSON.stringify({ type: "exit-app" }));
+/** Exit button of the exit dialog. A web page cannot close its own tab, so say so instead of doing nothing. */
+function leaveApp(close: () => void) {
+  if (exitNativeApp()) return;
+  close();
+  ping("ब्राउज़र में ऐप बंद करने के लिए यह टैब बंद करें");
 }
+
+/** Full catalog pull is ~1 MB: do it on resume/online and every 15 minutes, not every 3. */
+const SYNC_EVERY_MS = 15 * 60 * 1000;
+const RESUME_MIN_GAP_MS = 2 * 60 * 1000;
 
 export function GranthApp() {
   const boot = useGranth((state) => state.boot);
@@ -121,14 +126,6 @@ export function GranthApp() {
 
   useEffect(() => {
     void boot();
-    try {
-      if (!sessionStorage.getItem("granth-app-open")) {
-        sessionStorage.setItem("granth-app-open", "1");
-        noteEvent("app_open", "app");
-      }
-    } catch {
-      /* ignore */
-    }
     const onOnline = () => {
       useGranth.setState({ online: true });
     };
@@ -142,7 +139,7 @@ export function GranthApp() {
     window.addEventListener("offline", onOffline);
     const onResume = () => {
       const now = Date.now();
-      if (now - lastSync.current < 3000) return;
+      if (now - lastSync.current < RESUME_MIN_GAP_MS) return;
       lastSync.current = now;
       void sync().then(() => savePages());
     };
@@ -160,16 +157,12 @@ export function GranthApp() {
   }, [boot, savePages, sync]);
 
   useEffect(() => {
-    if (images.running || images.total === 0 || images.done < images.total) return;
-    markGranthsOffline(useGranth.getState().granths.map((granth) => granth.id));
-  }, [images.done, images.running, images.total]);
-
-  useEffect(() => {
     const tick = () => {
       if (!navigator.onLine) return;
+      lastSync.current = Date.now();
       void sync().then(() => savePages());
     };
-    const timer = window.setInterval(tick, 180000);
+    const timer = window.setInterval(tick, SYNC_EVERY_MS);
     window.addEventListener("online", tick);
     return () => {
       window.clearInterval(timer);
@@ -288,9 +281,6 @@ export function GranthApp() {
   useEffect(() => {
     setMenuOpen(false);
     if (route.panel === "dashboard" || route.panel === "gallery" || route.pramanId) window.scrollTo({ top: 0 });
-    if (route.topicId) noteEvent("topic_open", route.topicId);
-    if (route.granthId) noteEvent("granth_open", route.granthId);
-    if (route.pramanId) noteEvent("praman_open", route.pramanId);
   }, [route.panel, route.topicId, route.granthId, route.pramanId]);
 
   useEffect(() => {
@@ -335,21 +325,25 @@ export function GranthApp() {
     replaceHash(hash);
   };
 
+  const goRef = useRef(go);
+  goRef.current = go;
+  useEffect(() => {
+    // In-app links from components that do not get `go` (e.g. "गैलरी में देखें" in the PDF dialog).
+    const onGo = (event: Event) => {
+      const hash = (event as CustomEvent<string>).detail;
+      if (typeof hash === "string" && hash.startsWith("#/")) goRef.current(hash);
+    };
+    window.addEventListener("granth-go", onGo);
+    return () => window.removeEventListener("granth-go", onGo);
+  }, []);
+
   const headerOn = (which: "topics" | "granths" | "pramans") => {
     if (which === "topics") return route.panel === "topics" || (route.panel === "pramans" && Boolean(route.topicId) && !route.granthId);
     if (which === "granths") return route.panel === "granths" || (route.panel === "pramans" && Boolean(route.granthId));
     return route.panel === "pramans" && !route.topicId && !route.granthId;
   };
 
-  const imageLabel = images.total
-    ? images.running
-      ? `पेज सेव हो रहे हैं ${images.done}/${images.total}`
-      : images.done >= images.total
-        ? "सभी पेज इस डिवाइस पर सेव हैं"
-        : `सेव पेज ${images.done}/${images.total}`
-    : status === "syncing"
-      ? "सूची सेव हो रही है…"
-      : "";
+  const imageLabel = imageProgressLabel(images, status === "syncing");
 
   return (
     <div className="app-root">
@@ -367,7 +361,7 @@ export function GranthApp() {
             </div>
             <div className="mast-tools">
               <PdfDock />
-              <button className="gallery-btn" type="button" aria-label="Gallery" onClick={() => go("#/gallery")}>
+              <button className="gallery-btn" type="button" aria-label="गैलरी" onClick={() => go("#/gallery")}>
                 <Images />
               </button>
               <button className="gallery-btn" type="button" aria-label="सेटिंग" onClick={() => setSettingsOpen(true)}>
@@ -424,7 +418,7 @@ export function GranthApp() {
       </nav>
 
       <div className={`sync-strip ${status}`}>
-        <p>
+        <p role="status" aria-live="polite">
           <span className={`dot ${online ? "on" : "off"}`} />
           {status === "syncing"
             ? "ऑनलाइन सिंक हो रहा है — सूची डिवाइस पर लिखी जा रही है"
@@ -439,6 +433,7 @@ export function GranthApp() {
           className="sync-btn"
           type="button"
           onClick={() => {
+            lastSync.current = Date.now();
             void sync().then(() => savePages());
           }}
           disabled={status === "syncing"}
@@ -470,34 +465,37 @@ export function GranthApp() {
 
       <ScrollRail hidden={Boolean(shots || settingsOpen || exitAsk)} />
       {showTop ? (
-        <button className="to-top" type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
-          Top
+        <button className="to-top" type="button" aria-label="सबसे ऊपर जाएँ" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+          ऊपर
         </button>
       ) : null}
-      {toast ? (
-        <div className="toast show">
-          <span>{toast.message}</span>
-          {toast.file ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (toast.file) void deliverFile(toast.file.blob, toast.file.name);
-              }}
-            >
-              डाउनलोड
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      {/* Always mounted so screen readers announce every new message. */}
+      <div className={toast ? "toast show" : "toast-idle"} role="status" aria-live="polite">
+        {toast ? (
+          <>
+            <span>{toast.message}</span>
+            {toast.file ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (toast.file) void deliverFile(toast.file.blob, toast.file.name);
+                }}
+              >
+                डाउनलोड
+              </button>
+            ) : null}
+          </>
+        ) : null}
+      </div>
       {shots ? <Lightbox paths={shots} onClose={() => setShots(null)} /> : null}
       {settingsOpen ? <SettingsSheet onClose={() => setSettingsOpen(false)} /> : null}
       {exitAsk ? (
         <div className="pdf-pop" role="presentation" onClick={() => setExitAsk(false)}>
-          <div className="exit-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <h3>क्या आप बाहर निकलना चाहते हैं?</h3>
+          <div className="exit-card" role="dialog" aria-modal="true" aria-labelledby="exit-title" onClick={(event) => event.stopPropagation()}>
+            <h3 id="exit-title">क्या आप बाहर निकलना चाहते हैं?</h3>
             <p>ऐप बंद होगा। सेव किए हुए ग्रंथ और PDF फ़ोन पर रहेंगे।</p>
             <div className="pdf-actions">
-              <button type="button" className="pdf-ok" onClick={leaveApp}>
+              <button type="button" className="pdf-ok" onClick={() => leaveApp(() => setExitAsk(false))}>
                 हाँ, बाहर जाएँ
               </button>
               <button type="button" className="pdf-back" onClick={() => setExitAsk(false)}>
