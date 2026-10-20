@@ -1,20 +1,19 @@
-# ग्रंथ प्रबंधन — GitHub से APK
+# ग्रंथ प्रबंधन — Android ऐप
 
-इस चैट से तैयार APK नहीं मिलती। यह ज़िप पूरा React Native प्रोजेक्ट है। GitHub पर पुश करते ही APK अपने आप बनती है।
+यह Expo / React Native का छोटा शेल है। ऐप का पूरा UI वेबसाइट वाला ही है, जो
+`android/app/src/main/assets/web/index.html` में एक फ़ाइल के रूप में बंद है
+(रिपो की जड़ पर `npm run build:apk` से बनती है)।
 
-`README.md` repo की जड़ पर है — ज़िप निकालने के बाद यही फ़ाइल GitHub की पहली स्क्रीन पर दिखती है।
+## बिल्ड
 
-## कदम
+1. रिपो की जड़ पर: `npm ci && npm run build:apk`
+2. यहाँ: `npm ci`
+3. `cd android && ./gradlew assembleRelease` — साइनिंग के लिए जड़ की `README.md` देखें।
 
-1. ज़िप निकालो। अंदर की फ़ाइलें (`README.md`, `package.json`, `package-lock.json`, `android`, `src`, `.github`) ही repo की जड़ हों। ज़िप फ़ाइल को GitHub पर मत डालना। `node_modules` मत डालना।
-2. नया GitHub repo बनाओ और सारी फ़ाइलें `main` ब्रांच पर पुश करो।
-3. GitHub पर **Actions** खोलो। `Android APK` वर्कफ़्लो चलेगा।
-4. खत्म होने पर **Artifacts** से `granth-prabandhan-apk` डाउनलोड करो। अंदर वाली `.apk` फ़ोन पर इंस्टॉल करो।
+वर्जन `version.properties` में है (versionName / versionCode)। हर नई Play अपलोड पर
+`VERSION_CODE` बढ़ाएँ।
 
-पहली बिल्ड 15–25 मिनट ले सकती है। वर्जन Expo SDK 57 के साथ पिन हैं: React Native 0.86.3, React 19.2.3। यह APK साइडलोड के लिए debug key से बनी है। Play Store के लिए अपनी keystore लगानी होगी।
-
-## बाकी
-
-ऐप WebView नहीं है। पहली ऑनलाइन ओपनिंग पर विषय, ग्रंथ और प्रमाण SQLite में बचते हैं, चित्र एक बार डाउनलोड होते हैं, फिर ऑफ़लाइन चलता है। खोज `mans` से मांस और `per` / `pair` से पैर मिलती है। ग्रंथ के अंदर प्रमाण अध्याय, श्लोक और पेज के क्रम में हैं। ग्रिड: ग्रंथ 1×1 / 2×2 / 3×3, प्रमाण और गैलरी 1×1 / 2×2।
+GitHub पर पुश करते ही **Actions → Android APK** वर्कफ़्लो साइन की हुई APK और AAB बनाता है
+(Secrets न हों तो debug key से, चेतावनी के साथ)।
 
 विस्तार [ARCHITECTURE.md](ARCHITECTURE.md) में है।

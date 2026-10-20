@@ -1,90 +1,39 @@
 # Architecture
 
 ```
-React Native UI (screens + FlatList)
-        ↓
-Navigation (native stack + bottom tabs)
-        ↓
-AppProvider
-        ↓
-Services (search, catalog, downloads, PDF, gallery, packs)
-        ↓
-SQLite (expo-sqlite) + files (expo-file-system) + MediaStore
+WebView (react-native-webview)
+  └─ file:///android_asset/web/index.html   ← the web UI from ../src, built by `npm run build:apk`
+        │  fetch() to https://granth.wnmsolutions.com (needs allowUniversalAccessFromFileURLs: the API sends no CORS headers)
+        │  IndexedDB: catalog, offline page images, gallery, PDFs
+        │
+        └─ window.__granthNative.postMessage(…)   (main frame only, per-launch token)
+              ↓
+App.tsx (bridge)  ── replies with window.__granthReply(reqId, { ok, error, uri })
+  ├─ save-chunk / share-chunk / open-chunk   → file in app storage, then
+  │     PDF → Downloads (MediaStore), picture → Pictures/Granth (MediaStore)
+  │     share → expo-sharing, open → ACTION_VIEW (falls back to share when no viewer)
+  ├─ open-saved / share-saved / export-saved → reuse the stored copy ("missing" if absent)
+  ├─ net            → legacy relative /api/* fetches proxied natively
+  ├─ open-url / open-mail / share-text / exit-app
+  └─ hardware Back  → window.__granthBack() (MainActivity / back/GranthBack.kt)
 ```
 
-Not HTML → WebView → website.
+## Native module `GranthDownloads` (`DownloadsModule.kt`)
 
-## Layers
-
-| Path | Role |
+| Method | Use |
 | --- | --- |
-| `src/screens` | Dashboard, Topics, Granths, Pramans, Gallery, Downloads |
-| `src/components` | Header, search, grid switch, cards, image with download button |
-| `src/navigation/RootNav.tsx` | Tabs and gallery/download stack. No web view |
-| `src/state/AppProvider.tsx` | Boot, sync, settings, toasts |
-| `src/database/db.ts` | SQLite schema and queries |
-| `src/search/SearchService.ts` | `normalizeText`, `transliterateQuery`, `fuzzyMatch`, `calculateRelevance`, `searchTopics`, `searchGranth`, `searchPramaan` |
-| `src/services/CatalogService.ts` | `getTopics` / `getGranths` / `getPramans`, then local replace |
-| `src/services/DownloadService.ts` | Queue, 2 workers, pause/resume (`DownloadResumable`), retry, cancel, duplicate id |
-| `src/services/StorageService.ts` | App directories, base64, JPEG/PNG check |
-| `src/services/PdfService.ts` | pdf-lib + Noto font. Image keeps aspect ratio. Text paginates on A4 |
-| `src/services/GalleryService.ts` | Gallery rows, MediaStore album, SAF PDF export, share |
-| `src/services/ResourcePackService.ts` | Version compare and JSON/zip import |
-| `src/services/settings.ts` | Column counts and theme in AsyncStorage |
+| `beginWrite` / `appendWrite` / `finishWrite` | stream base64 chunks to a file, verify size and `%PDF` header |
+| `copyToDownloads` | PDF → Downloads via MediaStore (no permission on Android 10+) |
+| `copyToPictures` | picture → Pictures/Granth via MediaStore |
+| `viewUri` | open a content:// URI; rejects `no-viewer` when nothing can open it |
+| `getAppVersion`, `exitApp` | settings / exit dialog |
 
-## Data
+## Permissions
 
-SQLite `granth.db`:
+`INTERNET` only on Android 10+. Legacy storage permissions are limited to Android 9 and older.
+No media-read or notification permissions are requested.
 
-- `topics`, `granths`, `pramans` — catalog, separate from UI code
-- `files` — cached image path → local uri + size
-- `folders`, `gallery` — user album and metadata
-- `downloads` — queue snapshot so a restart can resume
-- `meta` — `syncedAt`, `resourceVersion` (default `1.0.0`), SAF directory
+## Version and signing
 
-Files:
-
-- `granth/images` — original downloads, skipped when the file is already valid
-- `granth/gallery` — user copies
-- `granth/pdfs` — generated card PDFs
-- `granth/packs` — imported packs
-
-## Offline search
-
-No network model. Pipeline:
-
-1. Unicode NFC, lowercasing, punctuation strip
-2. Matra strip
-3. Devanagari → Latin
-4. Synonym clusters (मांस/mans, मृत्यु/mrityu, ब्रह्म/brahm, कृष्ण, कबीर, गीता/gita, …)
-5. Levenshtein on short tokens
-6. Multi-word needs: a query like “ब्रह्मा की मृत्यु” scores documents that contain the concepts even when the exact phrase is absent
-
-Results are sorted by score. Hundreds of rows stay in memory; lists are virtualized.
-
-## Resource packs
-
-```json
-{
-  "resourceVersion": "1.1.0",
-  "topics": [],
-  "granths": [],
-  "pramans": []
-}
-```
-
-A `.zip` with one JSON file of that shape is accepted. Import is rejected when the pack version is older than the installed version. Images stay addressable by `granths/…` and `uploads/…` and download through the same queue.
-
-## Performance
-
-- `FlatList` windowing, `removeClippedSubviews`, memoized cards
-- Image decode uses the cached file once it exists; remote URLs are only the fallback
-- Download progress updates are throttled
-- PDF font bytes are cached after the first embed
-- Search does not scan with a cloud API
-
-## Android storage
-
-- Pictures: `expo-media-library` → MediaStore album “ग्रंथ प्रबंधन”
-- PDFs: app documents plus Storage Access Framework so the user picks Downloads or another folder
-- Sharing: `expo-sharing`
+`version.properties` is read by `android/app/build.gradle`; release signing comes from
+`GRANTH_KEYSTORE_*` environment variables or Gradle properties (see the root README).

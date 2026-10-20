@@ -10,7 +10,7 @@ test("app version is the same everywhere", () => {
   const name = /^VERSION_NAME=(.+)$/m.exec(props)?.[1]?.trim();
   const code = Number(/^VERSION_CODE=(\d+)$/m.exec(props)?.[1]);
   assert.ok(name && /^\d+\.\d+\.\d+$/.test(name), "VERSION_NAME");
-  assert.ok(code >= 22, "VERSION_CODE must stay above the previously shipped 20");
+  assert.ok(code >= 22, "VERSION_CODE must stay above the last Play upload (21)");
   const app = JSON.parse(read("mobile/app.json")).expo;
   assert.equal(app.version, name);
   assert.equal(app.android.versionCode, code);
