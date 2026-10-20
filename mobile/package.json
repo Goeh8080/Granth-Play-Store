@@ -1,39 +1,24 @@
 {
   "name": "granth-prabandhan",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
-    "prebuild": "expo prebuild --platform android",
-    "typecheck": "tsc --noEmit",
-    "test:search": "node --experimental-strip-types src/search/check.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@expo/vector-icons": "^15.1.1",
-    "@pdf-lib/fontkit": "^1.1.1",
-    "@react-native-async-storage/async-storage": "2.2.0",
-    "@react-navigation/bottom-tabs": "^7.19.2",
-    "@react-navigation/native": "^7.4.1",
-    "@react-navigation/native-stack": "^7.19.2",
-    "buffer": "^6.0.3",
     "expo": "~57.0.25",
     "expo-asset": "~57.0.18",
     "expo-constants": "~57.0.19",
     "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.4",
-    "expo-intent-launcher": "~57.0.1",
-    "expo-media-library": "~57.0.5",
     "expo-sharing": "~57.0.22",
-    "expo-sqlite": "~57.0.3",
     "expo-status-bar": "~57.0.1",
-    "fflate": "^0.8.3",
-    "pdf-lib": "^1.17.1",
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
-    "react-native-screens": "~4.26.0",
     "react-native-webview": "^13.16.1"
   },
   "devDependencies": {
@@ -41,5 +26,8 @@
     "@types/react": "~19.2.0",
     "babel-preset-expo": "~57.0.13",
     "typescript": "~5.8.3"
+  },
+  "engines": {
+    "node": ">=22.6"
   }
 }

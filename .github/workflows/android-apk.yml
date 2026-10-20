@@ -3,10 +3,28 @@ name: Android APK
 on:
   push:
     branches: [main, master]
+  pull_request:
   workflow_dispatch:
 
 jobs:
+  web:
+    name: Web checks (typecheck, lint, tests, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
   apk:
+    name: Signed APK + AAB
+    needs: web
     runs-on: ubuntu-latest
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -16,16 +34,34 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: mobile/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Install
+      - name: Version
+        id: version
+        run: |
+          name=$(sed -n 's/^VERSION_NAME=//p' mobile/version.properties | tr -d '[:space:]')
+          code=$(sed -n 's/^VERSION_CODE=//p' mobile/version.properties | tr -d '[:space:]')
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "Building Granth Prabandhan $name ($code)"
+
+      # The APK shows mobile/android/app/src/main/assets/web/index.html.
+      # Rebuild it from source so the app never ships a stale web bundle.
+      - name: Build embedded web bundle
+        run: |
+          npm ci
+          npm run build:apk
+
+      - name: Install mobile dependencies
         working-directory: mobile
         run: npm ci
 
@@ -41,16 +77,59 @@ jobs:
           "$SM" --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
 
+      # Release signing. Required repository secrets:
+      #   ANDROID_KEYSTORE_BASE64   base64 of the release .jks (base64 -w0 granth-release.jks)
+      #   ANDROID_KEYSTORE_PASSWORD keystore password
+      #   ANDROID_KEY_ALIAS         key alias (granth-release)
+      #   ANDROID_KEY_PASSWORD      key password (same as the keystore password for PKCS12)
+      # Without them (e.g. pull requests from forks) the build still runs but is
+      # signed with the DEBUG key and must not be published.
+      - name: Release keystore
+        id: signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            store="$RUNNER_TEMP/granth-release.jks"
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$store"
+            {
+              echo "GRANTH_KEYSTORE_FILE=$store"
+              echo "GRANTH_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
+              echo "GRANTH_KEY_ALIAS=${ANDROID_KEY_ALIAS:-granth-release}"
+              echo "GRANTH_KEY_PASSWORD=${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
+            } >> "$GITHUB_ENV"
+            echo "kind=release" >> "$GITHUB_OUTPUT"
+            echo "Signing with the release key from repository secrets."
+          else
+            echo "kind=debug-signed" >> "$GITHUB_OUTPUT"
+            echo "::warning title=APK is DEBUG-signed::ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD secrets are not set. This build is signed with the debug key: fine for testing, but it cannot be uploaded to Play or installed over a release-signed app."
+          fi
+
       - name: Build APK and AAB
         working-directory: mobile/android
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace -PverCode=15 -PverName=1.0.0 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+
+      - name: Verify signature
+        run: |
+          apk=$(ls mobile/android/app/build/outputs/apk/release/*.apk | head -n 1)
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
+          out="Granth-Prabandhan-v${{ steps.version.outputs.name }}-${{ steps.version.outputs.code }}"
+          [ "${{ steps.signing.outputs.kind }}" = "release" ] || out="$out-debug-signed"
+          mkdir -p dist-android
+          cp "$apk" "dist-android/$out.apk"
+          cp mobile/android/app/build/outputs/bundle/release/*.aab "dist-android/$out.aab"
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/granth-release.jks"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: granth-prabandhan-1.0.0
-          path: |
-            mobile/android/app/build/outputs/apk/release/*.apk
-            mobile/android/app/build/outputs/bundle/release/*.aab
+          name: granth-prabandhan-${{ steps.version.outputs.name }}-${{ steps.version.outputs.code }}-${{ steps.signing.outputs.kind }}
+          path: dist-android/*
           if-no-files-found: error

@@ -12,3 +12,14 @@ local.properties
 .env.*
 *.apk
 *.aab
+# release signing material — lives outside the repo (e.g. /workspace/granth-signing)
+*.keystore
+!mobile/android/app/debug.keystore
+*.p12
+*.pk8
+credentials.properties
+granth-signing/
+# local build outputs
+.output/
+dist/
+.tanstack/

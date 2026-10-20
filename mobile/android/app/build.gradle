@@ -81,8 +81,35 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
-def appVersionCode = (project.findProperty("verCode") ?: "15").toString().toInteger()
-def appVersionName = (project.findProperty("verName") ?: "1.0.0").toString()
+// Version: mobile/version.properties is the single source of truth (also used by
+// the web build and CI). -PverCode / -PverName still override it if needed.
+def versionProps = new Properties()
+def versionFile = new File(projectRoot, "version.properties")
+if (versionFile.exists()) versionFile.withInputStream { versionProps.load(it) }
+def appVersionCode = (project.findProperty("verCode") ?: versionProps.getProperty("VERSION_CODE") ?: "22").toString().trim().toInteger()
+def appVersionName = (project.findProperty("verName") ?: versionProps.getProperty("VERSION_NAME") ?: "1.0.2").toString().trim()
+
+// Release signing comes from the environment or Gradle properties
+// (~/.gradle/gradle.properties or -P...), never from files in the repo:
+//   GRANTH_KEYSTORE_FILE / granthKeystoreFile
+//   GRANTH_KEYSTORE_PASSWORD / granthKeystorePassword
+//   GRANTH_KEY_ALIAS / granthKeyAlias
+//   GRANTH_KEY_PASSWORD / granthKeyPassword
+// (the older RELEASE_STORE_FILE / RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS /
+// RELEASE_KEY_PASSWORD names are still accepted).
+def signingValue = { String env, String legacyEnv, String prop ->
+    def value = System.getenv(env) ?: System.getenv(legacyEnv) ?: project.findProperty(prop)
+    return value ? value.toString() : null
+}
+def releaseStoreFile = signingValue("GRANTH_KEYSTORE_FILE", "RELEASE_STORE_FILE", "granthKeystoreFile")
+def releaseStorePassword = signingValue("GRANTH_KEYSTORE_PASSWORD", "RELEASE_STORE_PASSWORD", "granthKeystorePassword")
+def releaseKeyAlias = signingValue("GRANTH_KEY_ALIAS", "RELEASE_KEY_ALIAS", "granthKeyAlias") ?: "granth-release"
+def releaseKeyPassword = signingValue("GRANTH_KEY_PASSWORD", "RELEASE_KEY_PASSWORD", "granthKeyPassword") ?: releaseStorePassword
+def hasReleaseKey = releaseStoreFile && new File(releaseStoreFile).exists() && releaseStorePassword
+if (!hasReleaseKey) {
+    logger.warn("WARNING: no release keystore configured (GRANTH_KEYSTORE_FILE + GRANTH_KEYSTORE_PASSWORD). " +
+        "Release builds will be signed with the DEBUG key and cannot be published or installed over the store build.")
+}
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -113,12 +140,11 @@ android {
             keyPassword 'android'
         }
         release {
-            def store = System.getenv("RELEASE_STORE_FILE")
-            if (store) {
-                storeFile file(store)
-                storePassword System.getenv("RELEASE_STORE_PASSWORD")
-                keyAlias System.getenv("RELEASE_KEY_ALIAS")
-                keyPassword System.getenv("RELEASE_KEY_PASSWORD")
+            if (hasReleaseKey) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
             }
         }
     }
@@ -127,7 +153,7 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig System.getenv("RELEASE_STORE_FILE") ? signingConfigs.release : signingConfigs.debug
+            signingConfig hasReleaseKey ? signingConfigs.release : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

@@ -1,6 +1,9 @@
 package com.wnm.granthprabandhan
 
+import android.content.ActivityNotFoundException
 import android.content.ContentValues
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -127,6 +130,76 @@ class DownloadsModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
       promise.resolve(dest.absolutePath)
     } catch (error: Exception) {
       promise.reject("download", error.message, error)
+    }
+  }
+
+  /** Copy a picture into the phone gallery (Pictures/Granth). No storage permission is needed on Android 10+. */
+  @ReactMethod
+  fun copyToPictures(filePath: String, displayName: String, mime: String, promise: Promise) {
+    try {
+      val source = File(filePath.removePrefix("file://"))
+      if (!source.exists()) {
+        promise.reject("missing", "file missing")
+        return
+      }
+      val name = displayName.ifBlank { source.name }
+      val type = mime.ifBlank { "image/jpeg" }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val resolver = reactApplicationContext.contentResolver
+        val values = ContentValues().apply {
+          put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+          put(MediaStore.MediaColumns.MIME_TYPE, type)
+          put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Granth")
+          put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+          ?: throw IllegalStateException("gallery insert failed")
+        try {
+          resolver.openOutputStream(uri)?.use { output ->
+            FileInputStream(source).use { input -> input.copyTo(output) }
+          } ?: throw IllegalStateException("gallery stream failed")
+        } catch (error: Exception) {
+          resolver.delete(uri, null, null)
+          throw error
+        }
+        values.clear()
+        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        promise.resolve(uri.toString())
+        return
+      }
+      val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Granth")
+      if (!dir.exists()) dir.mkdirs()
+      val dest = File(dir, name)
+      source.copyTo(dest, overwrite = true)
+      android.media.MediaScannerConnection.scanFile(reactApplicationContext, arrayOf(dest.absolutePath), arrayOf(type), null)
+      promise.resolve(dest.absolutePath)
+    } catch (error: Exception) {
+      promise.reject("gallery", error.message, error)
+    }
+  }
+
+  /** Open a content:// URI in the user's viewer app. Rejects with "no-viewer" when none is installed. */
+  @ReactMethod
+  fun viewUri(uri: String, mime: String, promise: Promise) {
+    val activity = reactApplicationContext.currentActivity
+    if (activity == null) {
+      promise.reject("no-activity", "app not in foreground")
+      return
+    }
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+      setDataAndType(Uri.parse(uri), mime.ifBlank { "application/pdf" })
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    activity.runOnUiThread {
+      try {
+        activity.startActivity(intent)
+        promise.resolve(true)
+      } catch (error: ActivityNotFoundException) {
+        promise.reject("no-viewer", "no app can open this file", error)
+      } catch (error: Exception) {
+        promise.reject("open", error.message, error)
+      }
     }
   }
 

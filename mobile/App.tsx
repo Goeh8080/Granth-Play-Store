@@ -1,19 +1,28 @@
 import { cacheDirectory, deleteAsync, documentDirectory, EncodingType, getContentUriAsync, getInfoAsync, makeDirectoryAsync, writeAsStringAsync } from "expo-file-system/legacy";
-import * as IntentLauncher from "expo-intent-launcher";
-import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
-import { AppState, BackHandler, Image, Linking, NativeModules, PermissionsAndroid, Platform, Share, StyleSheet, View } from "react-native";
+import { AppState, BackHandler, Image, Linking, NativeModules, Share, StyleSheet, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
 const ORIGIN = "https://granth.wnmsolutions.com";
 const LISTS = new Set(["getTopics", "getGranths", "getPramans"]);
+const APP_PAGE = "file:///android_asset/web/index.html";
+
+/**
+ * Per-launch secret. The bridge script keeps it in a closure and stamps it on
+ * every message from the app page; messages without it (for example from an
+ * embedded YouTube iframe, which can also reach ReactNativeWebView) are ignored.
+ */
+const TOKEN = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+
+type Reply = { ok: boolean; error?: string; uri?: string };
 
 type SaveChunk = {
   type: "save-chunk" | "share-chunk" | "open-chunk";
   id: string;
+  reqId?: string;
   name: string;
   mime: string;
   index: number;
@@ -24,22 +33,49 @@ type SaveChunk = {
 type NetRequest = { type: "net"; id: string; path: string };
 type OpenMail = { type: "open-mail"; email: string };
 type OpenUrl = { type: "open-url"; url: string };
-type OpenSaved = { type: "open-saved"; name: string };
+type OpenSaved = { type: "open-saved"; name: string; reqId?: string };
 type ShareText = { type: "share-text"; title?: string; text?: string; url?: string };
-type ShareSaved = { type: "share-saved"; name: string };
-type ExportSaved = { type: "export-saved"; name: string };
+type ShareSaved = { type: "share-saved"; name: string; reqId?: string };
+type ExportSaved = { type: "export-saved"; name: string; reqId?: string };
 type ExitApp = { type: "exit-app" };
+type BridgeMessage = (SaveChunk | NetRequest | OpenMail | OpenUrl | OpenSaved | ShareText | ShareSaved | ExportSaved | ExitApp) & { token?: string };
+
+type NativeFiles = {
+  getAppVersion?: () => Promise<string>;
+  beginWrite?: (path: string) => Promise<boolean>;
+  appendWrite?: (path: string, data: string) => Promise<number>;
+  finishWrite?: (path: string) => Promise<number>;
+  copyToDownloads?: (path: string, name: string, mime: string) => Promise<string>;
+  copyToPictures?: (path: string, name: string, mime: string) => Promise<string>;
+  viewUri?: (uri: string, mime: string) => Promise<boolean>;
+  exitApp?: () => void;
+};
+
+const files = () => NativeModules.GranthDownloads as NativeFiles | undefined;
 
 const BRIDGE = `(function(){
   if (window.__granthBridge) return true;
+  if (window.top !== window) return true;
   window.__granthBridge = true;
+  var token = ${JSON.stringify(TOKEN)};
   var pending = new Map();
   var queue = [];
-  function post(obj){
-    var raw = JSON.stringify(obj);
+  function send(raw){
     if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) window.ReactNativeWebView.postMessage(raw);
     else queue.push(raw);
   }
+  function post(obj){
+    obj.token = token;
+    send(JSON.stringify(obj));
+  }
+  window.__granthNative = {
+    postMessage: function(raw){
+      var obj;
+      try { obj = JSON.parse(raw); } catch (e) { return; }
+      if (!obj || typeof obj !== "object") return;
+      post(obj);
+    }
+  };
   setInterval(function(){
     if (!window.ReactNativeWebView || !queue.length) return;
     var batch = queue.splice(0, queue.length);
@@ -117,13 +153,8 @@ function Shell() {
   const [splash, setSplash] = useState(true);
   const pad = `document.documentElement.style.setProperty('--apk-top','${Math.max(insets.top, 28)}px');document.documentElement.style.setProperty('--apk-bottom','${insets.bottom}px');document.body.classList.add('apk');true;`;
   useEffect(() => {
-    const timer = setTimeout(() => setSplash(false), 2600);
-    return () => clearTimeout(timer);
-  }, []);
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      void askDevicePermissions();
-    }, 2800);
+    // Safety net only: the splash is normally hidden as soon as the page has loaded.
+    const timer = setTimeout(() => setSplash(false), 6000);
     return () => clearTimeout(timer);
   }, []);
   useEffect(() => {
@@ -170,16 +201,21 @@ function Shell() {
       <StatusBar style="dark" />
       <WebView
         ref={web}
-        source={{ uri: "file:///android_asset/web/index.html" }}
+        source={{ uri: APP_PAGE }}
         style={styles.fill}
-        originWhitelist={["*"]}
+        originWhitelist={["file://*", "https://*", "about:blank"]}
         javaScriptEnabled
         domStorageEnabled
         allowFileAccess
         allowFileAccessFromFileURLs
+        // The Granth API sends no CORS headers; the bundled page needs this to read it.
         allowUniversalAccessFromFileURLs
-        mixedContentMode="always"
+        mixedContentMode="never"
         cacheEnabled
+        overScrollMode="never"
+        nestedScrollEnabled={false}
+        androidLayerType="hardware"
+        textZoom={100}
         onContentProcessDidTerminate={() => web.current?.reload()}
         onRenderProcessGone={() => {
           web.current?.reload();
@@ -194,8 +230,8 @@ function Shell() {
           webReady.current = true;
           web.current?.injectJavaScript(BRIDGE);
           web.current?.injectJavaScript(pad);
-          const reader = NativeModules.GranthDownloads as { getAppVersion?: () => Promise<string> } | undefined;
-          void reader?.getAppVersion?.().then((version) => {
+          setTimeout(() => setSplash(false), 350);
+          void files()?.getAppVersion?.().then((version) => {
             if (!version) return;
             web.current?.injectJavaScript(`window.__granthVersion=${JSON.stringify(version)};window.dispatchEvent(new Event("granth-version"));true;`);
           });
@@ -209,13 +245,21 @@ function Shell() {
           }
         }}
         onShouldStartLoadWithRequest={(request) => {
-          if (request.url.startsWith("mailto:")) {
-            void openMail(request.url.replace(/^mailto:/i, "").split("?")[0]);
+          const url = request.url;
+          if (url.startsWith("mailto:")) {
+            void openMail(url.replace(/^mailto:/i, "").split("?")[0]);
             return false;
           }
-          return true;
+          // Embedded frames (YouTube) may load what they need.
+          if (request.isTopFrame === false) return true;
+          // The app page itself, and in-page hash navigation.
+          if (url.startsWith("file:///android_asset/") || url === "about:blank") return true;
+          // Anything else would replace the app inside the WebView: hand it to the system instead.
+          if (/^(https?|intent|market|tel|whatsapp):/i.test(url)) void Linking.openURL(url).catch(() => undefined);
+          return false;
         }}
         onMessage={(event) => {
+          if (!event.nativeEvent.url?.startsWith("file:///android_asset/")) return;
           void onBridge(event.nativeEvent.data, web.current, parts.current);
         }}
       />
@@ -226,18 +270,6 @@ function Shell() {
       ) : null}
     </View>
   );
-}
-
-async function askDevicePermissions() {
-  if (Platform.OS !== "android") return;
-  const names: Array<(typeof PermissionsAndroid.PERMISSIONS)[keyof typeof PermissionsAndroid.PERMISSIONS]> = [];
-  if (Number(Platform.Version) >= 33) {
-    names.push(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS, PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES);
-  } else {
-    names.push(PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE, PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE);
-  }
-  await PermissionsAndroid.requestMultiple(names).catch(() => undefined);
-  await MediaLibrary.requestPermissionsAsync(false, ["photo"]).catch(() => undefined);
 }
 
 function hashFromShareUrl(url: string) {
@@ -258,44 +290,50 @@ function hashFromShareUrl(url: string) {
   return "";
 }
 
-function openDeepLink(view: WebView | null, url: string) {
-  const hash = hashFromShareUrl(url);
-  if (!hash || !view) return;
-  view.injectJavaScript(`window.__granthOpenLink&&window.__granthOpenLink(${JSON.stringify(hash)});true;`);
+function reply(view: WebView | null, reqId: string | undefined, answer: Reply) {
+  if (!view || !reqId) return;
+  view.injectJavaScript(`window.__granthReply&&window.__granthReply(${JSON.stringify(reqId)},${JSON.stringify(answer)});true;`);
+}
+
+function errorCode(error: unknown, fallback: string) {
+  const code = (error as { code?: string } | null)?.code;
+  return typeof code === "string" && code ? code : fallback;
 }
 
 async function onBridge(raw: string, view: WebView | null, parts: Map<string, string[]>) {
-  let message: SaveChunk | NetRequest | OpenMail | OpenUrl | OpenSaved | ShareText | ShareSaved | ExportSaved | ExitApp;
+  let message: BridgeMessage;
   try {
-    message = JSON.parse(raw) as SaveChunk | NetRequest | OpenMail | OpenUrl | OpenSaved | ShareText | ShareSaved | ExportSaved | ExitApp;
+    message = JSON.parse(raw) as BridgeMessage;
   } catch {
     return;
   }
+  if (!message || message.token !== TOKEN) return;
   if (message.type === "exit-app") {
-    const granth = NativeModules.GranthDownloads as { exitApp?: () => void } | undefined;
+    const granth = files();
     if (granth?.exitApp) granth.exitApp();
     else BackHandler.exitApp();
     return;
   }
   if (message.type === "share-text") {
     const text = message.text || message.url || message.title || "";
-    if (text) await Share.share({ title: message.title, message: text });
+    if (text) await Share.share({ title: message.title, message: text }).catch(() => undefined);
     return;
   }
   if (message.type === "share-saved") {
-    await shareSaved(message.name, view);
+    reply(view, message.reqId, await shareSaved(message.name));
     return;
   }
   if (message.type === "export-saved") {
-    await exportSaved(message.name, view);
+    reply(view, message.reqId, await exportSaved(message.name));
     return;
   }
   if (message.type === "open-saved") {
-    await openSaved(message.name, view);
+    reply(view, message.reqId, await openSaved(message.name));
     return;
   }
   if (message.type === "save-chunk" || message.type === "share-chunk" || message.type === "open-chunk") {
-    await placeFile(message, parts);
+    const answer = await placeFile(message, parts);
+    if (answer) reply(view, message.reqId, answer);
     return;
   }
   if (message.type === "net") {
@@ -303,11 +341,11 @@ async function onBridge(raw: string, view: WebView | null, parts: Map<string, st
     return;
   }
   if (message.type === "open-mail") {
-    await openMail(message.email);
+    await openMail(message.email).catch(() => undefined);
     return;
   }
   if (message.type === "open-url" && /^https?:\/\//i.test(message.url)) {
-    await Linking.openURL(message.url);
+    await Linking.openURL(message.url).catch(() => undefined);
   }
 }
 
@@ -412,88 +450,130 @@ function safeName(name: string) {
   return name.replace(/[^\w.\-\u0900-\u097F ]+/g, "_").slice(0, 80) || "granth.pdf";
 }
 
-async function shareSaved(rawName: string, view: WebView | null) {
-  const name = safeName(rawName);
-  const uri = documentDirectory ? `${documentDirectory}Granth/${name}` : "";
-  const info = uri ? await getInfoAsync(uri).catch(() => null) : null;
-  const size = info && "exists" in info && info.exists && "size" in info ? Number(info.size) : 0;
-  const ready = size > 64;
-  view?.injectJavaScript(
-    `window.__granthShare${ready ? "Hit" : "Miss"}&&window.__granthShare${ready ? "Hit" : "Miss"}(${JSON.stringify(rawName)});true;`,
-  );
-  if (!ready || !uri) return;
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: name });
-  }
+function mimeOf(name: string, given?: string) {
+  if (given) return given;
+  return name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg";
 }
 
-async function exportSaved(rawName: string, view: WebView | null) {
-  const name = safeName(rawName);
-  const uri = documentDirectory ? `${documentDirectory}Granth/${name}` : "";
-  const info = uri ? await getInfoAsync(uri).catch(() => null) : null;
-  const size = info && "exists" in info && info.exists && "size" in info ? Number(info.size) : 0;
-  const ready = size > 64;
-  view?.injectJavaScript(
-    `window.__granthExport${ready ? "Hit" : "Miss"}&&window.__granthExport${ready ? "Hit" : "Miss"}(${JSON.stringify(rawName)});true;`,
-  );
-  if (!ready || !uri) return;
-  const writer = NativeModules.GranthDownloads as { copyToDownloads?: (path: string, name: string, mime: string) => Promise<string> } | undefined;
-  const mime = name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg";
-  if (writer?.copyToDownloads) await writer.copyToDownloads(uri, name, mime).catch(() => undefined);
+function isPdf(name: string, mime?: string) {
+  return (mime || "").includes("pdf") || name.toLowerCase().endsWith(".pdf");
 }
 
-async function openSaved(rawName: string, view: WebView | null) {
-  const name = safeName(rawName);
+/** Where a file was written: PDFs in app documents/Granth, pictures in the cache. */
+function savedUri(name: string) {
+  if (isPdf(name)) return documentDirectory ? `${documentDirectory}Granth/${name}` : "";
+  return cacheDirectory ? `${cacheDirectory}${name}` : "";
+}
+
+async function existing(name: string): Promise<string> {
   const pending = writing.get(name);
   if (pending) {
     try {
-      await viewPdf(await pending);
-      return;
+      return await pending;
     } catch {
-      /* write again below if the file is still missing */
+      /* fall through to the disk check */
     }
   }
-  const uri = documentDirectory ? `${documentDirectory}Granth/${name}` : "";
-  if (uri) {
-    const info = await getInfoAsync(uri).catch(() => null);
-    if (info && "exists" in info && info.exists && "size" in info && Number(info.size) > 64) {
-      await viewPdf(uri);
-      return;
-    }
-  }
-  view?.injectJavaScript(`window.__granthOpenMiss&&window.__granthOpenMiss(${JSON.stringify(rawName)});true;`);
+  const uri = savedUri(name);
+  if (!uri) return "";
+  const info = await getInfoAsync(uri).catch(() => null);
+  return info && "exists" in info && info.exists && "size" in info && Number(info.size) > 64 ? uri : "";
 }
 
-async function placeFile(message: SaveChunk, parts: Map<string, string[]>) {
+async function shareFile(uri: string, name: string, mime?: string): Promise<Reply> {
+  if (!(await Sharing.isAvailableAsync())) return { ok: false, error: "no-share" };
+  try {
+    await Sharing.shareAsync(uri, { mimeType: mimeOf(name, mime), dialogTitle: name });
+    return { ok: true, uri };
+  } catch (error) {
+    return { ok: false, error: errorCode(error, "share") };
+  }
+}
+
+/** Public copy: PDFs → Downloads, pictures → Pictures/Granth (MediaStore, no permission needed on Android 10+). */
+async function publish(uri: string, name: string, mime?: string): Promise<Reply> {
+  const writer = files();
+  const pdf = isPdf(name, mime);
+  const copy = pdf ? writer?.copyToDownloads : writer?.copyToPictures;
+  if (!copy) return { ok: false, error: "unsupported" };
+  try {
+    const where = await copy(uri, name, mimeOf(name, mime));
+    return { ok: true, uri: where };
+  } catch (error) {
+    return { ok: false, error: errorCode(error, "copy") };
+  }
+}
+
+async function viewFile(uri: string, name: string, mime?: string): Promise<Reply> {
+  try {
+    const contentUri = await getContentUriAsync(uri);
+    const viewer = files()?.viewUri;
+    if (!viewer) return { ok: false, error: "unsupported" };
+    await viewer(contentUri, mimeOf(name, mime));
+    return { ok: true, uri: contentUri };
+  } catch (error) {
+    const code = errorCode(error, "open");
+    if (code === "no-viewer") {
+      // No PDF viewer installed: offer the share sheet (Drive, Files, …) instead.
+      void shareFile(uri, name, mime);
+    }
+    return { ok: false, error: code };
+  }
+}
+
+async function shareSaved(rawName: string): Promise<Reply> {
+  const name = safeName(rawName);
+  const uri = await existing(name);
+  if (!uri) return { ok: false, error: "missing" };
+  return shareFile(uri, name);
+}
+
+async function exportSaved(rawName: string): Promise<Reply> {
+  const name = safeName(rawName);
+  const uri = await existing(name);
+  if (!uri) return { ok: false, error: "missing" };
+  return publish(uri, name);
+}
+
+async function openSaved(rawName: string): Promise<Reply> {
+  const name = safeName(rawName);
+  const uri = await existing(name);
+  if (!uri) return { ok: false, error: "missing" };
+  return viewFile(uri, name);
+}
+
+/** Collects chunks; once the file is complete, writes it and performs the requested action. */
+async function placeFile(message: SaveChunk, parts: Map<string, string[]>): Promise<Reply | null> {
   const bucket = parts.get(message.id) ?? [];
   bucket[message.index] = message.data;
   parts.set(message.id, bucket);
-  if (bucket.filter((part) => part != null && part.length > 0).length < message.total) return;
+  if (bucket.filter((part) => part != null && part.length > 0).length < message.total) return null;
   parts.delete(message.id);
   const name = safeName(message.name);
   const job = writeFile(message, name, bucket);
   writing.set(name, job);
+  let uri = "";
   try {
-    await job;
+    uri = await job;
+  } catch (error) {
+    return { ok: false, error: errorCode(error, "write") };
   } finally {
     if (writing.get(name) === job) writing.delete(name);
   }
+  if (!uri) return { ok: false, error: "write" };
+  if (message.type === "share-chunk") return shareFile(uri, name, message.mime);
+  if (message.type === "open-chunk") return viewFile(uri, name, message.mime);
+  return publish(uri, name, message.mime);
 }
 
 async function writeFile(message: SaveChunk, name: string, chunks: string[]) {
-  const pdf = (message.mime || "").includes("pdf") || name.toLowerCase().endsWith(".pdf");
-  const root = pdf ? documentDirectory || cacheDirectory : cacheDirectory;
-  if (!root) return "";
+  const pdf = isPdf(name, message.mime);
   if (pdf && documentDirectory) {
     await makeDirectoryAsync(`${documentDirectory}Granth`, { intermediates: true }).catch(() => undefined);
   }
-  const uri = pdf && documentDirectory ? `${documentDirectory}Granth/${name}` : `${root}${name}`;
-  const writer = NativeModules.GranthDownloads as {
-    beginWrite?: (path: string) => Promise<boolean>;
-    appendWrite?: (path: string, data: string) => Promise<number>;
-    finishWrite?: (path: string) => Promise<number>;
-    copyToDownloads?: (path: string, name: string, mime: string) => Promise<string>;
-  } | undefined;
+  const uri = savedUri(name);
+  if (!uri) return "";
+  const writer = files();
   try {
     if (writer?.beginWrite && writer.appendWrite && writer.finishWrite) {
       await writer.beginWrite(uri);
@@ -515,39 +595,7 @@ async function writeFile(message: SaveChunk, name: string, chunks: string[]) {
     await deleteAsync(uri, { idempotent: true }).catch(() => undefined);
     throw error;
   }
-  if (pdf) {
-    if (writer?.copyToDownloads && message.type === "save-chunk") {
-      await writer.copyToDownloads(uri, name, "application/pdf").catch(() => undefined);
-    }
-  }
-  if (message.type === "share-chunk") {
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(uri, { mimeType: message.mime || (pdf ? "application/pdf" : "image/jpeg"), dialogTitle: name });
-    }
-    return uri;
-  }
-  if (message.type === "open-chunk") {
-    await viewPdf(uri);
-    return uri;
-  }
-  if (!pdf) {
-    try {
-      const permission = await MediaLibrary.requestPermissionsAsync(true, ["photo"]);
-      if (permission.granted) await MediaLibrary.saveToLibraryAsync(uri);
-    } catch {
-      /* album permission can be denied; the in-app gallery copy remains */
-    }
-  }
   return uri;
-}
-
-async function viewPdf(uri: string) {
-  const contentUri = await getContentUriAsync(uri);
-  void IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
-    data: contentUri,
-    type: "application/pdf",
-    flags: 1,
-  }).catch(() => undefined);
 }
 
 const styles = StyleSheet.create({
