@@ -1,13 +1,16 @@
 [
   {
-    "relation": ["delegate_permission/common.handle_all_urls"],
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
     "target": {
       "namespace": "android_app",
       "package_name": "com.wnm.granthprabandhan",
       "sha256_cert_fingerprints": [
         "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C",
         "E5:43:C3:27:F6:07:23:1B:B5:25:62:C6:CE:B5:68:09:94:4E:1F:B7:BF:21:9B:AD:27:C8:F8:12:3F:1E:1F:8F",
-        "68:C7:CF:34:EC:F0:FA:DA:21:05:C2:65:D2:59:54:96:BA:A1:BB:C9:7C:3F:DD:BC:35:D2:1D:BE:8D:0E:DD:DE"
+        "68:C7:CF:34:EC:F0:FA:DA:21:05:C2:65:D2:59:54:96:BA:A1:BB:C9:7C:3F:DD:BC:35:D2:1D:BE:8D:0E:DD:DE",
+        "01:F2:87:C6:02:C0:72:A5:CB:B3:F7:FF:23:37:62:1C:32:CA:AD:D4:6D:78:C4:79:3E:B1:22:FF:5D:9D:89:86"
       ]
     }
   }
