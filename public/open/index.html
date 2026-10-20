@@ -4,36 +4,57 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ग्रंथ प्रबंधन</title>
-    <meta name="description" content="ग्रंथ प्रबंधन ऐप में खोलें। ऐप न हो तो Play Store।" />
+    <meta name="description" content="ग्रंथ प्रबंधन में यह विषय, ग्रंथ या प्रमाण खोलें।" />
     <meta property="og:title" content="ग्रंथ प्रबंधन" />
-    <meta property="og:description" content="यह लिंक ऐप में ग्रंथ, विषय या प्रमाण खोलता है।" />
+    <meta property="og:description" content="यह लिंक ग्रंथ प्रबंधन में ग्रंथ, विषय या प्रमाण खोलता है।" />
     <meta property="og:image" content="https://granth.grok.me/og.jpg" />
     <style>
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fdf6e3; color: #4a2c0a; font-family: sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fdf6e3; color: #4a2c0a; font-family: "Noto Sans Devanagari", sans-serif; }
       section { width: min(420px, calc(100% - 32px)); background: #fffdf7; border: 1px solid #e2c97e; border-radius: 18px; padding: 22px; }
       h1 { margin: 0 0 8px; color: #7b1f2e; font-size: 32px; font-weight: 500; }
       p { line-height: 1.5; }
       a { display: inline-block; margin: 6px 8px 0 0; border-radius: 999px; padding: 10px 16px; font-weight: 700; text-decoration: none; }
       .go { background: #7b1f2e; color: #fffdf7; }
-      .store { border: 1px solid #7b1f2e; color: #7b1f2e; }
+      .store, .web { border: 1px solid #7b1f2e; color: #7b1f2e; }
     </style>
   </head>
   <body>
     <section>
       <h1>ग्रंथ प्रबंधन</h1>
-      <p>ऐप खुल रही है। ऐप इस फ़ोन में न हो तो Play Store पर ग्रंथ प्रबंधन खुल जाएगा।</p>
-      <a id="go" class="go" href="#">ऐप खोलें</a>
+      <p id="msg">लिंक खुल रहा है…</p>
+      <a id="go" class="go" href="#">ऐप में खोलें</a>
+      <a id="web" class="web" href="/">वेब पर देखें</a>
       <a id="store" class="store" href="https://play.google.com/store/apps/details?id=com.wnm.granthprabandhan">Play Store</a>
     </section>
     <script>
       (function () {
-        var play = "https://play.google.com/store/apps/details?id=com.wnm.granthprabandhan";
-        var intent = "intent://open" + location.search + "#Intent;scheme=granth;package=com.wnm.granthprabandhan;S.browser_fallback_url=" + encodeURIComponent(play) + ";end";
-        var go = document.getElementById("go");
-        if (go) go.setAttribute("href", intent);
+        var params = new URLSearchParams(location.search);
+        var hash = "#/dashboard";
+        var granth = params.get("granth"), topic = params.get("topic"), id = params.get("id");
+        if (granth) hash = "#/pramans?granth=" + encodeURIComponent(granth);
+        else if (topic) hash = "#/pramans?topic=" + encodeURIComponent(topic);
+        else if (id) hash = "#/pramans?id=" + encodeURIComponent(id);
+        var webUrl = "/" + hash;
+        var web = document.getElementById("web");
+        if (web) web.setAttribute("href", webUrl);
+        var android = /Android/i.test(navigator.userAgent || "");
+        if (!android) {
+          // iOS, desktop and everything else: there is no app, so show the shared item on the web.
+          var go = document.getElementById("go");
+          if (go) go.style.display = "none";
+          var store = document.getElementById("store");
+          if (store) store.style.display = "none";
+          location.replace(webUrl);
+          return;
+        }
+        var intent = "intent://open" + location.search + "#Intent;scheme=granth;package=com.wnm.granthprabandhan;S.browser_fallback_url=" + encodeURIComponent(location.origin + webUrl) + ";end";
+        var goLink = document.getElementById("go");
+        if (goLink) goLink.setAttribute("href", intent);
+        var msg = document.getElementById("msg");
+        if (msg) msg.textContent = "ऐप खुल रही है। ऐप न हो तो यह प्रमाण वेब पर खुलेगा, या Play Store से ऐप लें।";
         var timer = setTimeout(function () {
-          if (document.visibilityState === "visible") location.replace(play);
-        }, 2200);
+          if (document.visibilityState === "visible") location.replace(webUrl);
+        }, 2500);
         document.addEventListener("visibilitychange", function () {
           if (document.visibilityState === "hidden") clearTimeout(timer);
         });
