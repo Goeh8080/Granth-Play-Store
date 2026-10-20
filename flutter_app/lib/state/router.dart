@@ -1,0 +1,193 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+
+import '../services/events.dart';
+import '../services/storage.dart';
+
+enum Panel { dashboard, topics, granths, pramans, gallery }
+
+/// `ig()` — the parsed hash route of the web app (`#/pramans?topic=…`).
+@immutable
+class GRoute {
+  const GRoute(this.panel, {this.topicId, this.granthId, this.pramanId});
+  final Panel panel;
+  final String? topicId;
+  final String? granthId;
+  final String? pramanId;
+
+  static GRoute parse(String hash) {
+    final raw = hash.replaceFirst(RegExp('^#'), '');
+    final parts = (raw.isEmpty ? '/dashboard' : raw).split('?');
+    final path = parts.first.isEmpty ? '/dashboard' : parts.first;
+    final q = parts.length > 1 ? Uri.splitQueryString(parts[1].split('#').first) : const <String, String>{};
+    String? v(String k) => (q[k] ?? '').isEmpty ? null : q[k];
+    if (path.startsWith('/gallery')) return const GRoute(Panel.gallery);
+    if (path.startsWith('/topics')) return const GRoute(Panel.topics);
+    if (path.startsWith('/granths')) return const GRoute(Panel.granths);
+    if (path.startsWith('/pramans')) return GRoute(Panel.pramans, topicId: v('topic'), granthId: v('granth'), pramanId: v('id'));
+    return const GRoute(Panel.dashboard);
+  }
+
+  String get key => '${panel.name}:${topicId ?? ''}:${granthId ?? ''}:${pramanId ?? ''}';
+
+  @override
+  bool operator ==(Object other) => other is GRoute && other.key == key;
+  @override
+  int get hashCode => key.hashCode;
+}
+
+const _topHashes = {'#/dashboard', '#/topics', '#/granths', '#/pramans', '#/gallery'};
+
+bool _isDash(String h) => h == '#/dashboard' || h == '#/' || h.isEmpty || h.startsWith('#/dashboard');
+
+/// Hash-history navigation exactly like `N()` / `__granthBack` in the original shell.
+class AppNav extends ChangeNotifier {
+  AppNav();
+  static AppNav I = AppNav();
+  String _hash = '#/dashboard';
+  GRoute route = const GRoute(Panel.dashboard);
+  final List<String> _stack = [];
+  int _forward = 1; // +1 = drilling in, -1 = going back (for the shared-axis direction)
+  int _lastGo = 0;
+  String _lastGoHash = '';
+  int _lastBack = 0;
+  int _lastDashBack = 0;
+  bool menuOpen = false;
+
+  /// Called when the user should see the exit confirmation.
+  VoidCallback? onExitRequest;
+
+  String get hash => _hash;
+  int get direction => _forward;
+  List<String> get debugStack => List.unmodifiable(_stack);
+
+  void restore() {
+    final saved = Store.I.ready ? Store.I.getString(Store.kHash) : null;
+    if (saved != null && saved.startsWith('#/')) _set(saved, notify: false);
+  }
+
+  void _persistStack() {
+    if (!Store.I.ready) return;
+    final s = _stack.length > 24 ? _stack.sublist(_stack.length - 24) : _stack;
+    Store.I.setString('granth-nav', jsonEncode(s));
+  }
+
+  void _set(String h, {bool notify = true}) {
+    final changed = h != _hash;
+    _hash = h;
+    final next = GRoute.parse(h);
+    final before = route;
+    route = next;
+    if (Store.I.ready) Store.I.setString(Store.kHash, h);
+    if (changed || before != next) {
+      menuOpen = false;
+      if (next.topicId != null) EventLog.I.log('topic_open', next.topicId!);
+      if (next.granthId != null) EventLog.I.log('granth_open', next.granthId!);
+      if (next.pramanId != null) EventLog.I.log('praman_open', next.pramanId!);
+    }
+    if (notify) notifyListeners();
+  }
+
+  /// `N()`
+  void go(String h) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_lastGoHash == h && now - _lastGo < 400) return;
+    _lastGoHash = h;
+    _lastGo = now;
+    beforeLeave?.call();
+    if (_hash == h) {
+      route = GRoute.parse(h);
+      menuOpen = false;
+      notifyListeners();
+      return;
+    }
+    if (h == '#/dashboard' || h == '#/') {
+      _stack.clear();
+    } else if (_topHashes.contains(h) || _isDash(_hash)) {
+      _stack
+        ..clear()
+        ..add('#/dashboard');
+    } else if (_stack.isEmpty || _stack.last != _hash) {
+      _stack.add(_hash);
+    }
+    _forward = 1;
+    _persistStack();
+    _set(h);
+  }
+
+  /// `__granthOpenLink` — deep link: remember where we were.
+  void openLink(String h) {
+    if (_hash != h) _stack.add(_hash);
+    _forward = 1;
+    _persistStack();
+    _set(h);
+  }
+
+  /// Route-level part of `__granthBack` (overlays are popped by the Navigator first).
+  void back() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_isDash(_hash)) {
+      _stack.clear();
+      _persistStack();
+      if (now - _lastDashBack > 80 && now - _lastDashBack < 900) {
+        _lastDashBack = 0;
+        onExitRequest?.call();
+      } else {
+        _lastDashBack = now;
+      }
+      return;
+    }
+    if (now - _lastBack < 260) return;
+    _lastBack = now;
+    beforeLeave?.call();
+    _forward = -1;
+    while (_stack.isNotEmpty) {
+      final e = _stack.removeLast();
+      if (e.isEmpty || e == _hash) continue;
+      final dash = _isDash(e);
+      if (dash) _stack.clear();
+      _persistStack();
+      _set(dash ? '#/dashboard' : e);
+      return;
+    }
+    _stack.clear();
+    _persistStack();
+    _set('#/dashboard');
+  }
+
+  void toggleMenu() {
+    menuOpen = !menuOpen;
+    notifyListeners();
+  }
+
+  /// Hook for the shell to remember the scroll place (`yh()`).
+  VoidCallback? beforeLeave;
+
+  /// `ae()` — which stat button is lit.
+  bool isActive(Panel p) {
+    final r = route;
+    switch (p) {
+      case Panel.topics:
+        return r.panel == Panel.topics || (r.panel == Panel.pramans && r.topicId != null && r.granthId == null);
+      case Panel.granths:
+        return r.panel == Panel.granths || (r.panel == Panel.pramans && r.granthId != null);
+      case Panel.pramans:
+        return r.panel == Panel.pramans && r.topicId == null && r.granthId == null;
+      default:
+        return r.panel == p;
+    }
+  }
+}
+
+/// Deep link → hash (`granth://open?topic=…`, `https://granth.grok.me/open?id=…`).
+String? hashFromLink(Uri u) {
+  final ok = (u.scheme == 'granth') || ((u.scheme == 'https' || u.scheme == 'http') && u.host == 'granth.grok.me' && u.path.startsWith('/open'));
+  if (!ok) return null;
+  final q = u.queryParameters;
+  if ((q['topic'] ?? '').isNotEmpty) return '#/pramans?topic=${q['topic']}';
+  if ((q['granth'] ?? '').isNotEmpty) return '#/pramans?granth=${q['granth']}';
+  if ((q['id'] ?? '').isNotEmpty) return '#/pramans?id=${q['id']}';
+  if (u.fragment.startsWith('/')) return '#${u.fragment}';
+  return '#/dashboard';
+}

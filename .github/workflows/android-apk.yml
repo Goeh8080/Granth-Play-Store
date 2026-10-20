@@ -1,56 +1,44 @@
-name: Android APK
+name: Android APK (Flutter)
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, flutter-port]
+  pull_request:
   workflow_dispatch:
 
 jobs:
   apk:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    defaults:
+      run:
+        working-directory: flutter_app
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: mobile/package-lock.json
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
       - name: Install
-        working-directory: mobile
-        run: npm ci
+        run: flutter pub get
 
-      - name: Android SDK packages
-        run: |
-          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-            SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          else
-            SM="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
-          fi
-          test -n "$SM"
-          yes | "$SM" --licenses >/dev/null || true
-          "$SM" --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+      - name: Analyze
+        run: flutter analyze
 
-      - name: Build APK and AAB
-        working-directory: mobile/android
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace -PverCode=15 -PverName=1.0.0 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+      - name: Test
+        run: flutter test
+
+      - name: Build APK
+        run: flutter build apk --release
 
       - uses: actions/upload-artifact@v4
         with:
-          name: granth-prabandhan-1.0.0
-          path: |
-            mobile/android/app/build/outputs/apk/release/*.apk
-            mobile/android/app/build/outputs/bundle/release/*.aab
+          name: granth-flutter-apk
+          path: flutter_app/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
