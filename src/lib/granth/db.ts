@@ -3,11 +3,20 @@ import type { Catalog, GalleryFolder, GalleryItem } from "./types";
 const DB_NAME = "granth-offline";
 const DB_VERSION = 2;
 
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+/**
+ * One shared IndexedDB connection for the whole app. Opening a new connection
+ * per call (thousands of times while caching images) was slow and could block a
+ * future DB_VERSION upgrade, so the connection is cached and closed when another
+ * tab asks for a version change.
+ */
 function openDb(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") {
     return Promise.reject(new Error("offline store unavailable"));
   }
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -16,9 +25,27 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains("gallery")) db.createObjectStore("gallery", { keyPath: "id" });
       if (!db.objectStoreNames.contains("folders")) db.createObjectStore("folders", { keyPath: "id" });
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onblocked = () => {
+      /* another tab still holds the old version; it closes on versionchange */
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+      };
+      db.onclose = () => {
+        dbPromise = null;
+      };
+      resolve(db);
+    };
     request.onerror = () => reject(request.error ?? new Error("idb open failed"));
   });
+  dbPromise = opening;
+  opening.catch(() => {
+    if (dbPromise === opening) dbPromise = null;
+  });
+  return opening;
 }
 
 function txDone(tx: IDBTransaction): Promise<void> {

@@ -15,25 +15,70 @@ export function ping(message: string | ToastPayload) {
 
 type NativeBridge = { postMessage: (message: string) => void };
 
+/** What the Android shell answers for every file request. */
+export type NativeReply = { ok: boolean; error?: string; uri?: string };
+
 type GranthWindow = Window & {
+  /** Token-checked bridge installed by the Android shell (main frame only). */
+  __granthNative?: NativeBridge;
   ReactNativeWebView?: NativeBridge;
-  __granthOpenMiss?: (name: string) => void;
-  __granthShareHit?: (name: string) => void;
-  __granthShareMiss?: (name: string) => void;
-  __granthExportHit?: (name: string) => void;
-  __granthExportMiss?: (name: string) => void;
+  __granthReply?: (id: string, reply: NativeReply) => void;
 };
 
-function nativeBridge(): NativeBridge | null {
+/** The Android app bridge, or null on the web. */
+export function nativeBridge(): NativeBridge | null {
   if (typeof window === "undefined") return null;
-  const bridge = (window as GranthWindow).ReactNativeWebView;
+  const host = window as GranthWindow;
+  const bridge = host.__granthNative ?? host.ReactNativeWebView;
   return bridge && typeof bridge.postMessage === "function" ? bridge : null;
+}
+
+export function inNativeApp() {
+  return nativeBridge() !== null;
+}
+
+const replies = new Map<string, (reply: NativeReply) => void>();
+
+function installReply() {
+  const host = window as GranthWindow;
+  if (host.__granthReply) return;
+  host.__granthReply = (id, reply) => {
+    const done = replies.get(id);
+    if (!done) return;
+    replies.delete(id);
+    done(reply);
+  };
+}
+
+let seq = 0;
+function requestId() {
+  seq += 1;
+  return `${Date.now().toString(36)}-${seq}`;
+}
+
+/** Send one request to the Android shell and wait for its answer. */
+function callNative(message: Record<string, unknown>, timeoutMs: number): Promise<NativeReply> {
+  const bridge = nativeBridge();
+  if (!bridge) return Promise.resolve({ ok: false, error: "no-bridge" });
+  installReply();
+  const reqId = (message.reqId as string) || requestId();
+  return new Promise<NativeReply>((resolve) => {
+    const timer = window.setTimeout(() => {
+      replies.delete(reqId);
+      resolve({ ok: false, error: "timeout" });
+    }, timeoutMs);
+    replies.set(reqId, (reply) => {
+      window.clearTimeout(timer);
+      resolve(reply);
+    });
+    bridge.postMessage(JSON.stringify({ ...message, reqId }));
+  });
 }
 
 const SITE = "https://granth.grok.me/open";
 
 export function publicLink(kind: "topic" | "granth" | "praman", id: string) {
-  if (!id) return "granth://open";
+  if (!id) return "https://granth.grok.me/";
   const key = kind === "praman" ? "id" : kind;
   return `${SITE}?${key}=${encodeURIComponent(id)}`;
 }
@@ -56,7 +101,7 @@ export async function shareLink(title: string, url: string) {
   }
   if (typeof navigator.share === "function") {
     try {
-      await navigator.share({ title, text });
+      await navigator.share({ title, text, url: url || undefined });
       return;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -79,7 +124,15 @@ export function openMail(email: string) {
   window.location.href = `mailto:${email}`;
 }
 
-async function chunkBase64(bytes: Uint8Array): Promise<string> {
+/** Ask the Android app to close (exit dialog). Returns false on the web, where a page cannot close itself. */
+export function exitNativeApp() {
+  const bridge = nativeBridge();
+  if (!bridge) return false;
+  bridge.postMessage(JSON.stringify({ type: "exit-app" }));
+  return true;
+}
+
+function toBase64(bytes: Uint8Array): string {
   let binary = "";
   const size = 0x8000;
   for (let index = 0; index < bytes.length; index += size) {
@@ -88,49 +141,67 @@ async function chunkBase64(bytes: Uint8Array): Promise<string> {
   return btoa(binary);
 }
 
-const openBlobs = new Map<string, Blob>();
-const saving = new Map<string, Promise<void>>();
+type Mode = "save" | "share" | "open";
 
-function rememberOpen(name: string, blob: Blob) {
-  openBlobs.set(name, blob);
-  const host = window as GranthWindow;
-  host.__granthOpenMiss = (missed) => {
-    const stored = openBlobs.get(missed) ?? openBlobs.get(name);
-    if (!stored) return;
-    openBlobs.delete(missed);
-    void handoff(stored, missed, "open");
-  };
-}
+/** ~256 KB per message: 5× fewer bridge round trips than before, still well inside WebView limits. */
+const CHUNK_BYTES = 3 * 87_381;
 
-async function handoff(blob: Blob, name: string, mode: "save" | "share" | "open") {
+/**
+ * Stream a file to the Android app in base64 chunks. Resolves with the
+ * native result (written, copied to Downloads/Gallery, opened, shared).
+ */
+async function handoff(blob: Blob, name: string, mode: Mode): Promise<NativeReply> {
   const bridge = nativeBridge();
-  if (!bridge || blob.size < 64) return false;
-  const raw = 48_000;
-  const total = Math.max(1, Math.ceil(blob.size / raw));
-  const id = `${Date.now()}-${name}`;
+  if (!bridge) return { ok: false, error: "no-bridge" };
+  if (blob.size < 64) return { ok: false, error: "empty" };
+  const total = Math.max(1, Math.ceil(blob.size / CHUNK_BYTES));
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const type = mode === "share" ? "share-chunk" : mode === "open" ? "open-chunk" : "save-chunk";
   const mime = blob.type || (name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+  installReply();
+  const reqId = requestId();
+  const answer = new Promise<NativeReply>((resolve) => {
+    const timer = window.setTimeout(() => {
+      replies.delete(reqId);
+      resolve({ ok: false, error: "timeout" });
+    }, 180_000);
+    replies.set(reqId, (reply) => {
+      window.clearTimeout(timer);
+      resolve(reply);
+    });
+  });
   for (let index = 0; index < total; index += 1) {
-    const slice = blob.slice(index * raw, (index + 1) * raw);
-    const data = await chunkBase64(new Uint8Array(await slice.arrayBuffer()));
-    bridge.postMessage(JSON.stringify({ type, id, name, mime, index, total, data }));
-    if (index % 6 === 5) await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const slice = blob.slice(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES);
+    const data = toBase64(new Uint8Array(await slice.arrayBuffer()));
+    bridge.postMessage(JSON.stringify({ type, id, reqId, name, mime, index, total, data }));
+    if (index % 4 === 3) await new Promise((resolve) => window.setTimeout(resolve, 0));
   }
-  return true;
+  return answer;
 }
 
-export function deliverFile(blob: Blob, fileName: string) {
-  const job = (async () => {
+function browserDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+const saving = new Map<string, Promise<NativeReply>>();
+
+/**
+ * Put a file on the device: in the app → private copy + Downloads (PDF) or the
+ * phone gallery (image); on the web → a normal browser download.
+ */
+export function deliverFile(blob: Blob, fileName: string): Promise<NativeReply> {
+  const job = (async (): Promise<NativeReply> => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-    if (await handoff(blob, fileName, "save")) return;
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    if (nativeBridge()) return handoff(blob, fileName, "save");
+    browserDownload(blob, fileName);
+    return { ok: true };
   })();
   saving.set(fileName, job);
   void job.finally(() => {
@@ -149,63 +220,72 @@ async function waitSaved(fileName: string) {
   }
 }
 
-function askReady(name: string, type: "share-saved" | "export-saved") {
-  const bridge = nativeBridge();
-  if (!bridge) return Promise.resolve(false);
-  return new Promise<boolean>((resolve) => {
-    const timer = window.setTimeout(() => resolve(false), 4000);
-    const host = window as GranthWindow;
-    const finish = (ok: boolean) => {
-      window.clearTimeout(timer);
-      resolve(ok);
-    };
-    if (type === "share-saved") {
-      host.__granthShareHit = (hit) => { if (hit === name) finish(true); };
-      host.__granthShareMiss = (miss) => { if (miss === name) finish(false); };
-    } else {
-      host.__granthExportHit = (hit) => { if (hit === name) finish(true); };
-      host.__granthExportMiss = (miss) => { if (miss === name) finish(false); };
-    }
-    bridge.postMessage(JSON.stringify({ type, name }));
-  });
-}
-
 export async function shareBlob(blob: Blob, fileName: string) {
   if (nativeBridge()) {
     await waitSaved(fileName);
-    if (!(await askReady(fileName, "share-saved"))) await handoff(blob, fileName, "share");
+    const known = await callNative({ type: "share-saved", name: fileName }, 8000);
+    const reply = known.ok ? known : await handoff(blob, fileName, "share");
+    if (!reply.ok && reply.error !== "cancelled") ping("शेयर नहीं हो पाया — फिर कोशिश करें");
     return;
   }
   const file = new File([blob], fileName, { type: blob.type || "application/pdf" });
   if (typeof navigator.share === "function") {
     const canFiles = typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
     try {
-      if (canFiles) await navigator.share({ files: [file], title: fileName });
-      else await navigator.share({ title: fileName, text: fileName });
-      return;
+      if (canFiles) {
+        await navigator.share({ files: [file], title: fileName });
+        return;
+      }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
     }
   }
-  await deliverFile(blob, fileName);
+  // Desktop browsers cannot share files: download it instead and say so.
+  browserDownload(blob, fileName);
+  ping("इस ब्राउज़र में शेयर नहीं होता — फ़ाइल डाउनलोड कर दी है");
 }
 
+/**
+ * Open a PDF (or image) in the phone's viewer. In the app the saved copy is
+ * opened through a content:// URI; when no viewer app exists the shell offers
+ * the share sheet instead. On the web the PDF opens in a new browser tab.
+ */
 export async function openBlob(blob: Blob, fileName: string) {
-  const bridge = nativeBridge();
-  if (bridge) {
+  if (nativeBridge()) {
     await waitSaved(fileName);
-    rememberOpen(fileName, blob);
-    bridge.postMessage(JSON.stringify({ type: "open-saved", name: fileName }));
+    let reply = await callNative({ type: "open-saved", name: fileName }, 15000);
+    if (!reply.ok && reply.error === "missing") reply = await handoff(blob, fileName, "open");
+    if (!reply.ok) {
+      ping(reply.error === "no-viewer" ? "PDF खोलने वाला ऐप नहीं मिला — शेयर से Drive/Files में खोलें" : "PDF नहीं खुली — फिर कोशिश करें");
+    }
     return;
   }
   const url = URL.createObjectURL(blob);
-  window.open(url, "_blank", "noopener,noreferrer");
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    // Pop-up blocked (common on mobile browsers): navigate a link instead.
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
 }
 
-export async function saveBlob(blob: Blob, fileName: string) {
+/** Where `saveBlob` put the file. */
+export type SaveResult = "device" | "download" | "failed";
+
+export async function saveBlob(blob: Blob, fileName: string): Promise<SaveResult> {
   if (nativeBridge()) {
     await waitSaved(fileName);
-    if (await askReady(fileName, "export-saved")) return;
+    const known = await callNative({ type: "export-saved", name: fileName }, 20000);
+    if (known.ok) return "device";
+    const reply = await deliverFile(blob, fileName);
+    return reply.ok ? "device" : "failed";
   }
-  await deliverFile(blob, fileName);
+  browserDownload(blob, fileName);
+  return "download";
 }

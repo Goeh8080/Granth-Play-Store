@@ -1,20 +1,7 @@
-const SAFE_PATH = /^(granths|uploads)\/[A-Za-z0-9_.-]+$/;
+import { safeMediaPath } from "./offline-plan";
 
 /** Only scripture image paths from the Granth API — never an open proxy. */
-export function mediaPath(input: string | null | undefined): string | null {
-  if (!input) return null;
-  let path = input.trim();
-  if (!path) return null;
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    try {
-      path = new URL(path).pathname;
-    } catch {
-      return null;
-    }
-  }
-  path = path.replace(/^\/+/, "");
-  return SAFE_PATH.test(path) ? path : null;
-}
+export const mediaPath = safeMediaPath;
 
 const ORIGIN = "https://granth.wnmsolutions.com";
 

@@ -1,14 +1,17 @@
 import { create } from "zustand";
-import { countImages, hasImage, readCatalog, readImage, savedImagePaths, writeCatalog, writeImage } from "./db";
+import { hasImage, readCatalog, readImage, savedImagePaths, writeCatalog, writeImage } from "./db";
 import { mediaPath, mediaUrl } from "./media";
-import { applyPublishedOverlay } from "./admin-db";
-import { noteEvent } from "./metrics";
+import { fullyCachedGranths, granthImagePaths } from "./offline-plan";
+import { setOfflineGranths } from "./pdf-jobs";
 import type { ApiEnvelope, Catalog, Granth, Praman, Topic } from "./types";
 
 export type SyncStatus = "booting" | "syncing" | "ready" | "offline" | "error";
 
 type ImageJob = {
+  /** Images really stored in IndexedDB. */
   done: number;
+  /** Images that could not be downloaded in the last pass. */
+  failed: number;
   total: number;
   running: boolean;
 };
@@ -31,11 +34,7 @@ type GranthState = {
 
 let bootOnce: Promise<void> | null = null;
 let saveToken = 0;
-let lastServer: Catalog | null = null;
-
-export function serverCatalog(): Catalog | null {
-  return lastServer;
-}
+let syncing: Promise<void> | null = null;
 
 const ORIGIN = "https://granth.wnmsolutions.com";
 
@@ -112,14 +111,30 @@ function collectImagePaths(catalog: Catalog): string[] {
   return [...groups.first, ...groups.rest];
 }
 
-async function cacheImage(path: string): Promise<boolean> {
-  if (await hasImage(path)) return true;
-  const response = await fetch(mediaUrl(path));
-  if (!response.ok) return false;
-  const blob = await response.blob();
-  if (!blob.type.startsWith("image/") || blob.size < 32) return false;
-  await writeImage(path, blob);
-  return true;
+/** True only when the image is (now) stored on the device. */
+export async function cacheImage(path: string): Promise<boolean> {
+  try {
+    if (await hasImage(path)) return true;
+    const response = await fetch(mediaUrl(path));
+    if (!response.ok) return false;
+    const blob = await response.blob();
+    if (!isImageBlob(blob)) return false;
+    await writeImage(path, blob);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isImageBlob(blob: Blob | null | undefined): blob is Blob {
+  return Boolean(blob && blob.size >= 32 && (!blob.type || blob.type.startsWith("image/")));
+}
+
+async function refreshOfflineGranths(catalog: Pick<Catalog, "granths" | "pramans">) {
+  const needs = granthImagePaths(catalog.granths, catalog.pramans);
+  const all = [...new Set([...needs.values()].flat())];
+  const saved = await savedImagePaths(all).catch(() => new Set<string>());
+  setOfflineGranths(fullyCachedGranths(needs, saved));
 }
 
 export const useGranth = create<GranthState>((set, get) => ({
@@ -130,7 +145,7 @@ export const useGranth = create<GranthState>((set, get) => ({
   status: "booting",
   online: true,
   error: null,
-  images: { done: 0, total: 0, running: false },
+  images: { done: 0, failed: 0, total: 0, running: false },
   booted: false,
   boot: () => {
     if (bootOnce) return bootOnce;
@@ -140,15 +155,17 @@ export const useGranth = create<GranthState>((set, get) => ({
       try {
         const cached = await readCatalog();
         if (cached) {
-          const saved = await countImages().catch(() => 0);
+          const paths = collectImagePaths(cached);
+          const saved = await savedImagePaths(paths).catch(() => new Set<string>());
           set({
             topics: cached.topics,
             granths: cached.granths,
             pramans: cached.pramans,
             syncedAt: cached.syncedAt,
             status: online ? "ready" : "offline",
-            images: { done: saved, total: collectImagePaths(cached).length, running: false },
+            images: { done: saved.size, failed: 0, total: paths.length, running: false },
           });
+          void refreshOfflineGranths(cached);
         }
       } catch {
         /* first run has no store */
@@ -169,43 +186,50 @@ export const useGranth = create<GranthState>((set, get) => ({
     })();
     return bootOnce;
   },
-  sync: async () => {
-    const online = typeof navigator === "undefined" ? true : navigator.onLine;
-    if (!online) {
-      const hasCache = Boolean(get().topics.length || get().granths.length || get().syncedAt);
-      set({
-        online: false,
-        status: hasCache ? "offline" : "error",
-        error: hasCache ? null : "डेटा नहीं आ पाया। इंटरनेट चेक करके फिर सिंक करें।",
-      });
-      return;
-    }
-    set({ status: "syncing", online: true, error: null });
-    try {
-      const pulled = await pullCatalog();
-      lastServer = pulled;
-      const catalog = await applyPublishedOverlay(lastServer);
-      await writeCatalog(catalog);
-      const saved = await countImages().catch(() => 0);
-      set({
-        topics: catalog.topics,
-        granths: catalog.granths,
-        pramans: catalog.pramans,
-        syncedAt: catalog.syncedAt,
-        status: "ready",
-        error: null,
-        images: { done: saved, total: collectImagePaths(catalog).length, running: get().images.running },
-      });
-      noteEvent("sync", "catalog");
-    } catch {
-      const hasCache = Boolean(get().syncedAt);
-      set({
-        status: hasCache ? "ready" : "error",
-        error: hasCache
-          ? "नया डेटा नहीं मिला। सेव की हुई कॉपी चल रही है।"
-          : "डेटा नहीं आ पाया। इंटरनेट चेक करके फिर सिंक करें।",
-      });
-    }
+  sync: () => {
+    // Timer, resume, the online event and the button can all ask at once;
+    // share one request instead of pulling the whole catalog several times.
+    if (syncing) return syncing;
+    const job = (async () => {
+      const online = typeof navigator === "undefined" ? true : navigator.onLine;
+      if (!online) {
+        const hasCache = Boolean(get().topics.length || get().granths.length || get().syncedAt);
+        set({
+          online: false,
+          status: hasCache ? "offline" : "error",
+          error: hasCache ? null : "डेटा नहीं आ पाया। इंटरनेट चेक करके फिर सिंक करें।",
+        });
+        return;
+      }
+      set({ status: "syncing", online: true, error: null });
+      try {
+        const catalog = await pullCatalog();
+        await writeCatalog(catalog);
+        const paths = collectImagePaths(catalog);
+        const saved = await savedImagePaths(paths).catch(() => new Set<string>());
+        set({
+          topics: catalog.topics,
+          granths: catalog.granths,
+          pramans: catalog.pramans,
+          syncedAt: catalog.syncedAt,
+          status: "ready",
+          error: null,
+          images: { ...get().images, done: saved.size, total: paths.length },
+        });
+      } catch {
+        const hasCache = Boolean(get().syncedAt);
+        set({
+          status: hasCache ? "ready" : "error",
+          error: hasCache
+            ? "नया डेटा नहीं मिला। सेव की हुई कॉपी चल रही है।"
+            : "डेटा नहीं आ पाया। इंटरनेट चेक करके फिर सिंक करें।",
+        });
+      }
+    })();
+    syncing = job.finally(() => {
+      syncing = null;
+    });
+    return syncing;
   },
   savePages: () => {
     const catalog: Catalog = {
@@ -218,10 +242,11 @@ export const useGranth = create<GranthState>((set, get) => ({
     const paths = [...groups.first, ...groups.rest];
     if (!paths.length) return;
     const token = ++saveToken;
-    set({ images: { done: get().images.done, total: paths.length, running: true } });
+    set({ images: { done: get().images.done, failed: 0, total: paths.length, running: true } });
     void (async () => {
-      const have = await savedImagePaths(paths);
+      const have = await savedImagePaths(paths).catch(() => new Set<string>());
       let done = 0;
+      let failed = 0;
       const pendingFirst: string[] = [];
       const pendingRest: string[] = [];
       for (const path of groups.first) {
@@ -233,55 +258,42 @@ export const useGranth = create<GranthState>((set, get) => ({
         else pendingRest.push(path);
       }
       if (token !== saveToken) return;
-      set({ images: { done, total: paths.length, running: pendingFirst.length + pendingRest.length > 0 } });
-      const drain = async (pending: string[]) => {
+      const pending = pendingFirst.length + pendingRest.length;
+      set({ images: { done, failed, total: paths.length, running: pending > 0 } });
+      let settled = 0;
+      const drain = async (queue: string[]) => {
         let cursor = 0;
         const worker = async () => {
           while (token === saveToken) {
             const index = cursor;
             cursor += 1;
-            if (index >= pending.length) return;
-            const path = pending[index];
+            if (index >= queue.length) return;
+            const path = queue[index];
             if (!path) return;
-            try {
-              await cacheImage(path);
-            } catch {
-              /* keep going — text library still works */
-            }
-            done += 1;
-            if (token === saveToken && (done % 3 === 0 || done === paths.length)) {
-              set({ images: { done, total: paths.length, running: done < paths.length } });
+            // Count an image as saved only when it is really in IndexedDB.
+            if (await cacheImage(path)) done += 1;
+            else failed += 1;
+            settled += 1;
+            if (token === saveToken && (settled % 4 === 0 || settled === pending)) {
+              set({ images: { done, failed, total: paths.length, running: settled < pending } });
             }
           }
         };
-        const width = Math.min(6, pending.length);
+        const width = Math.min(6, queue.length);
         if (width > 0) await Promise.all(Array.from({ length: width }, () => worker()));
       };
       await drain(pendingFirst);
       await drain(pendingRest);
-      if (token === saveToken) {
-        set({ images: { done: paths.length, total: paths.length, running: false } });
-      }
+      if (token !== saveToken) return;
+      set({ images: { done, failed, total: paths.length, running: false } });
+      await refreshOfflineGranths(catalog);
     })();
   },
   stopSave: () => {
     saveToken += 1;
-    set({ images: { done: get().images.done, total: get().images.total, running: false } });
+    set({ images: { ...get().images, running: false } });
   },
 }));
-
-export async function refreshAdminOverlay(): Promise<void> {
-  if (!lastServer) return;
-  const merged = await applyPublishedOverlay({ ...lastServer, syncedAt: Date.now() });
-  await writeCatalog(merged);
-  useGranth.setState({
-    topics: merged.topics,
-    granths: merged.granths,
-    pramans: merged.pramans,
-    syncedAt: merged.syncedAt,
-    status: "ready",
-  });
-}
 
 export async function cachedObjectUrl(path: string): Promise<string | null> {
   const blob = await readImage(path);
