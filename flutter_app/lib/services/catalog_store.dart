@@ -8,6 +8,7 @@ import '../models/models.dart';
 import 'api.dart';
 import 'events.dart';
 import 'image_cache.dart';
+import 'search.dart';
 import 'storage.dart';
 
 enum SyncStatus { booting, ready, offline, syncing, error }
@@ -24,7 +25,9 @@ const kStaleError = 'नया डेटा नहीं मिला। से�
 
 /// The zustand store `cn` from the web bundle: boot → cached catalog → sync → save pages offline.
 class CatalogStore extends ChangeNotifier {
-  CatalogStore({Api? api, Stream<List<ConnectivityResult>>? connectivity}) : _api = api ?? Api(), _connectivity = connectivity;
+  CatalogStore({Api? api, Stream<List<ConnectivityResult>>? connectivity})
+      : _api = api ?? Api(),
+        _connectivity = connectivity;
   static CatalogStore? _instance;
   static CatalogStore get I => _instance ??= CatalogStore();
   static set I(CatalogStore v) => _instance = v;
@@ -49,9 +52,59 @@ class CatalogStore extends ChangeNotifier {
   int? get syncedAt => _catalog.syncedAt;
   bool get hasData => topics.isNotEmpty || granths.isNotEmpty;
 
+  // ---------- search index (built once per catalog, off the UI thread) ----------
+
+  /// Bumped whenever the catalog lists are replaced; screens rebuild only then.
+  int catalogVersion = 0;
+  final Map<String, SearchDoc> _pDocs = {};
+  final Map<String, SearchDoc> _tDocs = {};
+  final Map<String, SearchDoc> _gDocs = {};
+
+  static List<String?> pramanFields(Praman p) => [p.title, p.description, p.topicTitle, p.granthTitle, p.granthAuthor, p.youtubeDesc];
+  static List<String?> topicFields(Topic t) => [t.title, t.description];
+  static List<String?> granthFields(Granth g) => [g.title, g.author, g.description];
+
+  SearchDoc pramanDoc(Praman p) => _pDocs[p.id] ??= docOf(pramanFields(p));
+  SearchDoc topicDoc(Topic t) => _tDocs[t.id] ??= docOf(topicFields(t));
+  SearchDoc granthDoc(Granth g) => _gDocs[g.id] ??= docOf(granthFields(g));
+
+  void _catalogChanged({bool warm = true}) {
+    catalogVersion++;
+    _pDocs.clear();
+    _tDocs.clear();
+    _gDocs.clear();
+    if (warm) unawaited(_warmIndex());
+  }
+
+  static String _join(List<String?> f) => f.whereType<String>().where((x) => x.isNotEmpty).join('\n');
+
+  /// Normalizing + transliterating 1,200 rows takes ~0.6 s, so do it in a background isolate.
+  Future<void> _warmIndex() async {
+    final v = catalogVersion;
+    final ps = pramans, ts = topics, gs = granths;
+    try {
+      final texts = [...ps.map((p) => _join(pramanFields(p))), ...ts.map((t) => _join(topicFields(t))), ...gs.map((g) => _join(granthFields(g)))];
+      final docs = await compute(makeDocs, texts);
+      if (v != catalogVersion || docs.length != texts.length) return;
+      var i = 0;
+      for (final p in ps) {
+        _pDocs[p.id] = docs[i++];
+      }
+      for (final t in ts) {
+        _tDocs[t.id] = docs[i++];
+      }
+      for (final g in gs) {
+        _gDocs[g.id] = docs[i++];
+      }
+    } catch (e) {
+      debugPrint('search index: $e');
+    }
+  }
+
   @visibleForTesting
   void debugSetCatalog(Catalog c) {
     _catalog = c;
+    _catalogChanged(warm: false);
     status = SyncStatus.ready;
     booted = true;
     notifyListeners();
@@ -62,6 +115,14 @@ class CatalogStore extends ChangeNotifier {
   Future<void> _doBoot() async {
     booted = true;
     offlineIds = _loadOfflineIds();
+    // Settings restored by Android backup on a new install can say "saved offline" while the
+    // pictures are not on this phone yet: start from a clean list then.
+    if (offlineIds.isNotEmpty && ImageStore.I.countSync() == 0) {
+      offlineIds = {};
+      try {
+        Store.I.setString(Store.kOfflineIds, '[]');
+      } catch (_) {}
+    }
     try {
       final res = await Connectivity().checkConnectivity().timeout(const Duration(seconds: 3));
       online = !res.contains(ConnectivityResult.none);
@@ -70,9 +131,22 @@ class CatalogStore extends ChangeNotifier {
     }
     notifyListeners();
     try {
-      final cached = Catalog.fromJson(await Store.I.readJson('catalog.json').timeout(const Duration(seconds: 8)));
+      // Decoded off the UI thread; a damaged / old-format file is ignored and a fresh sync
+      // replaces it.
+      final raw = await Store.I.readJson('catalog.json', background: true).timeout(const Duration(seconds: 8));
+      Catalog? cached;
+      try {
+        cached = Catalog.fromJson(raw);
+      } catch (e) {
+        debugPrint('catalog.json unreadable, will sync fresh: $e');
+      }
+      if (cached != null && cached.topics.isEmpty && cached.granths.isEmpty) cached = null;
       if (cached != null) {
         _catalog = cached;
+        try {
+          _lastJson = _contentKey(cached);
+        } catch (_) {}
+        _catalogChanged();
         status = online ? SyncStatus.ready : SyncStatus.offline;
         images = ImageProgress(ImageStore.I.countSync(), _allImagePaths().length, false);
         notifyListeners();
@@ -122,11 +196,32 @@ class CatalogStore extends ChangeNotifier {
   }
 
   DateTime _lastResume = DateTime.now();
+  DateTime? _pausedAt;
+  DateTime? _lastSyncAt;
+
+  /// App went to the background.
+  void onPause() => _pausedAt = DateTime.now();
+
+  /// Back from the background: sync silently when the app was away for a while (≥ 30 s)
+  /// or the last sync is older than 2 minutes. The saved data stays on screen meanwhile.
   void onResume() {
     final now = DateTime.now();
     if (now.difference(_lastResume).inMilliseconds < 3000) return;
     _lastResume = now;
+    final away = _pausedAt == null ? Duration.zero : now.difference(_pausedAt!);
+    _pausedAt = null;
+    final stale = _lastSyncAt == null || now.difference(_lastSyncAt!) > const Duration(minutes: 2);
+    if (away < const Duration(seconds: 30) && !stale) return;
     sync().then((_) => savePages());
+  }
+
+  /// JSON of the catalog on screen; an identical download changes nothing (no rebuild,
+  /// no re-index, no disk write).
+  String? _lastJson;
+
+  static String _contentKey(Catalog c) {
+    final j = c.toJson()..remove('syncedAt');
+    return jsonEncode(j);
   }
 
   Future<void> sync() async {
@@ -143,8 +238,17 @@ class CatalogStore extends ChangeNotifier {
     notifyListeners();
     try {
       final c = await _api.fetchCatalog();
-      await Store.I.writeJson('catalog.json', c.toJson());
-      _catalog = c;
+      _lastSyncAt = DateTime.now();
+      final enc = _contentKey(c);
+      if (enc != _lastJson || !hasData) {
+        await Store.I.writeJson('catalog.json', c.toJson());
+        _lastJson = enc;
+        _catalog = c;
+        _catalogChanged();
+      } else {
+        // Same data: keep the lists (and every screen) as they are, just refresh the time.
+        _catalog = _catalog.withSyncedAt(c.syncedAt);
+      }
       status = SyncStatus.ready;
       error = null;
       images = ImageProgress(ImageStore.I.countSync(), _allImagePaths().length, images.running);

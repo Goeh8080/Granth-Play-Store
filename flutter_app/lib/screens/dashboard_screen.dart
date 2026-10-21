@@ -6,12 +6,17 @@ import '../state/router.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
 import '../widgets/common.dart';
+import '../widgets/live_panel.dart';
 import '../widgets/panel.dart';
 
 /// `wh` — Dashboard.
-class DashboardPanel extends StatelessWidget {
+class DashboardPanel extends StatefulWidget {
   const DashboardPanel({super.key});
+  @override
+  State<DashboardPanel> createState() => _DashboardPanelState();
+}
 
+class _DashboardPanelState extends State<DashboardPanel> with LivePanel {
   @override
   Widget build(BuildContext context) {
     final s = CatalogStore.I;

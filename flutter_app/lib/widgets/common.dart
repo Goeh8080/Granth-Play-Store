@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -502,10 +503,14 @@ class GridSwitch extends StatelessWidget {
 
 /// `.form-control` search input with the saffron focus ring.
 class SearchField extends StatefulWidget {
-  const SearchField({super.key, required this.placeholder, required this.onChanged, this.initial = ''});
+  const SearchField({super.key, required this.placeholder, required this.onChanged, this.initial = '', this.debounce = const Duration(milliseconds: 200)});
   final String placeholder;
+
+  /// Called [debounce] after the last keystroke (immediately when cleared or on "search"),
+  /// so typing stays smooth while the list filters.
   final ValueChanged<String> onChanged;
   final String initial;
+  final Duration debounce;
   @override
   State<SearchField> createState() => _SearchFieldState();
 }
@@ -513,6 +518,24 @@ class SearchField extends StatefulWidget {
 class _SearchFieldState extends State<SearchField> {
   late final TextEditingController _c = TextEditingController(text: widget.initial);
   final FocusNode _f = FocusNode();
+  Timer? _t;
+  late String _sent = widget.initial;
+
+  void _changed(String v) {
+    _t?.cancel();
+    if (v.trim().isEmpty || widget.debounce == Duration.zero) {
+      _emit(v);
+    } else {
+      _t = Timer(widget.debounce, () => _emit(v));
+    }
+  }
+
+  void _emit(String v) {
+    _t?.cancel();
+    if (!mounted || v == _sent) return;
+    _sent = v;
+    widget.onChanged(v);
+  }
 
   @override
   void initState() {
@@ -522,6 +545,7 @@ class _SearchFieldState extends State<SearchField> {
 
   @override
   void dispose() {
+    _t?.cancel();
     _c.dispose();
     _f.dispose();
     super.dispose();
@@ -541,7 +565,8 @@ class _SearchFieldState extends State<SearchField> {
       child: TextField(
         controller: _c,
         focusNode: _f,
-        onChanged: widget.onChanged,
+        onChanged: _changed,
+        onSubmitted: _emit,
         onTapOutside: (_) => _f.unfocus(),
         style: GText.sans(size: 16, color: GColors.text),
         cursorColor: GColors.saffron,

@@ -32,8 +32,17 @@ class PramanPdfRequest extends PdfRequest {
   final Praman praman;
 }
 
+/// Several granths at once (multi-select on the Granths screen): one PDF per granth,
+/// all made in parallel, each with its own progress row.
+class MultiGranthPdfRequest extends PdfRequest {
+  MultiGranthPdfRequest(this.granths);
+  final List<Granth> granths;
+}
+
 void _run(PdfRequest r, PdfStyle s) {
   switch (r) {
+    case MultiGranthPdfRequest(:final granths):
+      PdfQueue.I.granthPdfs(granths, s);
     case GranthPdfRequest(:final granth):
       PdfQueue.I.granthPdf(granth, s);
     case TopicPdfRequest(:final topic):
@@ -179,35 +188,28 @@ Widget _doneActions(BuildContext context, PdfJob j, VoidCallback refresh) => Pad
       ]),
     );
 
-/// `.pdf-deck` — progress of every queued PDF with पिछला / अगला navigation.
-Future<void> openDeck(BuildContext context, {int? index}) => showPop(context, (ctx) => _Deck(start: index ?? 0));
+/// `.pdf-deck` — progress of every PDF being made. There is no queue: each PDF has its
+/// own row with its own progress bar, रोकें / फिर कोशिश करें and the done actions.
+Future<void> openDeck(BuildContext context, {int? index}) => showPop(context, (ctx) => const _Deck());
 
 class _Deck extends StatefulWidget {
-  const _Deck({required this.start});
-  final int start;
+  const _Deck();
   @override
   State<_Deck> createState() => _DeckState();
 }
 
 class _DeckState extends State<_Deck> {
-  late int _i = widget.start;
   Timer? _tick;
 
   @override
   void initState() {
     super.initState();
     _tick = Timer.periodic(const Duration(seconds: 1), (_) => mounted ? setState(() {}) : null);
-    PdfQueue.I.finished.addListener(_onDone);
-  }
-
-  void _onDone() {
-    if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
   }
 
   @override
   void dispose() {
     _tick?.cancel();
-    PdfQueue.I.finished.removeListener(_onDone);
     super.dispose();
   }
 
@@ -216,47 +218,78 @@ class _DeckState extends State<_Deck> {
         listenable: PdfQueue.I,
         builder: (context, _) {
           final jobs = PdfQueue.I.jobs;
-          if (jobs.isEmpty) return const SizedBox.shrink();
-          final i = _i.clamp(0, jobs.length - 1);
-          final m = jobs[i];
           final now = DateTime.now().millisecondsSinceEpoch;
+          final active = PdfQueue.I.activeCount;
           return FrostCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text('${i + 1}/${jobs.length}', style: GText.sans(size: 16, weight: FontWeight.w700)),
-                TweenAnimationBuilder<double>(
-                  tween: Tween(end: m.percent.toDouble()),
-                  duration: const Duration(milliseconds: 420),
-                  builder: (context, v, _) => Text('${v.round()}%', style: GText.sans(size: 16)),
+                Flexible(
+                  child: Text(active > 0 ? '$active PDF बन रही हैं' : 'PDF', style: GText.sans(size: 16, weight: FontWeight.w700)),
                 ),
-              ]),
-              const SizedBox(height: 6),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                child: Text(m.title, key: ValueKey(m.id), style: GText.display(size: 22, color: GColors.maroon, height: 1.25)),
-              ),
-              const SizedBox(height: 6),
-              PdfMeter(percent: m.percent),
-              Text(jobLine(m, now), style: GText.sans(size: 14)),
-              const SizedBox(height: 4),
-              Text(phaseText(m), style: GText.sans(size: 14)),
-              const SizedBox(height: 10),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                 Pill(label: 'बंद', onTap: () => Navigator.pop(context)),
-                Pill(icon: 'chevron-left', label: 'पिछला', enabled: i > 0, onTap: () => setState(() => _i = (i - 1).clamp(0, jobs.length - 1))),
-                Pill(trailingIcon: 'chevron-right', label: 'अगला', enabled: i < jobs.length - 1, onTap: () => setState(() => _i = (i + 1).clamp(0, jobs.length - 1))),
               ]),
-              if (m.active) ...[const SizedBox(height: 10), SheetButton(label: 'रोकें', onTap: () => PdfQueue.I.cancel(m.id))],
-              if (m.phase == PdfPhase.done && m.filePath != null) _doneActions(context, m, () => setState(() {})),
+              const SizedBox(height: 8),
+              if (jobs.isEmpty) Text('अभी कोई PDF नहीं बन रही।', style: GText.sans(size: 15, color: GColors.muted)),
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.62),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    itemCount: jobs.length,
+                    separatorBuilder: (_, _) => const Divider(height: 18, color: GColors.creamDark),
+                    itemBuilder: (context, i) => _JobRow(key: ValueKey(jobs[i].id), job: jobs[i], now: now, refresh: () => setState(() {})),
+                  ),
+                ),
+              ),
             ]),
           );
         },
       );
 }
 
+/// One PDF: title, its own progress bar, status and actions.
+class _JobRow extends StatelessWidget {
+  const _JobRow({super.key, required this.job, required this.now, required this.refresh});
+  final PdfJob job;
+  final int now;
+  final VoidCallback refresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = job;
+    final failed = m.phase == PdfPhase.error;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(child: Text(m.title, style: GText.display(size: 19, color: GColors.maroon, height: 1.25))),
+        const SizedBox(width: 8),
+        TweenAnimationBuilder<double>(
+          tween: Tween(end: m.percent.toDouble()),
+          duration: const Duration(milliseconds: 420),
+          builder: (context, v, _) => Text('${v.round()}%', style: GText.sans(size: 15, weight: FontWeight.w700)),
+        ),
+      ]),
+      PdfMeter(percent: m.percent),
+      Text(jobLine(m, now), style: GText.sans(size: 13)),
+      const SizedBox(height: 2),
+      Text(phaseText(m), style: GText.sans(size: 13, color: failed ? GColors.maroon : GColors.text, weight: failed ? FontWeight.w700 : FontWeight.w400)),
+      if (m.phase == PdfPhase.done && m.missingImages > 0) Text('${m.missingImages} चित्र लोड नहीं हुए — उनकी जगह खाली फ्रेम है', style: GText.sans(size: 12, color: GColors.muted)),
+      if (m.active) ...[const SizedBox(height: 8), SheetButton(label: 'रोकें', onTap: () => PdfQueue.I.cancel(m.id))],
+      if (m.canRetry) ...[
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: SheetButton(label: 'फिर कोशिश करें', primary: true, onTap: () => PdfQueue.I.retry(m.id))),
+          const SizedBox(width: 10),
+          Expanded(child: SheetButton(label: 'हटाएँ', onTap: () => PdfQueue.I.dismiss(m.id))),
+        ]),
+      ],
+      if (m.phase == PdfPhase.done && m.filePath != null) _doneActions(context, m, refresh),
+    ]);
+  }
+}
+
 /// `.pdf-done` — shown when a PDF finishes; it is also copied to Downloads automatically.
-Future<void> openDone(BuildContext context, PdfJob job, Future<bool> exported) =>
-    showPop(context, (ctx) => _Done(job: job, exported: exported));
+Future<void> openDone(BuildContext context, PdfJob job, Future<bool> exported) => showPop(context, (ctx) => _Done(job: job, exported: exported));
 
 class _Done extends StatefulWidget {
   const _Done({required this.job, required this.exported});
@@ -289,13 +322,12 @@ class _DoneState extends State<_Done> {
         const SizedBox(height: 6),
         Text(a.fileName, style: GText.display(size: 22, color: GColors.maroon, height: 1.25)),
         const SizedBox(height: 6),
-        Text('${a.total} पृष्ठ · ${formatDuration((a.finishedAt ?? DateTime.now().millisecondsSinceEpoch) - a.startedAt)} · ${formatBytes(a.size ?? 0)}',
-            style: GText.sans(size: 16)),
+        Text('${a.total} पृष्ठ · ${formatDuration((a.finishedAt ?? DateTime.now().millisecondsSinceEpoch) - a.startedAt)} · ${formatBytes(a.size ?? 0)}', style: GText.sans(size: 16)),
         const SizedBox(height: 4),
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 260),
-          child: Text(_saved ? 'Downloads और फ़ाइल मैनेजर में सेव हो गया' : 'डिवाइस में सेव हो रहा है',
-              key: ValueKey(_saved), style: GText.sans(size: 16, color: _saved ? GColors.online : GColors.text)),
+          child:
+              Text(_saved ? 'Downloads और फ़ाइल मैनेजर में सेव हो गया' : 'डिवाइस में सेव हो रहा है', key: ValueKey(_saved), style: GText.sans(size: 16, color: _saved ? GColors.online : GColors.text)),
         ),
         _doneActions(context, a, () => setState(() {})),
       ]),
@@ -340,8 +372,7 @@ class _SettingsState extends State<_Settings> {
         builder: (context, _) => SheetCard(children: [
           SheetHead(title: 'सेटिंग', onBack: () => Navigator.pop(context)),
           _block('PDF सेटिंग', [
-            for (final o in pdfStyleOptions)
-              Pill(label: o.title, tone: UiPrefs.I.pdfStyle == o.style ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.pdfStyle = o.style),
+            for (final o in pdfStyleOptions) Pill(label: o.title, tone: UiPrefs.I.pdfStyle == o.style ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.pdfStyle = o.style),
           ]),
           _block('लेआउट', [
             for (final n in [1, 2]) Pill(label: '$n×$n', tone: UiPrefs.I.uiCols == n ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.setLayout(n)),
@@ -365,8 +396,7 @@ class _SettingsState extends State<_Settings> {
             curve: kRise,
             child: _looks
                 ? _block('कार्ड स्टाइल', [
-                    for (final (id, title) in cardLooks)
-                      Pill(label: title, tone: UiPrefs.I.look == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.look = id),
+                    for (final (id, title) in cardLooks) Pill(label: title, tone: UiPrefs.I.look == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.look = id),
                   ])
                 : const SizedBox(width: double.infinity),
           ),

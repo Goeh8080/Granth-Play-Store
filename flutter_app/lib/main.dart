@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'screens/home_shell.dart';
 import 'screens/splash_screen.dart';
 import 'services/catalog_store.dart';
+import 'services/device_profile.dart';
+import 'services/file_actions.dart';
 import 'services/events.dart';
 import 'services/storage.dart';
 import 'state/router.dart';
@@ -29,6 +31,12 @@ void main() {
       await Store.I.init().timeout(const Duration(seconds: 6));
     } catch (e) {
       debugPrint('init: store: $e');
+    }
+    // Not awaited for long: both only tune / tidy, the app works without them.
+    try {
+      await Future.wait([DeviceProfile.load(), FileActions.cleanupPartials()]).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('init: profile/cleanup: $e');
     }
     try {
       AppNav.I.restore();
@@ -65,10 +73,16 @@ void _installErrorHandlers() {
 }
 
 class GranthApp extends StatefulWidget {
-  const GranthApp({super.key, this.ready, this.splash = true, this.links = true});
+  const GranthApp({super.key, this.ready, this.splash = true, this.links = true, this.linkStream, this.initialLink});
   final Future<void>? ready;
   final bool splash;
   final bool links;
+
+  /// For tests: replaces `AppLinks().uriLinkStream` (warm-start links).
+  final Stream<Uri>? linkStream;
+
+  /// For tests: replaces `AppLinks().getInitialLink()` (the link that cold-started the app).
+  final Future<Uri?>? initialLink;
   @override
   State<GranthApp> createState() => _GranthAppState();
 }
@@ -85,11 +99,34 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
     if (widget.links) _listenLinks();
   }
 
+  /// Shared links: the one that started the app (cold start) and any opened later while
+  /// it runs (warm start, delivered through `onNewIntent`). Both go through [_open]; the
+  /// 5 s de-dup drops the copy app_links also replays on its stream.
   void _listenLinks() {
     try {
-      final al = AppLinks();
-      _links = al.uriLinkStream.listen(_open, onError: (_) {});
-    } catch (_) {}
+      final stream = widget.linkStream ?? AppLinks().uriLinkStream;
+      _links = stream.listen(_safeOpen, onError: (_) {});
+    } catch (e) {
+      debugPrint('links: stream: $e');
+    }
+    try {
+      final first = widget.initialLink ?? AppLinks().getInitialLink();
+      first.then((u) {
+        if (u != null) _safeOpen(u);
+      }).catchError((Object e) => debugPrint('links: initial: $e'));
+    } catch (e) {
+      debugPrint('links: initial: $e');
+    }
+  }
+
+  void _safeOpen(Uri u) {
+    try {
+      _open(u);
+    } catch (e, st) {
+      // A malformed link must never break the app: fall back to the dashboard.
+      debugPrint('links: $u: $e\n$st');
+      AppNav.I.openLink('#/dashboard');
+    }
   }
 
   /// `__granthOpenLink` with the same 5 s de-duplication.
@@ -106,6 +143,7 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) CatalogStore.I.onResume();
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) CatalogStore.I.onPause();
   }
 
   @override

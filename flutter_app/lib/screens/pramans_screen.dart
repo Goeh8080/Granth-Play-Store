@@ -11,6 +11,7 @@ import '../state/router.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
 import '../widgets/common.dart';
+import '../widgets/live_panel.dart';
 import '../widgets/granth_image.dart';
 import '../widgets/overlays.dart';
 import '../widgets/panel.dart';
@@ -25,12 +26,12 @@ class PramansPanel extends StatefulWidget {
   State<PramansPanel> createState() => _PramansPanelState();
 }
 
-class _PramansPanelState extends State<PramansPanel> {
+class _PramansPanelState extends State<PramansPanel> with LivePanel {
   String _q = '';
   final _log = SearchLogger();
-  final Map<String, SearchDoc> _docs = {};
   List<Praman>? _src;
   List<Praman>? _filteredSrc;
+  String _filteredKey = '';
   List<Praman> _filtered = const [];
 
   @override
@@ -46,7 +47,6 @@ class _PramansPanelState extends State<PramansPanel> {
     final all = s.pramans;
     if (!identical(all, _src)) {
       _src = all;
-      _docs.clear();
     }
     Topic? topic;
     Granth? granth;
@@ -56,14 +56,18 @@ class _PramansPanelState extends State<PramansPanel> {
     for (final g in s.granths) {
       if (g.id == e.granthId) granth = g;
     }
-    if (!identical(_filteredSrc, all)) {
+    // Re-filter when the data OR the route changes (a shared link can switch the topic /
+    // granth / praman while this screen stays mounted).
+    final key = '${e.topicId}|${e.granthId}|${e.pramanId}';
+    if (!identical(_filteredSrc, all) || key != _filteredKey) {
       _filteredSrc = all;
+      _filteredKey = key;
       _filtered = orderPramans(
         all.where((t) => !((e.topicId != null && t.topicId != e.topicId) || (e.granthId != null && t.granthId != e.granthId) || (e.pramanId != null && t.id != e.pramanId))).toList(),
         granth?.title ?? '',
       );
     }
-    final rows = searchRows(_filtered, _q, (p) => _docs[p.id] ??= docOf([p.title, p.description, p.topicTitle, p.granthTitle, p.granthAuthor, p.youtubeDesc]));
+    final rows = searchRows(_filtered, _q, CatalogStore.I.pramanDoc);
     _log.track(_q, rows.length);
     final cols = UiPrefs.I.cols(Store.kPramanCols, allowed: const [1, 2], fallback: 2);
     final dx = panelDx();
@@ -116,15 +120,35 @@ class _PramansPanelState extends State<PramansPanel> {
             ),
           ),
         ),
-      gridSliver(
+      // Keyed by the column count: switching 1×1 / 2×2 / 3×3 re-lays out the grid and
+      // replays the staggered card entry, so the change is visible and animated.
+      KeyedSubtree(key: ValueKey('grid-$cols'), child: gridSliver(
         count: rows.length,
         cols: cols,
         gap: 14,
         item: (context, i) => Entry(index: i + 2, dx: dx, child: PramanCard(praman: rows[i], index: i + 1, total: rows.length)),
-      ),
-      if (rows.isEmpty) const SliverToBoxAdapter(child: EmptyState(title: 'कोई प्रमाण नहीं', body: 'इस चयन में प्रमाण नहीं मिले, या सिंक अभी चल रहा है।')),
+      )),
+      if (rows.isEmpty && _linkMissing(s, e, topic, granth))
+        SliverToBoxAdapter(
+          child: Column(children: [
+            const EmptyState(title: 'लिंक वाला विषय/ग्रंथ/प्रमाण नहीं मिला', body: 'यह शायद हटा दिया गया है या अभी सिंक नहीं हुआ। सिंक के बाद फिर खोलें।'),
+            const SizedBox(height: 12),
+            Pill(label: 'Dashboard पर जाएँ', tone: PillTone.maroon, onTap: () => AppNav.I.go('#/dashboard')),
+          ]),
+        )
+      else if (rows.isEmpty)
+        const SliverToBoxAdapter(child: EmptyState(title: 'कोई प्रमाण नहीं', body: 'इस चयन में प्रमाण नहीं मिले, या सिंक अभी चल रहा है।')),
     ]);
   }
+}
+
+/// The route came from a link whose topic / granth / praman is not in the (loaded) catalog.
+bool _linkMissing(CatalogStore s, GRoute e, Topic? topic, Granth? granth) {
+  if (!s.hasData || s.status == SyncStatus.syncing || s.status == SyncStatus.booting) return false;
+  if (e.topicId != null && topic == null) return true;
+  if (e.granthId != null && granth == null) return true;
+  if (e.pramanId != null && !s.pramans.any((p) => p.id == e.pramanId)) return true;
+  return false;
 }
 
 /// `Uh`

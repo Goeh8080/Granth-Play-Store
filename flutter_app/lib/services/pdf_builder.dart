@@ -1,12 +1,14 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:image/image.dart' as img;
-import 'package:pdf/pdf.dart';
 
 import '../theme/colors.dart';
+import 'native_bridge.dart';
+import 'pdf_stream.dart';
 
 /// Port of the web app's `buildBookPdf` (pdf-lib + canvas). Text is drawn with Flutter's
 /// text engine (correct Devanagari shaping with Noto Sans Devanagari) into images, exactly like
@@ -30,7 +32,7 @@ const pdfStyleOptions = [
 ];
 
 class PdfSpec {
-  PdfSpec({required this.title, this.subtitle = '', this.body = '', this.meta = '', this.path, this.cover = false, this.topicCover = false, this.image});
+  PdfSpec({required this.title, this.subtitle = '', this.body = '', this.meta = '', this.path, this.cover = false, this.topicCover = false, this.image, this.file});
   final String title;
   final String subtitle;
   final String body;
@@ -38,7 +40,16 @@ class PdfSpec {
   final String? path;
   final bool cover;
   final bool topicCover;
+
+  /// Raw picture bytes, or [file] to read them lazily (keeps big granths out of memory).
   Uint8List? image;
+  String? file;
+
+  /// The page should have had a picture but it could not be loaded or decoded:
+  /// the page is still produced, with a "चित्र उपलब्ध नहीं" placeholder.
+  bool missing = false;
+
+  bool get wantsPicture => image != null || file != null || missing;
 }
 
 class PreparedImage {
@@ -52,6 +63,17 @@ const double _a4w = 595.28;
 const double _a4h = 841.89;
 
 class PdfCancelled implements Exception {}
+
+/// Drawing a page did not finish in time (for example the phone stopped the GPU while
+/// the app was in the background). The job is retried as a whole once the app is back.
+class PdfRenderStalled implements Exception {
+  @override
+  String toString() => 'PdfRenderStalled';
+}
+
+const _renderTimeout = Duration(seconds: 40);
+
+Future<T> _guardRender<T>(Future<T> f) => f.timeout(_renderTimeout, onTimeout: () => throw PdfRenderStalled());
 
 /// `Bm` — read PNG/JPEG dimensions from the header.
 ({int w, int h, String kind})? imageHeader(Uint8List e) {
@@ -89,36 +111,83 @@ class PdfCancelled implements Exception {}
   return null;
 }
 
-/// `Hm`/`Um` — keep small JPEGs untouched, otherwise flatten on white, cap at 1800 px, JPEG q90.
-PreparedImage? prepareImageSync(Uint8List bytes) {
+/// JPEGs up to this size are embedded exactly as saved (no decode / re-encode): this is
+/// what makes an offline granth PDF fast. Larger pictures are scaled to [kPdfImageSide].
+const kPassSide = 2600;
+const kPassBytes = 1500000;
+const kPdfImageSide = 1800;
+
+/// True when the picture can go into the PDF unchanged.
+bool jpegFits(({int w, int h, String kind})? head, int length, [int maxBytes = kPassBytes]) =>
+    head != null && head.kind == 'jpg' && head.w <= kPassSide && head.h <= kPassSide && length <= math.min(kPassBytes, math.max(60000, maxBytes));
+
+/// `Hm`/`Um` — keep JPEGs that fit untouched, otherwise flatten on white, cap at 1800 px, JPEG q90.
+///
+/// [maxBytes]: when a re-encoded picture is still bigger than this, it is scaled down /
+/// compressed a little more (never below ~900 px).
+PreparedImage? prepareImageSync(Uint8List bytes, [int maxBytes = kPassBytes]) {
   if (bytes.length < 32) return null;
   final head = imageHeader(bytes);
-  const cap = 1800;
-  if (head != null && head.kind == 'jpg' && head.w <= cap && head.h <= cap && bytes.length < 1100000) {
-    return PreparedImage(bytes, head.w, head.h);
-  }
+  const cap = kPdfImageSide;
+  // A huge photo (e.g. 4616×12984) would need hundreds of MB to decode in Dart: skip it
+  // here (it becomes a placeholder); on Android the native path decodes it scaled down.
+  if (head != null && head.w * head.h > 24000000) return null;
+  final limit = math.min(kPassBytes, math.max(60000, maxBytes));
+  if (jpegFits(head, bytes.length, maxBytes)) return PreparedImage(bytes, head!.w, head.h);
   try {
-    var im = img.decodeImage(bytes);
-    if (im == null) return null;
-    final scale = math.min(1.0, cap / math.max(im.width, im.height));
-    if (scale < 1) {
-      im = img.copyResize(im, width: math.max(1, (im.width * scale).round()), height: math.max(1, (im.height * scale).round()), interpolation: img.Interpolation.average);
-    }
-    if (im.hasAlpha) {
-      final bg = img.Image(width: im.width, height: im.height);
+    var src = img.decodeImage(bytes);
+    if (src == null) return null;
+    if (src.hasAlpha) {
+      final bg = img.Image(width: src.width, height: src.height);
       img.fill(bg, color: img.ColorRgb8(255, 255, 255));
-      img.compositeImage(bg, im);
-      im = bg;
+      img.compositeImage(bg, src);
+      src = bg;
     }
-    return PreparedImage(Uint8List.fromList(img.encodeJpg(im, quality: 90)), im.width, im.height);
+    var side = cap.toDouble();
+    var quality = 90;
+    while (true) {
+      final scale = math.min(1.0, side / math.max(src.width, src.height));
+      final im = scale < 1 ? img.copyResize(src, width: math.max(1, (src.width * scale).round()), height: math.max(1, (src.height * scale).round()), interpolation: img.Interpolation.average) : src;
+      final out = Uint8List.fromList(img.encodeJpg(im, quality: quality));
+      if (out.length <= limit || (side <= 900 && quality <= 62)) return PreparedImage(out, im.width, im.height);
+      side = math.max(900, side * 0.8);
+      quality = math.max(62, quality - 7);
+    }
   } catch (_) {
     return null;
   }
 }
 
-Future<PreparedImage?> prepareImage(Uint8List? bytes) async {
+/// Pictures that need scaling go to the platform codec on a native worker thread (fast,
+/// and big photos are decoded at reduced size). Null = use the Dart path.
+Future<PreparedImage?> _prepareNative(File f, Uint8List raw, int maxBytes) async {
+  if (!NativeBridge.nativeImages) return null;
+  final head = imageHeader(raw);
+  if (jpegFits(head, raw.length, maxBytes)) return null; // embedded as-is
+  final out = '${Directory.systemTemp.path}/granth-prep-${f.hashCode}-${DateTime.now().microsecondsSinceEpoch}.jpg';
+  try {
+    final r = await NativeBridge.prepareImage(f.path, out);
+    if (r == null) return null;
+    return PreparedImage(await File(out).readAsBytes(), r.w, r.h);
+  } catch (_) {
+    return null;
+  } finally {
+    try {
+      final o = File(out);
+      if (await o.exists()) await o.delete();
+    } catch (_) {}
+  }
+}
+
+PreparedImage? _prepareEntry((Uint8List, int) a) => prepareImageSync(a.$1, a.$2);
+
+Future<PreparedImage?> prepareImage(Uint8List? bytes, {int maxBytes = kPassBytes}) async {
   if (bytes == null || bytes.length < 32) return null;
-  return compute(prepareImageSync, bytes);
+  // Fast path (most saved pages): a JPEG that already fits is embedded as-is, with no
+  // decode and no isolate hop.
+  final head = imageHeader(bytes);
+  if (jpegFits(head, bytes.length, maxBytes)) return PreparedImage(bytes, head!.w, head.h);
+  return compute(_prepareEntry, (bytes, maxBytes));
 }
 
 /// Small JPEG used as the gallery preview (`sh`): max 720 px on #fffdf7, q82.
@@ -223,17 +292,17 @@ Future<_TextImage?> _renderLines(List<_Line> lines, double widthPt, Color bg) as
     c.drawParagraph(p, ui.Offset(24, y + (lh(l) - p.height) / 2));
     y += lh(l);
   }
-  final image = await rec.endRecording().toImage(pxW, pxH);
-  final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+  final image = await _guardRender(rec.endRecording().toImage(pxW, pxH));
+  final data = await _guardRender(image.toByteData(format: ui.ImageByteFormat.rawRgba));
   image.dispose();
   if (data == null) return null;
   return _TextImage(data.buffer.asUint8List(), pxW, pxH, widthPt, pxH / 2);
 }
 
-Future<_TextImage?> _textBlock(String text, double widthPt, double size, Color color, FontWeight weight) async {
+Future<_TextImage?> _textBlock(String text, double widthPt, double size, Color color, FontWeight weight, {Color bg = GColors.paper}) async {
   final t = text.trim();
   if (t.isEmpty) return null;
-  return _renderLines([_Line(t, size, color, weight)], widthPt, GColors.paper);
+  return _renderLines([_Line(t, size, color, weight)], widthPt, bg);
 }
 
 List<String> _linesFor(String text, double widthPt, double size, FontWeight weight) {
@@ -265,56 +334,49 @@ List<List<String>> _pagesOf(List<String> lines, double size, double maxH) {
   return (w: w * i, h: h * i);
 }
 
-PdfColor _pc(Color c) => PdfColor(c.r, c.g, c.b);
-
 class BookPdfBuilder {
-  BookPdfBuilder({this.isCancelled, this.onPage, this.onPreview});
+  BookPdfBuilder({this.isCancelled, this.onPage, this.onPreview, this.lookAhead = 8, this.maxImageBytes = kPassBytes});
+
+  /// How many pictures may be prepared ahead of the page being assembled.
+  final int lookAhead;
+
+  /// Largest JPEG kept per page picture (see [prepareImageSync]).
+  final int maxImageBytes;
   final bool Function()? isCancelled;
   final void Function(int done, int total)? onPage;
   final void Function(Uint8List jpeg)? onPreview;
 
-  late PdfDocument _doc;
-  late PdfFont _font;
+  final List<PdfPageData> _pending = [];
+  int _pageCount = 0;
 
   void _check() {
     if (isCancelled?.call() ?? false) throw PdfCancelled();
   }
 
-  PdfImage _rgbaImage(_TextImage t) => PdfImage(_doc, image: _rgb(t.rgba, t.pxW * t.pxH), width: t.pxW, height: t.pxH, alpha: false);
+  static PdfPicture _rgbaImage(_TextImage t) => PdfPicture.rgba(t.rgba, t.pxW, t.pxH);
 
-  static Uint8List _rgb(Uint8List rgba, int n) {
-    final out = Uint8List(n * 3);
-    for (var i = 0, j = 0; i < n; i++, j += 4) {
-      out[i * 3] = rgba[j];
-      out[i * 3 + 1] = rgba[j + 1];
-      out[i * 3 + 2] = rgba[j + 2];
-    }
-    return out;
-  }
+  static void _img(PdfPageData p, PdfPicture pic, double x, double y, double w, double h) => p.ops.add(PdfOp.image(p.addPicture(pic), x, y, w, h));
 
-  PdfPage _page(double w, double h, Color fill) {
-    final p = PdfPage(_doc, pageFormat: PdfPageFormat(w, h));
-    final g = p.getGraphics();
-    g.setFillColor(_pc(fill));
-    g.drawRect(0, 0, w, h);
-    g.fillPath();
+  static void _rect(PdfPageData p, double x, double y, double w, double h, Color c, {double alpha = 1}) => p.ops.add(PdfOp.fill(x, y, w, h, c.r, c.g, c.b, alpha: alpha));
+
+  PdfPageData _newPage(double w, double h) {
+    final p = PdfPageData(w, h);
+    _pending.add(p);
     return p;
   }
 
-  void _stamp(PdfPage page, int n) {
+  PdfPageData _page(double w, double h, Color fill) {
+    final p = _newPage(w, h);
+    _rect(p, 0, 0, w, h, fill);
+    return p;
+  }
+
+  void _stamp(PdfPageData page, int n) {
     final s = '$n';
-    final m = _font.stringMetrics(s);
-    final tw = m.advanceWidth * 11;
-    final w = page.pageFormat.width;
-    final g = page.getGraphics();
-    g.saveContext();
-    g.setGraphicState(PdfGraphicState(opacity: 0.92));
-    g.setFillColor(const PdfColor(1, 0.984, 0.953));
-    g.drawRect(w - tw - 16, 6, tw + 10, 16);
-    g.fillPath();
-    g.restoreContext();
-    g.setFillColor(const PdfColor(0.482, 0.122, 0.18));
-    g.drawString(_font, 11, s, w - tw - 11, 9);
+    final tw = helveticaWidth(s, 11);
+    final w = page.w;
+    _rect(page, w - tw - 16, 6, tw + 10, 16, const Color(0xFFFFFBF3), alpha: 0.92);
+    page.ops.add(PdfOp.text(s, 11, w - tw - 11, 9, 0.482, 0.122, 0.18));
   }
 
   /// `Xm`
@@ -325,15 +387,14 @@ class BookPdfBuilder {
     return (header: header, footer: parts.where(seen.add).join('\n'));
   }
 
-  Future<void> _drawPage(double a, double o, _TextImage? head, _TextImage? foot, PreparedImage? picture) async {
+  Future<void> _drawPage(double a, double o, _TextImage? head, _TextImage? foot, PreparedImage? picture, {bool placeholder = false}) async {
     const s0 = 8.0;
     final s = a - 16;
     final page = _page(a, o, GColors.paper);
-    final g = page.getGraphics();
     final c = head?.h ?? 0;
     final l = foot?.h ?? 0;
-    if (head != null) g.drawImage(_rgbaImage(head), s0, o - c - 4, s, c);
-    if (foot != null) g.drawImage(_rgbaImage(foot), s0, 20, s, l);
+    if (head != null) _img(page, _rgbaImage(head), s0, o - c - 4, s, c);
+    if (foot != null) _img(page, _rgbaImage(foot), s0, 20, s, l);
     if (picture != null) {
       final t = c + 8;
       final n = l + 20 + 4;
@@ -341,10 +402,18 @@ class BookPdfBuilder {
       final f = _fit(s, area, picture.w, picture.h);
       final x = s0 + (s - f.w) / 2;
       final y = n + (area - f.h) / 2;
-      g.setFillColor(const PdfColor(0, 0, 0));
-      g.drawRect(x - 1, y - 1, f.w + 2, f.h + 2);
-      g.fillPath();
-      g.drawImage(PdfImage.jpeg(_doc, image: picture.bytes), x, y, f.w, f.h);
+      _rect(page, x - 1, y - 1, f.w + 2, f.h + 2, const Color(0xFF000000));
+      _img(page, PdfPicture.jpeg(picture.bytes, picture.w, picture.h), x, y, f.w, f.h);
+    } else if (placeholder) {
+      final t = c + 8;
+      final n = l + 20 + 4;
+      final area = math.max(48.0, o - t - n);
+      final bh = math.min(area, 220.0);
+      final y = n + (area - bh) / 2;
+      _rect(page, s0 + 24, y, s - 48, bh, const Color(0xFFF6EFE2));
+      page.ops.add(PdfOp.stroke(s0 + 24, y, s - 48, bh, 0.788, 0.659, 0.298));
+      final label = await _textBlock('चित्र उपलब्ध नहीं — इंटरनेट से लोड नहीं हो पाया', s - 80, 14, GColors.muted, FontWeight.w600, bg: const Color(0xFFF6EFE2));
+      if (label != null) _img(page, _rgbaImage(label), s0 + 40, y + (bh - label.h) / 2, s - 80, label.h);
     }
   }
 
@@ -363,7 +432,8 @@ class BookPdfBuilder {
     final s = a - 16;
     var c = land ? 16.0 : 17.0;
     var l = land ? 14.0 : 15.0;
-    final u = n != null ? (land ? 140.0 : 190.0) : 0.0;
+    final ph = n == null && spec.missing;
+    final u = n != null ? (land ? 140.0 : 190.0) : (ph ? 120.0 : 0.0);
     var d = await _textBlock(t.header, s, c, GColors.maroon, FontWeight.w700);
     var f = await _textBlock(t.footer, s, l, GColors.brown, FontWeight.w600);
     while (c > 13 && (d?.h ?? 0) + (f?.h ?? 0) + u + 20 + 12 > o) {
@@ -373,7 +443,7 @@ class BookPdfBuilder {
       f = await _textBlock(t.footer, s, l, GColors.brown, FontWeight.w600);
     }
     if ((d?.h ?? 0) + (f?.h ?? 0) + u + 20 + 12 <= o) {
-      await _drawPage(a, o, d, f, n);
+      await _drawPage(a, o, d, f, n, placeholder: ph);
       await _preview(n, first);
       return;
     }
@@ -384,7 +454,7 @@ class BookPdfBuilder {
     final v = firstHead.isNotEmpty ? await _renderLines(firstHead.map((e) => _Line(e, c, GColors.maroon, FontWeight.w700)).toList(), s, GColors.paper) : null;
     final y = math.max(70.0, o - (v?.h ?? 0) - (n != null ? u : 0) - 20 - 12);
     final firstFoot = _pagesOf(h, l, y).first;
-    await _drawPage(a, o, v, firstFoot.isNotEmpty ? await _renderLines(firstFoot.map((e) => _Line(e, l, GColors.brown, FontWeight.w600)).toList(), s, GColors.paper) : null, n);
+    await _drawPage(a, o, v, firstFoot.isNotEmpty ? await _renderLines(firstFoot.map((e) => _Line(e, l, GColors.brown, FontWeight.w600)).toList(), s, GColors.paper) : null, n, placeholder: ph);
     await _preview(n, first);
     final rest = [
       ...m.skip(firstHead.length).map((e) => _Line(e, c, GColors.maroon, FontWeight.w700)),
@@ -427,8 +497,7 @@ class BookPdfBuilder {
       final paint = ui.Paint()..shader = ui.Gradient.radial(ui.Offset(x, y), r, [col, const Color.fromRGBO(246, 239, 226, 0)], [8 / r, 1]);
       cv.drawCircle(ui.Offset(x, y), r, paint);
     }
-    final vignette = ui.Paint()
-      ..shader = ui.Gradient.radial(ui.Offset(s / 2, c / 2), c * 0.72, [const Color.fromRGBO(0, 0, 0, 0), const Color.fromRGBO(92, 48, 22, 0.22)], [0.22 / 0.72, 1]);
+    final vignette = ui.Paint()..shader = ui.Gradient.radial(ui.Offset(s / 2, c / 2), c * 0.72, [const Color.fromRGBO(0, 0, 0, 0), const Color.fromRGBO(92, 48, 22, 0.22)], [0.22 / 0.72, 1]);
     cv.drawRect(ui.Rect.fromLTWH(0, 0, s, c), vignette);
     void frame(double inset, double w, Color col) => cv.drawRect(
         ui.Rect.fromLTWH(inset, inset, s - inset * 2, c - inset * 2),
@@ -462,9 +531,12 @@ class BookPdfBuilder {
       h += f * 1.16;
     }
     h += 16;
-    cv.drawLine(ui.Offset(s / 2 - 110, h), ui.Offset(s / 2 + 110, h), ui.Paint()
-      ..color = GColors.maroon
-      ..strokeWidth = 2);
+    cv.drawLine(
+        ui.Offset(s / 2 - 110, h),
+        ui.Offset(s / 2 + 110, h),
+        ui.Paint()
+          ..color = GColors.maroon
+          ..strokeWidth = 2);
     final body = t.body.trim();
     if (body.isNotEmpty && body != title) {
       final st = _uiStyle(size: 34, color: GColors.brown, weight: FontWeight.w600);
@@ -475,20 +547,21 @@ class BookPdfBuilder {
       }
     }
     cv.drawParagraph(_para('ग्रंथ प्रबंधन', _uiStyle(size: 28, color: GColors.maroon, weight: FontWeight.w700), s, align: TextAlign.center), ui.Offset(0, c - 120));
-    final image = await rec.endRecording().toImage(s.toInt(), c.toInt());
-    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    final image = await _guardRender(rec.endRecording().toImage(s.toInt(), c.toInt()));
+    final data = await _guardRender(image.toByteData(format: ui.ImageByteFormat.rawRgba));
     image.dispose();
-    final page = PdfPage(_doc, pageFormat: const PdfPageFormat(_a4w, _a4h));
+    final page = _newPage(_a4w, _a4h);
     if (data == null) {
-      final g = page.getGraphics();
-      g.setFillColor(const PdfColor(0.965, 0.937, 0.886));
-      g.drawRect(0, 0, _a4w, _a4h);
-      g.fillPath();
+      _rect(page, 0, 0, _a4w, _a4h, const Color(0xFFF6EFE2));
       return;
     }
     final rgba = data.buffer.asUint8List();
     final enc = await compute(_coverJpeg, (rgba: rgba, w: s.toInt(), h: c.toInt()));
-    if (enc.jpeg != null) page.getGraphics().drawImage(PdfImage.jpeg(_doc, image: enc.jpeg!), 0, 0, _a4w, _a4h);
+    if (enc.jpeg != null) {
+      _img(page, PdfPicture.jpeg(enc.jpeg!, s.toInt(), c.toInt()), 0, 0, _a4w, _a4h);
+    } else {
+      _rect(page, 0, 0, _a4w, _a4h, const Color(0xFFF6EFE2));
+    }
     if (first && onPreview != null && enc.preview != null) onPreview!(enc.preview!);
   }
 
@@ -496,65 +569,144 @@ class BookPdfBuilder {
   Future<void> _spec(PdfSpec spec, PreparedImage? n, PdfStyle style, bool first) async {
     if (spec.topicCover) return _topicCover(spec, first);
     if (style == PdfStyle.original) {
-      if (n == null) return;
+      if (n == null) {
+        // Never drop a page silently: a broken picture still gets a page with its text.
+        if (spec.missing) await _fill(spec, null, first);
+        return;
+      }
       final land = n.w > n.h * 1.05;
       final r = land ? _a4h : _a4w;
       final a = land ? _a4w : _a4h;
       final f = _fit(r - 20, a - 20, n.w, n.h);
       final page = _page(r, a, const Color(0xFFFFFFFF));
-      page.getGraphics().drawImage(PdfImage.jpeg(_doc, image: n.bytes), (r - f.w) / 2, (a - f.h) / 2, f.w, f.h);
+      _img(page, PdfPicture.jpeg(n.bytes, n.w, n.h), (r - f.w) / 2, (a - f.h) / 2, f.w, f.h);
       await _preview(n, first);
       return;
     }
     await _fill(spec, n, first);
   }
 
-  /// `ch` — build the whole book. Images are prepared by 6 workers ahead of page assembly.
+  /// Builds the PDF in memory and returns its bytes (small PDFs and tests).
   Future<Uint8List> build(List<PdfSpec> specs, PdfStyle style) async {
-    _doc = PdfDocument();
-    _font = PdfFont.helvetica(_doc);
-    final o = specs.isNotEmpty ? specs : [PdfSpec(title: 'कोई प्रमाण नहीं')];
-    final prepared = List<Future<PreparedImage?>?>.filled(o.length, null);
-    var next = 0;
-    Future<void> worker() async {
-      while (next < o.length) {
-        if (isCancelled?.call() ?? false) return;
-        final i = next++;
-        prepared[i] = prepareImage(o[i].image);
-        await prepared[i];
+    final dir = await Directory.systemTemp.createTemp('granth-pdf');
+    try {
+      final path = '${dir.path}/out.pdf';
+      await buildToFile(specs, style, path, isolate: false);
+      return await File(path).readAsBytes();
+    } finally {
+      try {
+        await dir.delete(recursive: true);
+      } catch (_) {}
+    }
+  }
+
+  /// `ch` — build the whole book straight into [path].
+  ///
+  /// Pictures are prepared by up to 6 workers ahead of page assembly (at most [lookAhead]
+  /// pages ahead); each finished page goes to a background writer isolate that compresses
+  /// it and appends it to the file, so memory stays flat however big the granth is.
+  /// On failure or cancel the partial file is deleted. Returns the file size.
+  Future<int> buildToFile(List<PdfSpec> specs, PdfStyle style, String path, {bool isolate = true}) async {
+    _pending.clear();
+    _pageCount = 0;
+    final sink = await PdfSink.open(path, isolate: isolate);
+    var ok = false;
+    Future<void> lastWrite = Future.value();
+    Future<void> flush() async {
+      for (final p in _pending) {
+        await lastWrite; // one page in flight: drawing the next page overlaps with writing this one
+        lastWrite = sink.addPage(p)..ignore();
+        _pageCount++;
       }
+      _pending.clear();
     }
 
-    final workers = List.generate(math.min(6, o.length), (_) => worker());
-    for (var e = 0; e < o.length; e++) {
-      _check();
-      while (prepared[e] == null) {
-        await Future<void>.delayed(const Duration(milliseconds: 4));
-        _check();
-      }
-      final before = _doc.pdfPageList.pages.length;
-      try {
-        await _spec(o[e], await prepared[e], style, e == 0);
-      } on PdfCancelled {
-        rethrow;
-      } catch (_) {
-        _page(_a4w, _a4h, const Color(0xFFFFFBF3));
-      }
-      if (style != PdfStyle.original || o[e].topicCover) {
-        final pages = _doc.pdfPageList.pages;
-        for (var t = before; t < pages.length; t++) {
-          _stamp(pages[t], t + 1);
+    try {
+      final o = specs.isNotEmpty ? specs : [PdfSpec(title: 'कोई प्रमाण नहीं')];
+      final prepared = List<Future<PreparedImage?>?>.filled(o.length, null);
+      var next = 0;
+      var assembled = 0;
+      Future<PreparedImage?> prep(PdfSpec spec) async {
+        try {
+          var raw = spec.image;
+          if (raw == null && spec.file != null) {
+            final f = File(spec.file!);
+            if (await f.exists()) raw = await f.readAsBytes();
+            if (raw != null) {
+              final n = await _prepareNative(f, raw, maxImageBytes);
+              if (n != null) return n;
+            }
+          }
+          spec.image = null; // release raw bytes as soon as they are converted
+          final r = await prepareImage(raw, maxBytes: maxImageBytes).timeout(const Duration(seconds: 60));
+          if (r == null && (raw != null || spec.file != null)) spec.missing = true;
+          return r;
+        } catch (_) {
+          spec.missing = true;
+          return null;
         }
       }
-      onPage?.call(e + 1, o.length);
+
+      Future<void> worker() async {
+        while (next < o.length) {
+          if (isCancelled?.call() ?? false) return;
+          // Stay at most [lookAhead] pages ahead of assembly so big granths never hold every picture at once.
+          if (next - assembled > lookAhead) {
+            await Future<void>.delayed(const Duration(milliseconds: 8));
+            continue;
+          }
+          final i = next++;
+          prepared[i] = prep(o[i]);
+          await prepared[i];
+        }
+      }
+
+      final workers = List.generate(math.min(6, o.length), (_) => worker());
+      for (var e = 0; e < o.length; e++) {
+        _check();
+        while (prepared[e] == null) {
+          await Future<void>.delayed(const Duration(milliseconds: 4));
+          _check();
+        }
+        _pending.clear();
+        try {
+          await _spec(o[e], await prepared[e], style, e == 0);
+        } on PdfCancelled {
+          rethrow;
+        } on PdfRenderStalled {
+          rethrow;
+        } catch (_) {
+          _pending.clear();
+          _page(_a4w, _a4h, const Color(0xFFFFFBF3));
+        }
+        if (style != PdfStyle.original || o[e].topicCover) {
+          for (var t = 0; t < _pending.length; t++) {
+            _stamp(_pending[t], _pageCount + t + 1);
+          }
+        }
+        await flush();
+        prepared[e] = Future.value(null); // drop the prepared JPEG reference (it now lives in the PDF)
+        assembled = e + 1;
+        onPage?.call(e + 1, o.length);
+      }
+      await Future.wait(workers);
+      _check();
+      if (_pageCount == 0) {
+        _page(_a4w, _a4h, const Color(0xFFFFFFFF));
+        await flush();
+      }
+      await lastWrite;
+      final size = await sink.close();
+      final f = File(path);
+      final head = await f.openRead(0, 5).fold<List<int>>([], (a, b) => a..addAll(b));
+      if (size < 64 || head.length < 4 || head[0] != 37 || head[1] != 80 || head[2] != 68 || head[3] != 70) {
+        throw StateError('PDF खाली रह गई');
+      }
+      ok = true;
+      return size;
+    } finally {
+      _pending.clear();
+      if (!ok) await sink.abort();
     }
-    await Future.wait(workers);
-    _check();
-    if (_doc.pdfPageList.pages.isEmpty) _page(_a4w, _a4h, const Color(0xFFFFFFFF));
-    final bytes = await _doc.save();
-    if (bytes.length < 64 || bytes[0] != 37 || bytes[1] != 80 || bytes[2] != 68 || bytes[3] != 70) {
-      throw StateError('PDF खाली रह गई');
-    }
-    return bytes;
   }
 }

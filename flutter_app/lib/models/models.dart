@@ -59,6 +59,8 @@ class Catalog {
   final List<Praman> pramans;
   final int? syncedAt;
 
+  Catalog withSyncedAt(int? t) => Catalog(topics: topics, granths: granths, pramans: pramans, syncedAt: t ?? syncedAt);
+
   static Catalog empty() => Catalog(topics: const [], granths: const [], pramans: const []);
 
   Map<String, dynamic> toJson() => {

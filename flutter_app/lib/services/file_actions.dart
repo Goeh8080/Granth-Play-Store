@@ -30,22 +30,93 @@ class FileActions {
   }
 
   /// Writes bytes into `documents/granth/Granth/name`.
-  static Future<File> writeLocal(Uint8List bytes, String name) async {
-    final f = File('${Store.I.pdfDir}/${safeName(name)}');
-    await f.writeAsBytes(bytes, flush: true);
-    return f;
+  static Future<File> writeLocal(Uint8List bytes, String name) => writeAtomic(File('${Store.I.pdfDir}/${safeName(name)}'), bytes);
+
+  /// Moves a finished temp file into `documents/granth/Granth/name` (rename, or copy +
+  /// delete across volumes).
+  static Future<File> moveLocal(String source, String name) async {
+    final dest = File('${Store.I.pdfDir}/${safeName(name)}');
+    final src = File(source);
+    try {
+      return await src.rename(dest.path);
+    } on FileSystemException {
+      final part = File('${dest.path}.part');
+      try {
+        await src.copy(part.path);
+        final f = await part.rename(dest.path);
+        await src.delete();
+        return f;
+      } catch (_) {
+        try {
+          if (await part.exists()) await part.delete();
+        } catch (_) {}
+        rethrow;
+      }
+    }
+  }
+
+  /// Writes to `name.part` and renames it into place, so a crash, a full disk or the app
+  /// being killed never leaves a broken file under the real name. The partial file is
+  /// removed on failure (and by [cleanupPartials] on the next start).
+  static Future<File> writeAtomic(File f, List<int> bytes) async {
+    final part = File('${f.path}.part');
+    try {
+      await part.parent.create(recursive: true);
+      await part.writeAsBytes(bytes, flush: true);
+      return await part.rename(f.path);
+    } catch (_) {
+      try {
+        if (await part.exists()) await part.delete();
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  /// Removes `*.part` / `*.tmp` leftovers of writes that were cut off (app killed mid-save).
+  static Future<int> cleanupPartials() async {
+    if (!Store.I.ready) return 0;
+    var n = 0;
+    for (final dir in [Store.I.pdfDir, Store.I.galleryDir, Store.I.imagesDir, Store.I.root.path]) {
+      try {
+        final d = Directory(dir);
+        if (!await d.exists()) continue;
+        await for (final e in d.list(followLinks: false)) {
+          if (e is File && (e.path.endsWith('.part') || e.path.endsWith('.tmp'))) {
+            try {
+              await e.delete();
+              n++;
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+    return n;
   }
 
   static Future<File> ensureLocal(String sourcePath, String name) async {
     final dest = File('${Store.I.pdfDir}/${safeName(name)}');
     if (dest.path == sourcePath) return dest;
     if (await dest.exists() && await dest.length() > 64) return dest;
-    return File(sourcePath).copy(dest.path);
+    final part = '${dest.path}.part';
+    try {
+      await File(sourcePath).copy(part);
+      return await File(part).rename(dest.path);
+    } catch (_) {
+      try {
+        await File(part).delete();
+      } catch (_) {}
+      rethrow;
+    }
   }
 
   /// `xe()`/`we()` — save to the phone: PDFs to Downloads, pictures to the album.
   static Future<bool> exportToDevice(String sourcePath, String name) async {
-    final local = await ensureLocal(sourcePath, name);
+    final File local;
+    try {
+      local = await ensureLocal(sourcePath, name);
+    } catch (_) {
+      return false;
+    }
     final mime = mimeOf(name);
     final r = isPdf(name)
         ? await NativeBridge.copyToDownloads(local.path, safeName(name), mime)

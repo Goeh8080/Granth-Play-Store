@@ -1,11 +1,19 @@
 package com.wnm.granthprabandhan
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
+import android.os.StatFs
 import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -13,6 +21,8 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.util.concurrent.Executors
 
 /**
  * Native side of the Flutter port. Replaces the React Native `GranthDownloads` module:
@@ -24,11 +34,18 @@ class MainActivity : FlutterActivity() {
     private val album = "ग्रंथ प्रबंधन"
     private var pending: Pair<MethodCall, MethodChannel.Result>? = null
 
+    // PDF page pictures are scaled / re-encoded here, off the UI thread, with the platform's
+    // JPEG codec (much faster than pure Dart, and big photos are decoded at reduced size).
+    private val imageWorkers = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors().coerceIn(2, 4))
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "copyToDownloads", "saveImage" -> withLegacyPermission(call, result)
+                "prepareImage" -> prepareImage(call, result)
+                "deviceInfo" -> result.success(deviceInfo())
+                "freeBytes" -> result.success(freeBytes())
                 "exitApp" -> {
                     result.success(null)
                     finishAffinity()
@@ -36,6 +53,115 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    // A shared link opened while the app is already running arrives here (singleTask).
+    // Keep it as the current intent so the link plugin and a later re-create see the new link.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
+
+    /** Lets the PDF maker size itself to the phone: low-RAM phones build one PDF at a time. */
+    private fun deviceInfo(): Map<String, Any> {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val mi = ActivityManager.MemoryInfo()
+        am?.getMemoryInfo(mi)
+        return mapOf(
+            "sdk" to Build.VERSION.SDK_INT,
+            "lowRam" to (am?.isLowRamDevice ?: false),
+            "memClassMb" to (am?.memoryClass ?: 128),
+            "largeMemClassMb" to (am?.largeMemoryClass ?: 256),
+            "totalMem" to mi.totalMem,
+            "availMem" to mi.availMem,
+        )
+    }
+
+    /**
+     * Reads a page picture from [src], scales it so the longer side is at most [maxSide]
+     * (decoding big photos at 1/2, 1/4… size to save memory), flattens transparency on
+     * white and writes a JPEG to [out]. Returns width/height, or an error the Dart side
+     * turns into a "picture not available" placeholder.
+     */
+    private fun prepareImage(call: MethodCall, result: MethodChannel.Result) {
+        val src = call.argument<String>("src")
+        val out = call.argument<String>("out")
+        val maxSide = call.argument<Int>("maxSide") ?: 1800
+        val quality = call.argument<Int>("quality") ?: 85
+        if (src == null || out == null) {
+            result.error("args", "src/out missing", null)
+            return
+        }
+        imageWorkers.execute {
+            try {
+                val r = scaleToJpeg(File(src), File(out), maxSide, quality)
+                runOnUiThread { result.success(r) }
+            } catch (e: Throwable) {
+                File(out).delete()
+                runOnUiThread { result.error("image", e.toString(), null) }
+            }
+        }
+    }
+
+    private fun scaleToJpeg(src: File, out: File, maxSide: Int, quality: Int): Map<String, Int> {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(src.absolutePath, bounds)
+        val w0 = bounds.outWidth
+        val h0 = bounds.outHeight
+        if (w0 <= 0 || h0 <= 0) throw IllegalArgumentException("not an image")
+        var sample = 1
+        while (maxOf(w0, h0) / (sample * 2) >= maxSide) sample *= 2
+        var bmp: Bitmap? = null
+        var tries = 0
+        while (bmp == null) {
+            try {
+                bmp = BitmapFactory.decodeFile(src.absolutePath, BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }) ?: throw IllegalArgumentException("decode failed")
+            } catch (e: OutOfMemoryError) {
+                if (++tries > 3) throw e
+                sample *= 2 // low-RAM phone: try a smaller decode
+            }
+        }
+        var b: Bitmap = bmp
+        val side = maxOf(b.width, b.height)
+        if (side > maxSide) {
+            val k = maxSide.toFloat() / side
+            val scaled = Bitmap.createScaledBitmap(b, maxOf(1, (b.width * k).toInt()), maxOf(1, (b.height * k).toInt()), true)
+            if (scaled != b) b.recycle()
+            b = scaled
+        }
+        if (b.hasAlpha()) {
+            val flat = Bitmap.createBitmap(b.width, b.height, Bitmap.Config.ARGB_8888)
+            Canvas(flat).apply {
+                drawColor(Color.WHITE)
+                drawBitmap(b, 0f, 0f, null)
+            }
+            b.recycle()
+            b = flat
+        }
+        val w = b.width
+        val h = b.height
+        out.parentFile?.mkdirs()
+        val part = File(out.absolutePath + ".part")
+        try {
+            FileOutputStream(part).use { if (!b.compress(Bitmap.CompressFormat.JPEG, quality, it)) throw IllegalStateException("encode") }
+            if (!part.renameTo(out)) throw IllegalStateException("rename")
+        } catch (e: Throwable) {
+            part.delete()
+            throw e
+        } finally {
+            b.recycle()
+        }
+        return mapOf("w" to w, "h" to h)
+    }
+
+    /** Free space (bytes) where the app keeps its PDFs. */
+    private fun freeBytes(): Long = try {
+        StatFs(filesDir.absolutePath).availableBytes
+    } catch (e: Exception) {
+        -1L
     }
 
     private fun withLegacyPermission(call: MethodCall, result: MethodChannel.Result) {
@@ -88,7 +214,14 @@ class MainActivity : FlutterActivity() {
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: throw IllegalStateException("insert")
-            contentResolver.openOutputStream(uri)?.use { o -> FileInputStream(src).use { it.copyTo(o) } }
+            try {
+                val out = contentResolver.openOutputStream(uri) ?: throw IllegalStateException("open")
+                out.use { o -> FileInputStream(src).use { it.copyTo(o) } }
+            } catch (e: Exception) {
+                // Never leave a half-written, hidden (pending) file behind in Downloads.
+                try { contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+                throw e
+            }
             values.clear()
             values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             contentResolver.update(uri, values, null, null)
@@ -98,7 +231,12 @@ class MainActivity : FlutterActivity() {
         val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         dir.mkdirs()
         val dest = unique(dir, name)
-        src.copyTo(dest, overwrite = false)
+        try {
+            src.copyTo(dest, overwrite = false)
+        } catch (e: Exception) {
+            dest.delete()
+            throw e
+        }
         MediaScannerConnection.scanFile(this, arrayOf(dest.absolutePath), arrayOf(mime), null)
         return dest.absolutePath
     }
@@ -112,7 +250,13 @@ class MainActivity : FlutterActivity() {
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: throw IllegalStateException("insert")
-            contentResolver.openOutputStream(uri)?.use { o -> FileInputStream(src).use { it.copyTo(o) } }
+            try {
+                val out = contentResolver.openOutputStream(uri) ?: throw IllegalStateException("open")
+                out.use { o -> FileInputStream(src).use { it.copyTo(o) } }
+            } catch (e: Exception) {
+                try { contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+                throw e
+            }
             values.clear()
             values.put(MediaStore.Images.Media.IS_PENDING, 0)
             contentResolver.update(uri, values, null, null)
@@ -122,7 +266,12 @@ class MainActivity : FlutterActivity() {
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), album)
         dir.mkdirs()
         val dest = unique(dir, name)
-        src.copyTo(dest, overwrite = false)
+        try {
+            src.copyTo(dest, overwrite = false)
+        } catch (e: Exception) {
+            dest.delete()
+            throw e
+        }
         MediaScannerConnection.scanFile(this, arrayOf(dest.absolutePath), arrayOf(mime), null)
         return dest.absolutePath
     }

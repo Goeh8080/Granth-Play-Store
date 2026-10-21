@@ -11,6 +11,7 @@ import '../state/toast.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
 import '../widgets/common.dart';
+import '../widgets/live_panel.dart';
 import '../widgets/overlays.dart';
 import '../widgets/panel.dart';
 
@@ -21,7 +22,7 @@ class GalleryPanel extends StatefulWidget {
   State<GalleryPanel> createState() => _GalleryPanelState();
 }
 
-class _GalleryPanelState extends State<GalleryPanel> {
+class _GalleryPanelState extends State<GalleryPanel> with LivePanel {
   List<GalleryItem> _items = [];
   List<GalleryFolder> _folders = [];
   String _folder = '';
@@ -156,12 +157,14 @@ class _GalleryPanelState extends State<GalleryPanel> {
           ),
         ),
       ),
-      gridSliver(
+      // Keyed by the column count: switching 1×1 / 2×2 / 3×3 re-lays out the grid and
+      // replays the staggered card entry, so the change is visible and animated.
+      KeyedSubtree(key: ValueKey('grid-$cols'), child: gridSliver(
         count: rows.length,
         cols: cols,
         gap: 14,
         item: (context, i) => Entry(index: i + 3, dx: dx, child: _card(rows[i])),
-      ),
+      )),
       if (rows.isEmpty) const SliverToBoxAdapter(child: EmptyState(title: 'अभी खाली है', body: 'किसी चित्र के ↓ या कार्ड के PDF बटन से यहाँ सेव होगा।')),
     ]);
   }

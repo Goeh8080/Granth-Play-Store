@@ -6,6 +6,8 @@ shell around a React WebView (`index.html`). This port draws every screen native
 same layout, colours, fonts (Noto Sans Devanagari, Yatra One, Tiro Devanagari Sanskrit), icons and Hindi text.
 The only intended change is smoother animations.
 
+See [docs/PARITY.md](docs/PARITY.md) for the full feature-parity checklist against the original app, and the original bugs that were not copied.
+
 ## Features (ported from the web bundle)
 
 | Area | What works |
@@ -14,10 +16,10 @@ The only intended change is smoother animations.
 | Offline pages | Every granth cover and praman page is downloaded in the background by 6 workers, covers first. Progress shows in the sync strip (`पेज सेव हो रहे हैं d/t`). Granths that are fully saved get an `ऑफलाइन` pill. |
 | Dashboard | Counts, note card, mail link to `sadgranthpraman@gmail.com` (tries Gmail first, then `mailto:`). |
 | Topics | 1×1 / 2×2 grid, fuzzy Hindi/Hinglish search (a port of the original search pipeline), share link, topic PDF, **Multiple topic PDF** that merges several topics into one book. |
-| Granths | 1×1 / 2×2 / 3×3 grid, cover viewer, image save, Share, Original PDF link, हाईलाइट PDF. |
+| Granths | 1×1 / 2×2 / 3×3 grid, cover viewer, image save, Share, Original PDF link, हाईलाइट PDF, **Multiple granth PDF** (one PDF per ticked granth, made in parallel). |
 | प्रमाण | Filter by topic / granth / id. Ordered by chapter, verse and page, the same way the original orders them, including the Kabir Sagar book order. Thumbnails, मुख्य badge, YouTube player, topic and granth pills, Share, PDF. |
 | Gallery | PDF / चित्र tabs, folders (create, rename, delete), move items to a folder, open, save to the phone, share, delete with confirmation. |
-| PDF engine | A port of the original `buildBookPdf`. It has both styles: “PDF विषय के साथ” and “केवल चित्र”. It draws the decorated topic cover page, shapes Devanagari text with Flutter’s text engine, adds page numbers and a gallery preview. Jobs run in a queue with progress, ETA, cancel (रोकें) and one automatic retry. Finished PDFs are copied to **Downloads** and also saved in the app gallery. |
+| PDF engine | A port of the original `buildBookPdf`. It has both styles: “PDF विषय के साथ” and “केवल चित्र”. It draws the decorated topic cover page, shapes Devanagari text with Flutter’s text engine, adds page numbers and a gallery preview. Pages stream to disk from a background isolate (flat memory). Saved JPEGs are embedded as-is; others are scaled natively. Up to 3 PDFs build at once (1–2 on low-RAM phones). Each has its own progress, ETA, रोकें, one automatic retry and a “फिर कोशिश करें” button. Free space is checked first, and partial files are always cleaned up. Finished PDFs are copied to **Downloads** and also saved in the app gallery. |
 | Android | Deep links `granth://open?...` and `https://granth.grok.me/open?...`. Back button: closes the open overlay, then walks the history, then a double back on the Dashboard asks before exiting. The last screen is restored when the app starts again. Pictures are saved to *Pictures/ग्रंथ प्रबंधन*. |
 | Settings | PDF style, global layout, hidden **कार्ड स्टाइल** setting (tap *Version* 5 times) with all 8 looks: Bento + Clay, सादा, Glass, Neu, Clay, Material, Flat, Bento. |
 

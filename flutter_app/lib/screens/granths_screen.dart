@@ -13,6 +13,7 @@ import '../state/router.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
 import '../widgets/common.dart';
+import '../widgets/live_panel.dart';
 import '../widgets/granth_image.dart';
 import '../widgets/overlays.dart';
 import '../widgets/panel.dart';
@@ -25,10 +26,9 @@ class GranthsPanel extends StatefulWidget {
   State<GranthsPanel> createState() => _GranthsPanelState();
 }
 
-class _GranthsPanelState extends State<GranthsPanel> {
+class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
   String _q = '';
   final _log = SearchLogger();
-  final Map<String, SearchDoc> _docs = {};
   List<Granth>? _src;
 
   @override
@@ -42,9 +42,8 @@ class _GranthsPanelState extends State<GranthsPanel> {
     final all = CatalogStore.I.granths;
     if (!identical(all, _src)) {
       _src = all;
-      _docs.clear();
     }
-    var rows = searchRows(all, _q, (g) => _docs[g.id] ??= docOf([g.title, g.author, g.description]));
+    var rows = searchRows(all, _q, CatalogStore.I.granthDoc);
     if (_q.trim().isEmpty) {
       rows = [...rows];
       stableSort(rows, (a, b) => numericCompare(a.position, b.position));
@@ -62,6 +61,14 @@ class _GranthsPanelState extends State<GranthsPanel> {
             icon: 'library',
             title: 'Granths',
             subtitle: 'Sacred texts and scriptures',
+            trailing: Pressable(
+              onTap: () => showPop<void>(context, (ctx) => _MultiGranthSheet(granths: rows.isEmpty ? all : rows)),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(color: GColors.paper, border: Border.all(color: GColors.maroon), borderRadius: BorderRadius.circular(999)),
+                child: Text('Multiple granth PDF', style: GText.sans(size: 12, weight: FontWeight.w700, color: GColors.maroon, height: 1.2)),
+              ),
+            ),
             tools: Tools(
               grid: GridSwitch(options: const [1, 2, 3], value: cols, onChanged: (v) => UiPrefs.I.setCols(Store.kGranthCols, v)),
               search: SearchField(placeholder: 'ग्रंथ का नाम — gita, kabir', onChanged: (v) => setState(() => _q = v)),
@@ -70,12 +77,14 @@ class _GranthsPanelState extends State<GranthsPanel> {
         ),
       ),
       const SliverToBoxAdapter(child: SizedBox(height: 18)),
-      gridSliver(
+      // Keyed by the column count: switching 1×1 / 2×2 / 3×3 re-lays out the grid and
+      // replays the staggered card entry, so the change is visible and animated.
+      KeyedSubtree(key: ValueKey('grid-$cols'), child: gridSliver(
         count: rows.length,
         cols: cols,
         gap: cols == 1 ? 14 : (cols == 2 ? 10 : 8),
         item: (context, i) => Entry(index: i + 1, dx: dx, child: GranthCard(granth: rows[i], index: i + 1, total: rows.length, cols: cols)),
-      ),
+      )),
       if (rows.isEmpty) const SliverToBoxAdapter(child: EmptyState(title: 'कोई ग्रंथ नहीं', body: 'सिंक के बाद पवित्र ग्रंथ यहाँ खुलेंगे।')),
     ]);
   }
@@ -212,6 +221,102 @@ class _GranthCardState extends State<GranthCard> with SingleTickerProviderStateM
           ),
         );
       },
+    );
+  }
+}
+
+/// "Multiple granth PDF" — tick several granths; each gets its own PDF, made in parallel.
+class _MultiGranthSheet extends StatefulWidget {
+  const _MultiGranthSheet({required this.granths});
+  final List<Granth> granths;
+  @override
+  State<_MultiGranthSheet> createState() => _MultiGranthSheetState();
+}
+
+class _MultiGranthSheetState extends State<_MultiGranthSheet> {
+  final List<String> _sel = [];
+
+  @override
+  Widget build(BuildContext context) {
+    final h = MediaQuery.sizeOf(context).height;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: 520, maxHeight: (h * 0.78).clamp(0, 720)),
+      child: SheetCard(scroll: false, children: [
+        SheetHead(title: 'Multiple granth PDF', onBack: () => Navigator.pop(context)),
+        Text('जिन ग्रंथों की PDF चाहिए उन्हें चुनें। हर ग्रंथ की अलग PDF एक साथ बनेगी।', style: GText.sans(size: 13, color: GColors.muted)),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          Pill(label: 'सभी', onTap: () => setState(() => _sel
+            ..clear()
+            ..addAll(widget.granths.map((e) => e.id)))),
+          Pill(label: 'साफ', onTap: () => setState(_sel.clear)),
+          SizedBox(
+            width: 200,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 160),
+              opacity: _sel.isEmpty ? 0.45 : 1,
+              child: SheetButton(
+                label: 'PDF बनाएँ (${_sel.length})',
+                primary: true,
+                enabled: _sel.isNotEmpty,
+                onTap: () {
+                  final picked = [for (final id in _sel) ...widget.granths.where((g) => g.id == id)];
+                  final nav = Navigator.of(context);
+                  final ctx = nav.context;
+                  nav.pop();
+                  askPdf(ctx, MultiGranthPdfRequest(picked));
+                },
+              ),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Flexible(
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: widget.granths.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            itemBuilder: (context, i) {
+              final g = widget.granths[i];
+              final on = _sel.contains(g.id);
+              return Pressable(
+                scale: 0.98,
+                onTap: () => setState(() => on ? _sel.remove(g.id) : _sel.add(g.id)),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: on ? const Color(0xFFFFF4EA) : GColors.paper,
+                    border: Border.all(color: on ? GColors.maroon : const Color(0xFFE7D7B8)),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      width: 22,
+                      height: 22,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: on ? GColors.maroon : Colors.white,
+                        border: Border.all(color: GColors.maroon, width: 1.5),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: on ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(g.title, style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.text)),
+                        if (g.pramanCount > 0) Text('${g.pramanCount} प्रमाण', style: GText.sans(size: 12, color: GColors.muted)),
+                      ]),
+                    ),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ),
+      ]),
     );
   }
 }

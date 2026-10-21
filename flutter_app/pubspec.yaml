@@ -18,7 +18,6 @@ dependencies:
   open_filex: ^4.7.0
   package_info_plus: ^9.0.0
   path_provider: ^2.1.5
-  pdf: ^3.11.3
   share_plus: ^12.0.0
   shared_preferences: ^2.5.3
   unorm_dart: ^0.3.0

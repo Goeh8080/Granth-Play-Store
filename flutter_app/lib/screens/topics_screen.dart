@@ -12,6 +12,7 @@ import '../state/router.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
 import '../widgets/common.dart';
+import '../widgets/live_panel.dart';
 import '../widgets/overlays.dart';
 import '../widgets/panel.dart';
 import '../widgets/pdf_sheets.dart';
@@ -23,13 +24,12 @@ class TopicsPanel extends StatefulWidget {
   State<TopicsPanel> createState() => _TopicsPanelState();
 }
 
-class _TopicsPanelState extends State<TopicsPanel> {
+class _TopicsPanelState extends State<TopicsPanel> with LivePanel {
   String _q = '';
   final _log = SearchLogger();
-  final Map<String, SearchDoc> _docs = {};
   List<Topic>? _src;
 
-  SearchDoc _doc(Topic t) => _docs[t.id] ??= docOf([t.title, t.description]);
+  SearchDoc _doc(Topic t) => CatalogStore.I.topicDoc(t);
 
   @override
   void dispose() {
@@ -42,7 +42,6 @@ class _TopicsPanelState extends State<TopicsPanel> {
     final all = CatalogStore.I.topics;
     if (!identical(all, _src)) {
       _src = all;
-      _docs.clear();
     }
     var rows = searchRows(all, _q, _doc);
     if (_q.trim().isEmpty) {
@@ -78,7 +77,9 @@ class _TopicsPanelState extends State<TopicsPanel> {
         ),
       ),
       const SliverToBoxAdapter(child: SizedBox(height: 18)),
-      gridSliver(
+      // Keyed by the column count: switching 1×1 / 2×2 / 3×3 re-lays out the grid and
+      // replays the staggered card entry, so the change is visible and animated.
+      KeyedSubtree(key: ValueKey('grid-$cols'), child: gridSliver(
         count: rows.length,
         cols: cols,
         gap: 14,
@@ -92,7 +93,7 @@ class _TopicsPanelState extends State<TopicsPanel> {
             padding: cols == 2 ? 12 : 16,
           ),
         ),
-      ),
+      )),
       if (rows.isEmpty) const SliverToBoxAdapter(child: EmptyState(title: 'कोई विषय नहीं', body: 'सिंक पूरा होने पर विषय यहाँ दिखेंगे।')),
     ]);
   }

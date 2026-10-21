@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 6–11 Auto Backup. Only small, rebuildable data: settings and the saved catalog.
+     Page pictures, generated PDFs, the in-app gallery and temp files are not backed up
+     (they are large and are downloaded / made again). -->
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+    <include domain="root" path="app_flutter/granth/catalog.json" />
+    <include domain="root" path="app_flutter/granth/folders.json" />
+</full-backup-content>

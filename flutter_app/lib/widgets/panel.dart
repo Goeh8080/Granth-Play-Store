@@ -76,13 +76,16 @@ Widget gridSliver({required int count, required int cols, required double gap, r
   return SliverList.builder(
     itemCount: rows,
     itemBuilder: (context, r) {
+      // 1×1: the card itself. (Wrapping it in `Expanded` outside a Row threw a layout error,
+      // which a release build shows as an empty screen — the "1×1 does nothing" bug.)
+      if (cols == 1) return Padding(padding: EdgeInsets.only(top: r == 0 ? 0 : gap), child: item(context, r));
       final cells = <Widget>[];
       for (var c = 0; c < cols; c++) {
         final i = r * cols + c;
         if (c > 0) cells.add(SizedBox(width: gap));
         cells.add(Expanded(child: i < count ? item(context, i) : const SizedBox.shrink()));
       }
-      final row = cols == 1 ? cells.first : IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: cells));
+      final row = IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: cells));
       return Padding(padding: EdgeInsets.only(top: r == 0 ? 0 : gap), child: row);
     },
   );

@@ -76,11 +76,15 @@ class Store {
 
   Future<void> setInt(String k, int v) async => _prefs?.setInt(k, v);
 
-  Future<Object?> readJson(String name) async {
+  /// Reads a JSON file; a missing or damaged file gives null (never throws).
+  /// [background] decodes on another isolate (the catalog is ~1 MB).
+  Future<Object?> readJson(String name, {bool background = false}) async {
+    if (_root == null) return null;
     final f = File('${root.path}/$name');
-    if (!await f.exists()) return null;
     try {
-      return jsonDecode(await f.readAsString());
+      if (!await f.exists()) return null;
+      final text = await f.readAsString();
+      return background && text.length > 100000 ? await compute(jsonDecode, text) : jsonDecode(text);
     } catch (_) {
       return null;
     }

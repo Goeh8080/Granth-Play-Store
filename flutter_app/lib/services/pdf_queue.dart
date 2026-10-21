@@ -3,22 +3,56 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../models/models.dart';
 import 'api.dart';
 import 'catalog_store.dart';
+import 'device_profile.dart';
 import 'events.dart';
 import 'file_actions.dart';
 import 'gallery_service.dart';
 import 'image_cache.dart';
+import 'native_bridge.dart';
 import 'order.dart';
 import 'pdf_builder.dart';
 import 'storage.dart';
 
-enum PdfPhase { queue, images, pages, save, done, cancelled, error }
+enum PdfPhase { waiting, images, pages, save, done, cancelled, error }
+
+/// Clear Hindi message shown on a failed PDF row (with a "फिर कोशिश करें" button).
+const kPdfFailed = 'PDF नहीं बन पाई। इंटरनेट और फ़ोन की जगह जाँचकर “फिर कोशिश करें” दबाएँ।';
+
+/// Shown when the phone has too little free space for the PDF (no automatic retry).
+String pdfNoSpaceMessage(int? freeBytes) {
+  final free = freeBytes == null ? '' : ' (अभी ${formatBytes(freeBytes)} खाली)';
+  return 'फ़ोन में जगह कम है$free। कुछ जगह खाली करके “फिर कोशिश करें” दबाएँ।';
+}
+
+/// Not enough free storage for the PDF and its copies.
+class PdfNoSpace implements Exception {
+  PdfNoSpace(this.freeBytes);
+  final int? freeBytes;
+  @override
+  String toString() => 'PdfNoSpace($freeBytes)';
+}
+
+bool _isNoSpace(Object e) {
+  if (e is PdfNoSpace) return true;
+  if (e is FileSystemException) {
+    final code = e.osError?.errorCode;
+    final msg = '${e.message} ${e.osError?.message}'.toLowerCase();
+    return code == 28 || msg.contains('no space') || msg.contains('enospc');
+  }
+  return false;
+}
+
+/// Builds the PDF and returns the path of the finished (temporary) file.
+typedef PdfRun = Future<String> Function(PdfJob job, void Function(PdfPhase, int, int) report);
 
 class PdfJob {
-  PdfJob({required this.id, required this.title, required this.fileName, required this.galleryId, this.topic = '', this.granth = '', this.granthId = '', this.text = ''});
+  PdfJob({required this.id, required this.title, required this.fileName, required this.galleryId, this.topic = '', this.granth = '', this.granthId = '', this.text = '', this.weight = 1, this.pages = 1, String? dedupeKey})
+      : dedupeKey = dedupeKey ?? galleryId;
   final String id;
   final String title;
   final String fileName;
@@ -27,10 +61,20 @@ class PdfJob {
   final String granth;
   final String granthId;
   final String text;
-  PdfPhase phase = PdfPhase.queue;
+
+  /// Concurrency slots this job uses (very large books take two so memory stays bounded).
+  final int weight;
+
+  /// Number of page specs — used for the free-space check and the memory budget.
+  final int pages;
+
+  /// Two taps that ask for the same PDF while it is still being made share one job.
+  final String dedupeKey;
+  PdfPhase phase = PdfPhase.waiting;
   int done = 0;
   int total = 1;
   int percent = 0;
+  int peak = 0;
   int? etaMs;
   int startedAt = DateTime.now().millisecondsSinceEpoch;
   int? finishedAt;
@@ -38,38 +82,73 @@ class PdfJob {
   int? size;
   Uint8List? preview;
   String? error;
+  int missingImages = 0;
   bool cancelled = false;
-  bool retried = false;
+  int attempts = 0;
+  PdfRun? run;
 
-  bool get active => phase == PdfPhase.queue || phase == PdfPhase.images || phase == PdfPhase.pages || phase == PdfPhase.save;
+  bool get active => phase == PdfPhase.waiting || phase == PdfPhase.images || phase == PdfPhase.pages || phase == PdfPhase.save;
+  bool get canRetry => phase == PdfPhase.error || phase == PdfPhase.cancelled;
 }
 
-typedef _Run = Future<Uint8List> Function(PdfJob job, void Function(PdfPhase, int, int) report);
-
-/// `Nt`/`Ft` — PDF job queue: one job at a time, one automatic retry, cancel, ETA, max 12 rows.
+/// PDF maker. There is no visible queue any more: every requested PDF starts right away
+/// and gets its own progress row. Internally at most [maxSlots] build at the same time
+/// (to avoid running out of memory on big granths); each job retries once on its own, and
+/// a failed job can be retried without touching the others.
 class PdfQueue extends ChangeNotifier {
   PdfQueue._();
   static final PdfQueue I = PdfQueue._();
 
-  final List<PdfJob> jobs = [];
-  final List<(PdfJob, _Run)> _pending = [];
-  bool _running = false;
-  int _peak = 0;
+  /// Fresh state for tests.
+  @visibleForTesting
+  void debugReset() {
+    for (final j in jobs) {
+      j.cancelled = true;
+    }
+    jobs.clear();
+    _waiting.clear();
+    _busy = 0;
+    slotsOverride = null;
+    freeBytes = NativeBridge.freeBytes;
+    retryDelay = const Duration(milliseconds: 800);
+    finished.value = null;
+  }
 
-  /// Fired when a job finishes (the "PDF तैयार" card).
+  /// PDFs built at the same time: 3 on ordinary phones, 1–2 on low-RAM phones.
+  int get maxSlots => slotsOverride ?? DeviceProfile.I.pdfSlots;
+  @visibleForTesting
+  int? slotsOverride;
+  static const maxRows = 40;
+
+  /// Free-space probe (native StatFs). Replaceable in tests.
+  @visibleForTesting
+  Future<int?> Function() freeBytes = NativeBridge.freeBytes;
+
+  /// Rough bytes needed: the PDF (~300 KB a page) is kept in the app folder, in the
+  /// in-app gallery and copied to Downloads, plus a safety margin.
+  static int bytesNeeded(int pages) => math.max(1, pages) * 300 * 1024 * 3 + (25 << 20);
+
+  final List<PdfJob> jobs = [];
+  final List<PdfJob> _waiting = [];
+  int _busy = 0;
+
+  /// Fired when a job finishes (the "PDF तैयार" card / auto-save to Downloads).
   final ValueNotifier<PdfJob?> finished = ValueNotifier(null);
 
   int get activeCount => jobs.where((j) => j.active).length;
 
+  @visibleForTesting
+  int get runningSlots => _busy;
+
   String _id() => 'pdf-${DateTime.now().millisecondsSinceEpoch}-${math.Random().nextInt(1 << 20).toRadixString(36)}';
 
-  int _percent(PdfPhase p, int done, int total) {
+  int _percent(PdfJob j, PdfPhase p, int done, int total) {
     if (p == PdfPhase.done) return 100;
     if (p == PdfPhase.save) return 99;
     final r = done / math.max(1, total);
     final i = (p == PdfPhase.images ? r * 15 : r * 99).round();
-    _peak = math.max(_peak, math.min(99, i));
-    return _peak;
+    j.peak = math.max(j.peak, math.min(99, i));
+    return j.peak;
   }
 
   int? _eta(int started, int pct) {
@@ -78,88 +157,199 @@ class PdfQueue extends ChangeNotifier {
     return n < 500 ? null : math.max(1000, ((100 - pct) / pct * n).round());
   }
 
-  void _enqueue(PdfJob job, _Run run) {
+  /// Starts [job] (as soon as a slot is free). Exposed for tests.
+  @visibleForTesting
+  PdfJob start(PdfJob job, PdfRun run) {
+    // The same PDF is already being made: keep that one instead of writing the same file twice.
+    final same = jobs.where((j) => j.active && j.dedupeKey == job.dedupeKey).firstOrNull;
+    if (same != null) return same;
+    job.run = run;
     jobs.insert(0, job);
-    if (jobs.length > 12) jobs.removeRange(12, jobs.length);
-    _pending.add((job, run));
+    _trim();
+    _waiting.add(job);
     notifyListeners();
     _pump();
+    return job;
+  }
+
+  void _trim() {
+    while (jobs.length > maxRows) {
+      final i = jobs.lastIndexWhere((j) => !j.active);
+      if (i < 0) break;
+      jobs.removeAt(i);
+    }
   }
 
   void cancel(String id) {
     for (final j in jobs) {
-      if (j.id == id) {
+      if (j.id == id && j.active) {
         j.cancelled = true;
         j.phase = PdfPhase.cancelled;
         j.etaMs = 0;
+        _waiting.remove(j);
       }
     }
     notifyListeners();
   }
 
-  Future<void> _pump() async {
-    if (_running) return;
-    _running = true;
-    try {
-      while (_pending.isNotEmpty) {
-        final (job, run) = _pending.removeAt(0);
-        if (job.cancelled) continue;
-        final started = DateTime.now().millisecondsSinceEpoch;
-        _peak = 0;
-        job
-          ..phase = PdfPhase.pages
-          ..startedAt = started
-          ..percent = 0
-          ..done = 0
-          ..total = 1;
-        notifyListeners();
-        try {
-          final bytes = await run(job, (p, d, t) {
-            if (job.cancelled) return;
-            final pct = _percent(p, d, t);
-            job
-              ..phase = p
-              ..done = d
-              ..total = t
-              ..percent = pct
-              ..etaMs = _eta(started, pct);
-            notifyListeners();
-          });
-          if (job.cancelled) {
-            job.phase = PdfPhase.cancelled;
-            notifyListeners();
-            continue;
-          }
-          final file = await FileActions.writeLocal(bytes, job.fileName);
+  /// Re-runs one failed or stopped PDF; the other rows are not affected.
+  void retry(String id) {
+    final j = jobs.where((e) => e.id == id).firstOrNull;
+    if (j == null || !j.canRetry || j.run == null) return;
+    j
+      ..cancelled = false
+      ..error = null
+      ..attempts = 0
+      ..phase = PdfPhase.waiting
+      ..percent = 0
+      ..peak = 0
+      ..done = 0
+      ..etaMs = null
+      ..finishedAt = null;
+    _waiting.add(j);
+    notifyListeners();
+    _pump();
+  }
+
+  /// Removes a finished / failed row from the list.
+  void dismiss(String id) {
+    jobs.removeWhere((j) => j.id == id && !j.active);
+    notifyListeners();
+  }
+
+  void _pump() {
+    while (_waiting.isNotEmpty) {
+      final next = _waiting.first;
+      final w = math.min(next.weight, maxSlots);
+      if (_busy > 0 && _busy + w > maxSlots) return;
+      _waiting.removeAt(0);
+      if (next.cancelled) continue;
+      _busy += w;
+      unawaited(_runJob(next).whenComplete(() {
+        _busy -= w;
+        _pump();
+      }));
+    }
+  }
+
+  Future<void> _runJob(PdfJob job) async {
+    var stalls = 0;
+    while (true) {
+      final started = DateTime.now().millisecondsSinceEpoch;
+      job
+        ..attempts += 1
+        ..phase = PdfPhase.images
+        ..startedAt = started
+        ..percent = 0
+        ..peak = 0
+        ..done = 0
+        ..total = 1
+        ..missingImages = 0;
+      notifyListeners();
+      try {
+        // Check storage before doing any work (clear message instead of a half-written file).
+        final free = await freeBytes().catchError((Object _) => null);
+        if (free != null && free < bytesNeeded(job.pages)) throw PdfNoSpace(free);
+        final built = await job.run!(job, (p, d, t) {
+          if (job.cancelled) return;
+          final pct = _percent(job, p, d, t);
           job
-            ..phase = PdfPhase.done
-            ..percent = 100
-            ..etaMs = 0
-            ..filePath = file.path
-            ..size = bytes.length
-            ..finishedAt = DateTime.now().millisecondsSinceEpoch;
+            ..phase = p
+            ..done = d
+            ..total = t
+            ..percent = pct
+            ..etaMs = _eta(started, pct);
           notifyListeners();
-          finished.value = job;
-          EventLog.I.log('pdf_download', job.granthId.isNotEmpty ? job.granthId : job.id, job.fileName);
-        } catch (e) {
-          if (job.cancelled || e is PdfCancelled) {
-            job.phase = PdfPhase.cancelled;
-            job.etaMs = 0;
-          } else if (job.retried) {
-            job
-              ..phase = PdfPhase.error
-              ..etaMs = 0
-              ..error = e is StateError ? e.message : 'PDF नहीं बनी';
-          } else {
-            job.retried = true;
-            _pending.insert(0, (job, run));
-          }
-          notifyListeners();
+        });
+        if (job.cancelled) {
+          await _deleteQuietly(built);
+          throw PdfCancelled();
         }
+        final file = await FileActions.moveLocal(built, job.fileName);
+        final size = await file.length();
+        if (job.cancelled) {
+          // Stopped while saving: do not leave the file behind.
+          try {
+            await file.delete();
+          } catch (_) {}
+          throw PdfCancelled();
+        }
+        job
+          ..phase = PdfPhase.done
+          ..percent = 100
+          ..etaMs = 0
+          ..filePath = file.path
+          ..size = size
+          ..finishedAt = DateTime.now().millisecondsSinceEpoch;
+        notifyListeners();
+        finished.value = job;
+        try {
+          EventLog.I.log('pdf_download', job.granthId.isNotEmpty ? job.granthId : job.id, job.fileName);
+        } catch (_) {}
+        return;
+      } catch (e, st) {
+        if (job.cancelled || e is PdfCancelled) {
+          job
+            ..phase = PdfPhase.cancelled
+            ..etaMs = 0;
+          notifyListeners();
+          return;
+        }
+        debugPrint('PDF "${job.title}" attempt ${job.attempts} failed: $e\n$st');
+        if (_isNoSpace(e)) {
+          final free = e is PdfNoSpace ? e.freeBytes : await freeBytes().catchError((Object _) => null);
+          _fail(job, pdfNoSpaceMessage(free));
+          return;
+        }
+        if (e is PdfRenderStalled && stalls < 3) {
+          // Drawing stopped while the app was in the background: continue when it is back.
+          stalls++;
+          job.phase = PdfPhase.waiting;
+          notifyListeners();
+          await waitForeground();
+          if (job.cancelled) return;
+          job.attempts -= 1;
+          continue;
+        }
+        if (job.attempts < 2) {
+          await Future<void>.delayed(retryDelay);
+          if (job.cancelled) return;
+          continue; // one automatic retry
+        }
+        _fail(job, e is OutOfMemoryError ? 'फ़ोन की मेमोरी कम पड़ गई। दूसरे ऐप बंद करके “फिर कोशिश करें” दबाएँ।' : kPdfFailed);
+        return;
       }
-    } finally {
-      _running = false;
-      if (_pending.isNotEmpty) unawaited(_pump());
+    }
+  }
+
+  static Future<void> _deleteQuietly(String path) async {
+    try {
+      final f = File(path);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+  }
+
+  /// Temporary file a job builds into (`*.part`, removed on failure / next start).
+  static String workPath(PdfJob job) => '${Store.I.pdfDir}/${job.id}.pdf.part';
+
+  void _fail(PdfJob job, String message) {
+    job
+      ..phase = PdfPhase.error
+      ..etaMs = 0
+      ..error = message
+      ..finishedAt = DateTime.now().millisecondsSinceEpoch;
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  Duration retryDelay = const Duration(milliseconds: 800);
+
+  /// Resolves when the app is in the foreground (or after 10 minutes at most).
+  static Future<void> waitForeground() async {
+    for (var i = 0; i < 600; i++) {
+      final s = WidgetsBinding.instance.lifecycleState;
+      if (s == null || s == AppLifecycleState.resumed) return;
+      await Future<void>.delayed(const Duration(seconds: 1));
     }
   }
 
@@ -213,42 +403,70 @@ class PdfQueue extends ChangeNotifier {
 
   static PdfStyle currentStyle() => pdfStyleFrom(Store.I.getString(Store.kPdfStyle));
 
-  /// `jh` — load page images (8 at a time) then assemble.
-  static Future<Uint8List> _assemble(List<PdfSpec> specs, PdfStyle style, PdfJob job, void Function(PdfPhase, int, int) report) async {
+  /// Fetches one page picture: cached file, otherwise download with a timeout and
+  /// up to 3 attempts. Returns null instead of failing the PDF.
+  static Future<String?> fetchImage(String path, {int attempts = 3, Duration timeout = const Duration(seconds: 45)}) async {
+    for (var i = 0; i < attempts; i++) {
+      try {
+        final f = await ImageStore.I.get(path).timeout(timeout);
+        if (f != null) return f.path;
+      } catch (_) {}
+      if (i < attempts - 1) await Future<void>.delayed(Duration(milliseconds: 600 * (i + 1)));
+    }
+    return null;
+  }
+
+  /// `jh` — make sure page images are on the device (8 at a time) then assemble.
+  /// A picture that cannot be fetched becomes a placeholder; it never fails the PDF.
+  static Future<String> _assemble(List<PdfSpec> specs, PdfStyle style, PdfJob job, void Function(PdfPhase, int, int) report) async {
     final a = math.max(1, specs.length);
-    report(PdfPhase.pages, 0, a);
+    report(PdfPhase.images, 0, a);
     var loaded = 0;
     var next = 0;
+    var missing = 0;
     Future<void> worker() async {
       while (next < specs.length) {
         if (job.cancelled) return;
         final s = specs[next++];
+        s.missing = false;
         final p = mediaPath(s.path);
-        if (p != null) {
-          final f = await ImageStore.I.get(p);
-          if (f != null) s.image = await File(f.path).readAsBytes();
+        if (p != null && s.image == null) {
+          final f = await fetchImage(p);
+          if (f != null) {
+            s.file = f;
+          } else {
+            s.missing = true;
+            missing++;
+          }
         }
         loaded++;
         report(PdfPhase.images, loaded, a);
       }
     }
 
-    await Future.wait(List.generate(math.min(8, specs.length), (_) => worker()));
+    final p = DeviceProfile.I;
+    await Future.wait(List.generate(math.min(p.imageWorkers, specs.length), (_) => worker()));
     if (job.cancelled) throw PdfCancelled();
+    job.missingImages = missing;
     final builder = BookPdfBuilder(
+      lookAhead: p.pdfLookAhead,
       isCancelled: () => job.cancelled,
       onPage: (d, t) => report(PdfPhase.pages, d, t),
       onPreview: (b) => job.preview = b,
     );
-    return builder.build(specs, style);
+    final out = workPath(job);
+    await builder.buildToFile(specs, style, out);
+    return out;
   }
 
   /// `Mh` — keep every finished PDF in the in-app gallery.
-  static Future<void> _toGallery(PdfJob job, Uint8List bytes, {required String id, required String title, String text = '', String topic = '', String granth = ''}) async {
-    if (bytes.length < 64) throw StateError('PDF खाली रह गई');
+  static Future<void> _toGallery(PdfJob job, String path, {required String id, required String title, String text = '', String topic = '', String granth = ''}) async {
     try {
-      await GalleryService.I.put(id: id, kind: GalleryKind.pdf, title: title, text: text, topic: topic, granth: granth, fileName: job.fileName, bytes: bytes, preview: job.preview);
-    } catch (_) {}
+      await GalleryService.I.putFile(id: id, kind: GalleryKind.pdf, title: title, text: text, topic: topic, granth: granth, fileName: job.fileName, source: path, preview: job.preview);
+    } catch (e) {
+      // The PDF itself is fine; only the in-app gallery copy failed (e.g. low space).
+      if (_isNoSpace(e)) rethrow;
+    }
   }
 
   void granthPdf(Granth g, PdfStyle style) {
@@ -262,14 +480,24 @@ class PdfQueue extends ChangeNotifier {
       granth: g.title,
       granthId: g.id,
       text: [g.description, ...proofs.map((e) => e.title)].where((e) => e.isNotEmpty).join('\n'),
+      weight: specs.length > 150 ? 2 : 1,
+      pages: specs.length,
     );
-    _enqueue(job, (job, report) async {
-      final bytes = await _assemble(specs, style, job, report);
+    start(job, (job, report) async {
+      final built = await _assemble(specs, style, job, report);
       report(PdfPhase.save, specs.length, specs.length);
-      await _toGallery(job, bytes, id: 'pdf-granth-${g.id}', title: g.title, text: g.description, granth: g.title);
+      await _toGallery(job, built, id: 'pdf-granth-${g.id}', title: g.title, text: g.description, granth: g.title);
       CatalogStore.I.markOffline([g.id]);
-      return bytes;
+      return built;
     });
+  }
+
+  /// Several granth PDFs at once (multi-select on the Granths screen). Each one is a
+  /// separate PDF with its own progress row; they build in parallel.
+  void granthPdfs(List<Granth> granths, PdfStyle style) {
+    for (final g in granths) {
+      granthPdf(g, style);
+    }
   }
 
   void topicPdf(Topic t, PdfStyle style) {
@@ -281,13 +509,15 @@ class PdfQueue extends ChangeNotifier {
       galleryId: 'pdf-topic-${t.id}',
       topic: t.title,
       text: [t.description, ...r.proofs.map((e) => e.title)].where((e) => e.isNotEmpty).join('\n'),
+      weight: r.specs.length > 150 ? 2 : 1,
+      pages: r.specs.length,
     );
-    _enqueue(job, (job, report) async {
-      final bytes = await _assemble(r.specs, style, job, report);
+    start(job, (job, report) async {
+      final built = await _assemble(r.specs, style, job, report);
       report(PdfPhase.save, r.specs.length, r.specs.length);
-      await _toGallery(job, bytes, id: 'pdf-topic-${t.id}', title: t.title, text: t.description, topic: t.title);
+      await _toGallery(job, built, id: 'pdf-topic-${t.id}', title: t.title, text: t.description, topic: t.title);
       CatalogStore.I.markOffline(r.granthIds);
-      return bytes;
+      return built;
     });
   }
 
@@ -307,17 +537,20 @@ class PdfQueue extends ChangeNotifier {
       galleryId: 'pdf-topics-$stamp',
       topic: topics.map((e) => e.title).join(' · '),
       text: topics.map((e) => e.title).join('\n'),
+      weight: specs.length > 150 ? 2 : 1,
+      pages: specs.length,
+      dedupeKey: 'pdf-topics:${(topics.map((e) => e.id).toList()..sort()).join(',')}',
     );
-    _enqueue(job, (job, report) async {
-      final bytes = await _assemble(specs, style, job, report);
+    start(job, (job, report) async {
+      final built = await _assemble(specs, style, job, report);
       report(PdfPhase.save, specs.length, specs.length);
-      await _toGallery(job, bytes,
+      await _toGallery(job, built,
           id: 'pdf-topics-${DateTime.now().millisecondsSinceEpoch}',
           title: title,
           text: topics.map((e) => e.description).where((e) => e.isNotEmpty).join('\n'),
           topic: topics.map((e) => e.title).join(' · '));
       CatalogStore.I.markOffline(ids);
-      return bytes;
+      return built;
     });
   }
 
@@ -333,12 +566,12 @@ class PdfQueue extends ChangeNotifier {
       granthId: p.granthId,
       text: p.description,
     );
-    _enqueue(job, (job, report) async {
-      final bytes = await _assemble([spec], style, job, report);
+    start(job, (job, report) async {
+      final built = await _assemble([spec], style, job, report);
       report(PdfPhase.save, 1, 1);
-      await _toGallery(job, bytes, id: 'pdf-praman-${p.id}', title: p.title, text: p.description, topic: p.topicTitle, granth: p.granthTitle);
+      await _toGallery(job, built, id: 'pdf-praman-${p.id}', title: p.title, text: p.description, topic: p.topicTitle, granth: p.granthTitle);
       if (p.granthId.isNotEmpty) CatalogStore.I.markOffline([p.granthId]);
-      return bytes;
+      return built;
     });
   }
 }
@@ -363,8 +596,8 @@ String etaText(int? e, PdfPhase t) {
       return 'रुक गया';
     case PdfPhase.error:
       return 'रुका — त्रुटि';
-    case PdfPhase.queue:
-      return 'कतार में';
+    case PdfPhase.waiting:
+      return 'शुरू हो रहा है';
     default:
       break;
   }
@@ -377,9 +610,8 @@ String etaText(int? e, PdfPhase t) {
 String jobLine(PdfJob e, int now) {
   final end = e.finishedAt ?? now;
   final took = formatDuration(math.max(0, end - e.startedAt));
-  final first = (e.phase == PdfPhase.pages || e.phase == PdfPhase.done)
-      ? '${e.phase == PdfPhase.done ? e.total : e.done}/${e.total} पृष्ठ'
-      : (e.phase == PdfPhase.images ? '${e.done}/${e.total} चित्र' : '');
+  final first =
+      (e.phase == PdfPhase.pages || e.phase == PdfPhase.done) ? '${e.phase == PdfPhase.done ? e.total : e.done}/${e.total} पृष्ठ' : (e.phase == PdfPhase.images ? '${e.done}/${e.total} चित्र' : '');
   return [first, '$took लगे', etaText(e.etaMs, e.phase)].where((s) => s.isNotEmpty).join(' · ');
 }
 
@@ -390,7 +622,7 @@ String phaseText(PdfJob m) {
     PdfPhase.pages => 'पृष्ठ जुड़ रहे हैं',
     PdfPhase.save => 'सेव हो रहा है',
     PdfPhase.done => 'तैयार',
-    _ => 'कतार में',
+    _ => 'शुरू हो रहा है',
   };
   return '${m.percent}% · $p';
 }

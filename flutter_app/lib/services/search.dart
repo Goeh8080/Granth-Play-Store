@@ -6,6 +6,8 @@ import 'package:unorm_dart/unorm_dart.dart' as unorm;
 final RegExp _matra = RegExp('[\u093e\u093f\u0940\u0941\u0942\u0943\u0944\u0947\u0948\u094b\u094c\u0902\u0901\u094d\u093c\u200c\u200d]');
 final RegExp _punct = RegExp(r'[^\p{L}\p{M}\p{N}\s]', unicode: true);
 final RegExp _ws = RegExp(r'\s+');
+final RegExp _alnum = RegExp(r'[a-z0-9]');
+final RegExp _skel = RegExp(r'[aeiou\s]');
 
 const List<List<String>> synonymClusters = [
   ['मांस', 'माँस', 'mans', 'maans', 'maas', 'meat'],
@@ -44,10 +46,42 @@ const List<List<String>> synonymClusters = [
 ];
 
 const Map<String, String> _cons = {
-  'क': 'k', 'ख': 'kh', 'ग': 'g', 'घ': 'gh', 'ङ': 'ng', 'च': 'ch', 'छ': 'chh', 'ज': 'j', 'झ': 'jh', 'ञ': 'ny',
-  'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'dh', 'ण': 'n', 'त': 't', 'थ': 'th', 'द': 'd', 'ध': 'dh', 'न': 'n',
-  'प': 'p', 'फ': 'ph', 'ब': 'b', 'भ': 'bh', 'म': 'm', 'य': 'y', 'र': 'r', 'ल': 'l', 'व': 'v', 'श': 'sh',
-  'ष': 'sh', 'स': 's', 'ह': 'h', 'क्ष': 'ksh', 'त्र': 'tr', 'ज्ञ': 'gy',
+  'क': 'k',
+  'ख': 'kh',
+  'ग': 'g',
+  'घ': 'gh',
+  'ङ': 'ng',
+  'च': 'ch',
+  'छ': 'chh',
+  'ज': 'j',
+  'झ': 'jh',
+  'ञ': 'ny',
+  'ट': 't',
+  'ठ': 'th',
+  'ड': 'd',
+  'ढ': 'dh',
+  'ण': 'n',
+  'त': 't',
+  'थ': 'th',
+  'द': 'd',
+  'ध': 'dh',
+  'न': 'n',
+  'प': 'p',
+  'फ': 'ph',
+  'ब': 'b',
+  'भ': 'bh',
+  'म': 'm',
+  'य': 'y',
+  'र': 'r',
+  'ल': 'l',
+  'व': 'v',
+  'श': 'sh',
+  'ष': 'sh',
+  'स': 's',
+  'ह': 'h',
+  'क्ष': 'ksh',
+  'त्र': 'tr',
+  'ज्ञ': 'gy',
 };
 const Map<String, String> _vowelSigns = {'ा': 'a', 'ि': 'i', 'ी': 'i', 'ु': 'u', 'ू': 'u', 'ृ': 'ri', 'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au'};
 const Set<String> stopWords = {'की', 'के', 'का', 'कि', 'में', 'से', 'को', 'और', 'या', 'है', 'पर', 'यह', 'वह', 'एक', 'भी', 'हो', 'ने', 'the', 'of', 'and', 'in', 'to', 'a'};
@@ -59,15 +93,8 @@ String normalizeText(String e) => unorm.nfc(e).toLowerCase().replaceAll(_punct, 
 String stripMatras(String e) => normalizeText(e).replaceAll(_matra, '');
 
 /// `On`
-String foldLatin(String e) => e
-    .replaceAll('aa', 'a')
-    .replaceAll('ee', 'i')
-    .replaceAll('oo', 'u')
-    .replaceAll('ai', 'e')
-    .replaceAll('au', 'o')
-    .replaceAll('w', 'v')
-    .replaceAll('ph', 'f')
-    .replaceAll('q', 'k');
+String foldLatin(String e) =>
+    e.replaceAll('aa', 'a').replaceAll('ee', 'i').replaceAll('oo', 'u').replaceAll('ai', 'e').replaceAll('au', 'o').replaceAll('w', 'v').replaceAll('ph', 'f').replaceAll('q', 'k');
 
 /// `kn` — Devanagari → Latin.
 String transliterate(String input) {
@@ -119,7 +146,7 @@ String transliterate(String input) {
     final pair = r + at(e + 1);
     final a = _cons[pair] ?? _cons[r];
     if (a == null) {
-      if (RegExp(r'[a-z0-9]').hasMatch(r)) b.write(r);
+      if (_alnum.hasMatch(r)) b.write(r);
       continue;
     }
     if (_cons.containsKey(pair)) e += 1;
@@ -151,19 +178,20 @@ String transliterate(String input) {
 }
 
 /// `An`
-String skeleton(String e) => e.replaceAll(RegExp(r'[aeiou\s]'), '');
+String skeleton(String e) => e.replaceAll(_skel, '');
+
+/// Synonym clusters normalized once (was redone for every row and keystroke).
+final List<({List<String> norm, List<String> roman})> _clusters = [
+  for (final c in synonymClusters) (norm: c.map(normalizeText).toList(), roman: c.map((m) => foldLatin(transliterate(m))).toList()),
+];
 
 /// `jn` — expand a query token with synonyms.
 List<String> expandToken(String e) {
   final t = normalizeText(e);
   final n = foldLatin(transliterate(t));
   final r = <String>{t, n, stripMatras(t)};
-  for (final cluster in synonymClusters) {
-    if (cluster.any((m) => normalizeText(m) == t || foldLatin(transliterate(m)) == n)) {
-      for (final m in cluster) {
-        r.add(normalizeText(m));
-      }
-    }
+  for (final c in _clusters) {
+    if (c.norm.contains(t) || c.roman.contains(n)) r.addAll(c.norm);
   }
   return r.where((s) => s.isNotEmpty).toList();
 }
@@ -180,7 +208,10 @@ int levenshtein(String e, String t) {
     for (var a = 1; a <= t.length; a++) {
       final o = n[a];
       final s = e[r - 1] == t[a - 1] ? 0 : 1;
-      n[a] = [n[a] + 1, n[a - 1] + 1, i + s].reduce((x, y) => x < y ? x : y);
+      final del = n[a] + 1;
+      final ins = n[a - 1] + 1;
+      final sub = i + s;
+      n[a] = del < ins ? (del < sub ? del : sub) : (ins < sub ? ins : sub);
       i = o;
     }
   }
@@ -203,45 +234,73 @@ SearchDoc makeDoc(String e) {
   return SearchDoc(t, stripMatras(t), n, skeleton(n), n.split(' ').where((x) => x.length > 1).toList());
 }
 
+/// Builds docs for many texts at once (runs in a background isolate).
+List<SearchDoc> makeDocs(List<String> texts) => [for (final t in texts) makeDoc(t)];
+
 /// `Fn`
 SearchDoc docOf(List<String?> fields) => makeDoc(fields.whereType<String>().where((f) => f.isNotEmpty).join('\n'));
 
-/// `Pn`
-int scoreToken(String token, SearchDoc t) {
+/// One expanded form of a query token, with every derived string computed once.
+class SearchVariant {
+  SearchVariant(String r)
+      : e = normalizeText(r),
+        i = foldLatin(transliterate(r)) {
+    a = skeleton(i);
+    o = stripMatras(e);
+  }
+  final String e;
+  final String i;
+  late final String a;
+  late final String o;
+}
+
+/// A query compiled once per keystroke (instead of once per row).
+class QueryPlan {
+  QueryPlan(String query) {
+    final n = query.trim();
+    empty = n.isEmpty;
+    if (empty) return;
+    final r = normalizeText(n).split(' ').where((e) => e.length > 1 && !stopWords.contains(e)).toList();
+    final i = r.isNotEmpty ? r : [normalizeText(n)].where((e) => e.isNotEmpty).toList();
+    tokens = [for (final t in i) expandToken(t).map(SearchVariant.new).toList()];
+  }
+  late final bool empty;
+  List<List<SearchVariant>> tokens = const [];
+}
+
+int _scoreVariants(List<SearchVariant> vs, SearchDoc t) {
   var n = 0;
-  for (final r in expandToken(token)) {
-    final e = normalizeText(r);
-    final i = foldLatin(transliterate(r));
-    final a = skeleton(i);
-    if (e.length >= 2 && t.norm.contains(e)) n = n < 100 ? 100 : n;
-    final o = stripMatras(e);
-    if (o.length >= 4 && t.bare.contains(o)) n = n < 90 ? 90 : n;
-    if (i.length >= 4 && t.roman.contains(i)) n = n < 92 ? 92 : n;
-    if (i.length >= 2 && i.length <= 3 && t.tokens.any((x) => x == i || x.startsWith(i))) n = n < 88 ? 88 : n;
-    if (a.length >= 4 && t.skel.contains(a)) n = n < 80 ? 80 : n;
-    if (i.length >= 4) {
+  for (final v in vs) {
+    final e = v.e, i = v.i, a = v.a, o = v.o;
+    if (n < 100 && e.length >= 2 && t.norm.contains(e)) n = 100;
+    if (n < 90 && o.length >= 4 && t.bare.contains(o)) n = 90;
+    if (n < 92 && i.length >= 4 && t.roman.contains(i)) n = 92;
+    if (n < 88 && i.length >= 2 && i.length <= 3 && t.tokens.any((x) => x == i || x.startsWith(i))) n = 88;
+    if (n < 80 && a.length >= 4 && t.skel.contains(a)) n = 80;
+    if (n < 66 && i.length >= 4) {
       for (final tok in t.tokens) {
-        if (tok.isNotEmpty && tok[0] == i[0]) {
-          if ((tok.length - i.length).abs() > 2) continue;
-          if (levenshtein(i, tok) <= 1) n = n < 66 ? 66 : n;
+        if (tok.isNotEmpty && tok.codeUnitAt(0) == i.codeUnitAt(0) && (tok.length - i.length).abs() <= 2 && levenshtein(i, tok) <= 1) {
+          n = 66;
+          break;
         }
       }
     }
+    if (n >= 100) break;
   }
   return n;
 }
 
-/// `In`
-int scoreQuery(String query, SearchDoc t) {
-  final n = query.trim();
-  if (n.isEmpty) return 1;
-  final r = normalizeText(n).split(' ').where((e) => e.length > 1 && !stopWords.contains(e)).toList();
-  final i = r.isNotEmpty ? r : [normalizeText(n)].where((e) => e.isNotEmpty).toList();
+/// `Pn`
+int scoreToken(String token, SearchDoc t) => _scoreVariants(expandToken(token).map(SearchVariant.new).toList(), t);
+
+int scorePlan(QueryPlan p, SearchDoc t) {
+  if (p.empty) return 1;
+  final i = p.tokens;
   if (i.isEmpty) return 0;
   var a = 0;
   var o = 0;
   for (final e in i) {
-    final s = scoreToken(e, t);
+    final s = _scoreVariants(e, t);
     if (s > 0) a += 1;
     o += s;
   }
@@ -249,6 +308,9 @@ int scoreQuery(String query, SearchDoc t) {
   final s = o / i.length;
   return i.length > 1 && a < i.length ? (s * 0.65).round() : s.round();
 }
+
+/// `In`
+int scoreQuery(String query, SearchDoc t) => scorePlan(QueryPlan(query), t);
 
 /// `Ln` — exact substring hits first (by position), else fuzzy-scored results.
 List<T> searchRows<T>(List<T> rows, String query, SearchDoc Function(T) doc) {
@@ -274,7 +336,8 @@ List<T> searchRows<T>(List<T> rows, String query, SearchDoc Function(T) doc) {
     _stableSort(sorted, (x, y) => x.value.compareTo(y.value));
     return sorted.map((e) => e.key).toList();
   }
-  final scored = rows.map((e) => MapEntry(e, scoreQuery(r, doc(e)))).where((e) => e.value > 0).toList();
+  final plan = QueryPlan(r);
+  final scored = rows.map((e) => MapEntry(e, scorePlan(plan, doc(e)))).where((e) => e.value > 0).toList();
   _stableSort(scored, (x, y) => y.value.compareTo(x.value));
   return scored.map((e) => e.key).toList();
 }
@@ -298,3 +361,13 @@ void _stableSort<T>(List<T> list, int Function(T, T) cmp) {
 }
 
 void stableSort<T>(List<T> list, int Function(T, T) cmp) => _stableSort(list, cmp);
+
+/// Pre-built search docs for one list (built once per catalog, not per keystroke).
+class SearchIndex<T> {
+  SearchIndex(this.rows, List<String?> Function(T) fields) : docs = [for (final r in rows) docOf(fields(r))];
+  final List<T> rows;
+  final List<SearchDoc> docs;
+  late final Map<T, SearchDoc> _byRow = {for (var i = 0; i < rows.length; i++) rows[i]: docs[i]};
+
+  List<T> search(String query) => searchRows(rows, query, (r) => _byRow[r]!);
+}
