@@ -206,8 +206,17 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                       sliver: SliverMainAxisGroup(slivers: [
                         if (s.status == SyncStatus.booting && total == 0)
                           const SliverToBoxAdapter(child: EmptyState(title: 'सेव की हुई प्रति खोली जा रही है…', spinner: true)),
+                        if (s.status == SyncStatus.syncing && total == 0)
+                          const SliverToBoxAdapter(child: EmptyState(title: 'डेटा लोड हो रहा है…', spinner: true)),
                         if (s.error != null && s.status == SyncStatus.error && total == 0)
-                          SliverToBoxAdapter(child: EmptyState(title: 'अभी खाली है', body: s.error)),
+                          SliverToBoxAdapter(
+                            child: EmptyState(
+                              title: 'अभी खाली है',
+                              body: s.error,
+                              actionLabel: 'फिर कोशिश करें',
+                              onAction: () => CatalogStore.I.retry(),
+                            ),
+                          ),
                         SliverFadeTransition(
                           opacity: CurvedAnimation(parent: _panelIn, curve: Curves.easeOut),
                           sliver: KeyedSubtree(key: ValueKey(r.key), child: _panel(r)),

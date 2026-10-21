@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../theme/colors.dart';
@@ -7,10 +9,28 @@ import '../widgets/common.dart';
 /// themselves around the logo, a saffron glow blooms, the title rises, then the whole
 /// card zooms out to reveal the app (the original only showed a static splash for 2.6 s).
 class AnimatedSplash extends StatefulWidget {
-  const AnimatedSplash({super.key, required this.child, this.ready, this.duration = const Duration(milliseconds: 1900)});
+  const AnimatedSplash({
+    super.key,
+    required this.child,
+    this.ready,
+    this.duration = const Duration(milliseconds: 1900),
+    this.maxWait = const Duration(milliseconds: 2600),
+    this.hardLimit = const Duration(milliseconds: 3500),
+  });
   final Widget child;
+
+  /// Optional work the splash may wait for, but only until [maxWait] after start.
   final Future<void>? ready;
   final Duration duration;
+
+  /// Latest moment the zoom-out starts, whatever [ready] is doing (network, cache…).
+  final Duration maxWait;
+
+  /// Fail-safe: the app is shown at this point even if an animation never completes.
+  final Duration hardLimit;
+
+  /// Present only while the opening overlay is on screen (used by tests).
+  static const overlayKey = ValueKey('splash-overlay');
   @override
   State<AnimatedSplash> createState() => _AnimatedSplashState();
 }
@@ -19,25 +39,52 @@ class _AnimatedSplashState extends State<AnimatedSplash> with TickerProviderStat
   late final AnimationController _intro = AnimationController(vsync: this, duration: widget.duration);
   late final AnimationController _out = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
   bool _done = false;
+  Timer? _failSafe;
+  Timer? _gateTimer;
+
+  /// Completes [AnimatedSplash.maxWait] after start, or as soon as the splash finishes.
+  final Completer<void> _gate = Completer<void>();
 
   @override
   void initState() {
     super.initState();
+    _failSafe = Timer(widget.hardLimit, _finish);
+    _gateTimer = Timer(widget.maxWait, _openGate);
     _run();
   }
 
+  void _openGate() {
+    if (!_gate.isCompleted) _gate.complete();
+  }
+
+  void _finish() {
+    _failSafe?.cancel();
+    _gateTimer?.cancel();
+    _openGate();
+    if (mounted && !_done) setState(() => _done = true);
+  }
+
+  /// Completes with [f] or with the gate, whichever is first; never throws.
+  Future<void> _orGate(Future<void> f) => Future.any<void>([f.catchError((Object _) {}), _gate.future]);
+
   Future<void> _run() async {
-    await _intro.forward();
     try {
-      await (widget.ready ?? Future<void>.value()).timeout(const Duration(seconds: 3));
-    } catch (_) {}
-    if (!mounted) return;
-    await _out.forward();
-    if (mounted) setState(() => _done = true);
+      // Intro (1.9 s) → wait for [ready] only until maxWait → zoom out (0.52 s).
+      await _orGate(_intro.forward().orCancel);
+      await _orGate(widget.ready ?? Future<void>.value());
+      if (!mounted || _done) return;
+      _gateTimer?.cancel();
+      await _out.forward().orCancel.catchError((Object _) {});
+    } catch (_) {
+      // Never let the opening animation block the app.
+    }
+    _finish();
   }
 
   @override
   void dispose() {
+    _failSafe?.cancel();
+    _gateTimer?.cancel();
     _intro.dispose();
     _out.dispose();
     super.dispose();
@@ -46,7 +93,7 @@ class _AnimatedSplashState extends State<AnimatedSplash> with TickerProviderStat
   @override
   Widget build(BuildContext context) {
     if (_done) return widget.child;
-    return Stack(fit: StackFit.expand, children: [
+    return Stack(key: AnimatedSplash.overlayKey, fit: StackFit.expand, children: [
       // The app underneath scales up into place as the splash leaves.
       AnimatedBuilder(
         animation: _out,

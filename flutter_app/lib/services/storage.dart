@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -24,13 +25,26 @@ class Store {
   static const kOfflineIds = 'granth-offline-ids';
   static const kDevice = 'granth-device';
 
+  /// Never throws and never hangs: each step has a timeout, and if the app documents
+  /// directory is unavailable the cache falls back to a temp directory so the app still opens.
   Future<void> init() async {
-    _prefs ??= await SharedPreferences.getInstance();
+    try {
+      _prefs ??= await SharedPreferences.getInstance().timeout(const Duration(seconds: 4));
+    } catch (e, st) {
+      debugPrint('Store: prefs unavailable: $e\n$st');
+    }
     if (_root == null) {
-      final docs = await getApplicationDocumentsDirectory();
-      _root = Directory('${docs.path}/granth');
+      try {
+        final docs = await getApplicationDocumentsDirectory().timeout(const Duration(seconds: 4));
+        _root = Directory('${docs.path}/granth');
+      } catch (e) {
+        debugPrint('Store: documents dir unavailable: $e');
+        _root = Directory('${Directory.systemTemp.path}/granth');
+      }
       for (final d in ['images', 'gallery', 'pdfs', 'Granth']) {
-        await Directory('${_root!.path}/$d').create(recursive: true);
+        try {
+          await Directory('${_root!.path}/$d').create(recursive: true);
+        } catch (_) {}
       }
     }
   }

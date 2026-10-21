@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -12,14 +13,55 @@ import 'services/storage.dart';
 import 'state/router.dart';
 import 'theme/colors.dart';
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-  await Store.I.init();
-  AppNav.I.restore();
-  EventLog.I.log('app_open', 'app');
-  final boot = CatalogStore.I.boot();
-  runApp(GranthApp(ready: boot));
+void main() {
+  runZonedGuarded<Future<void>>(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    _installErrorHandlers();
+    Future<void> boot = Future<void>.value();
+    // Every init step is guarded: an exception or a hang here must never stop runApp,
+    // otherwise the phone stays on the native launch screen forever.
+    try {
+      await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('init: orientation: $e');
+    }
+    try {
+      await Store.I.init().timeout(const Duration(seconds: 6));
+    } catch (e) {
+      debugPrint('init: store: $e');
+    }
+    try {
+      AppNav.I.restore();
+    } catch (e) {
+      debugPrint('init: restore: $e');
+    }
+    try {
+      EventLog.I.log('app_open', 'app');
+    } catch (_) {}
+    try {
+      // The catalog loads in the background; the splash never waits for the network.
+      boot = CatalogStore.I.boot().catchError((Object e, StackTrace st) => debugPrint('boot: $e\n$st'));
+    } catch (e) {
+      debugPrint('init: boot: $e');
+    }
+    runApp(GranthApp(ready: boot));
+  }, (error, stack) {
+    debugPrint('Uncaught: $error\n$stack');
+  });
+}
+
+void _installErrorHandlers() {
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Platform error: $error\n$stack');
+    return true;
+  };
+  if (kReleaseMode) {
+    // A broken widget shows an empty box instead of a grey screen.
+    ErrorWidget.builder = (details) => const SizedBox.shrink();
+  }
 }
 
 class GranthApp extends StatefulWidget {

@@ -63,14 +63,14 @@ class CatalogStore extends ChangeNotifier {
     booted = true;
     offlineIds = _loadOfflineIds();
     try {
-      final res = await Connectivity().checkConnectivity();
+      final res = await Connectivity().checkConnectivity().timeout(const Duration(seconds: 3));
       online = !res.contains(ConnectivityResult.none);
     } catch (_) {
       online = true;
     }
     notifyListeners();
     try {
-      final cached = Catalog.fromJson(await Store.I.readJson('catalog.json'));
+      final cached = Catalog.fromJson(await Store.I.readJson('catalog.json').timeout(const Duration(seconds: 8)));
       if (cached != null) {
         _catalog = cached;
         status = online ? SyncStatus.ready : SyncStatus.offline;
@@ -114,6 +114,13 @@ class CatalogStore extends ChangeNotifier {
     });
   }
 
+  /// Retry button on the home screen.
+  Future<void> retry() async {
+    online = true;
+    await sync();
+    if (hasData) savePages();
+  }
+
   DateTime _lastResume = DateTime.now();
   void onResume() {
     final now = DateTime.now();
@@ -142,7 +149,8 @@ class CatalogStore extends ChangeNotifier {
       error = null;
       images = ImageProgress(ImageStore.I.countSync(), _allImagePaths().length, images.running);
       EventLog.I.log('sync', 'catalog');
-    } catch (_) {
+    } catch (e) {
+      debugPrint('sync failed: $e');
       final had = syncedAt != null;
       status = had ? SyncStatus.ready : SyncStatus.error;
       error = had ? kStaleError : kNoDataError;

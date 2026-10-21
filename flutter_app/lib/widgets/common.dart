@@ -343,10 +343,12 @@ class _SpinPainter extends CustomPainter {
 
 /// `.empty` / `.loading`
 class EmptyState extends StatelessWidget {
-  const EmptyState({super.key, required this.title, this.body, this.spinner = false});
+  const EmptyState({super.key, required this.title, this.body, this.spinner = false, this.actionLabel, this.onAction});
   final String title;
   final String? body;
   final bool spinner;
+  final String? actionLabel;
+  final VoidCallback? onAction;
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 12),
@@ -356,6 +358,17 @@ class EmptyState extends StatelessWidget {
             Text(title, textAlign: TextAlign.center, style: GText.display(size: 20, color: GColors.brown)),
             const SizedBox(height: 6),
             if (body != null) Text(body!, textAlign: TextAlign.center, style: GText.sans(size: 16, color: GColors.muted, height: 1.5)),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 16),
+              Pressable(
+                onTap: onAction,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  decoration: BoxDecoration(color: GColors.maroon, borderRadius: BorderRadius.circular(8)),
+                  child: Text(actionLabel!, style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.paper)),
+                ),
+              ),
+            ],
           ],
         ),
       );

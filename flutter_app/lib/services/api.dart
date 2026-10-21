@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
 
@@ -35,18 +38,30 @@ String? youtubeId(String? input) {
 }
 
 class Api {
-  Api({Dio? dio}) : dio = dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 20), receiveTimeout: const Duration(seconds: 60)));
+  Api({Dio? dio, this.timeout = const Duration(seconds: 20)})
+      : dio = dio ??
+            Dio(BaseOptions(
+              connectTimeout: const Duration(seconds: 10),
+              receiveTimeout: const Duration(seconds: 15),
+            ));
   final Dio dio;
 
+  /// Upper bound for one whole catalog fetch, so a stalled network can never hang a sync.
+  final Duration timeout;
+
   Future<List<Map<String, dynamic>>> _list(String request) async {
-    final r = await dio.get<dynamic>('$kOrigin/api/index.php', queryParameters: {'request': request}, options: Options(responseType: ResponseType.json));
-    final body = r.data;
-    if (body is! Map || body['success'] != true || body['data'] is! List) throw StateError('$request empty');
-    return (body['data'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    // The server answers JSON with `Content-Type: text/html`, so Dio would hand back a raw
+    // String for ResponseType.json. Always read plain text and decode it ourselves.
+    final r = await dio.get<dynamic>(
+      '$kOrigin/api/index.php',
+      queryParameters: {'request': request},
+      options: Options(responseType: ResponseType.plain),
+    );
+    return decodeApiList(r.data, request);
   }
 
   Future<Catalog> fetchCatalog() async {
-    final res = await Future.wait([_list('getTopics'), _list('getGranths'), _list('getPramans')]);
+    final res = await Future.wait([_list('getTopics'), _list('getGranths'), _list('getPramans')]).timeout(timeout);
     return applyCatalogRules(Catalog(
       topics: res[0].map(Topic.new).toList(),
       granths: res[1].map(Granth.new).toList(),
@@ -54,6 +69,21 @@ class Api {
       syncedAt: DateTime.now().millisecondsSinceEpoch,
     ));
   }
+}
+
+/// Accepts the API body as a decoded Map or as raw JSON text (any content type, optional BOM)
+/// and returns the `data` list, or throws a [FormatException]/[StateError].
+@visibleForTesting
+List<Map<String, dynamic>> decodeApiList(Object? data, String request) {
+  Object? body = data;
+  if (body is List<int>) body = utf8.decode(body, allowMalformed: true);
+  if (body is String) {
+    var t = body.trim();
+    if (t.startsWith('\uFEFF')) t = t.substring(1);
+    body = jsonDecode(t);
+  }
+  if (body is! Map || body['success'] != true || body['data'] is! List) throw StateError('$request empty');
+  return (body['data'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
 }
 
 /// `qe()` with no local drafts: drop pramans whose granth is missing and recompute counts.
