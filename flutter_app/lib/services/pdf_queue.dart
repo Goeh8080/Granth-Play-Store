@@ -120,6 +120,9 @@ class PdfQueue extends ChangeNotifier {
   int? slotsOverride;
   static const maxRows = 40;
 
+  /// Two requests for the same PDF closer than this are one tap (a double tap).
+  static const doubleTapWindowMs = 1500;
+
   /// Free-space probe (native StatFs). Replaceable in tests.
   @visibleForTesting
   Future<int?> Function() freeBytes = NativeBridge.freeBytes;
@@ -160,8 +163,10 @@ class PdfQueue extends ChangeNotifier {
   /// Starts [job] (as soon as a slot is free). Exposed for tests.
   @visibleForTesting
   PdfJob start(PdfJob job, PdfRun run) {
-    // The same PDF is already being made: keep that one instead of writing the same file twice.
-    final same = jobs.where((j) => j.active && j.dedupeKey == job.dedupeKey).firstOrNull;
+    // Accidental double tap (same PDF asked twice within a moment): keep the first job.
+    // A PDF asked for again on purpose later gets its own entry, even while the first runs.
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final same = jobs.where((j) => j.active && j.dedupeKey == job.dedupeKey && now - j.startedAt < doubleTapWindowMs).firstOrNull;
     if (same != null) return same;
     job.run = run;
     jobs.insert(0, job);
@@ -215,6 +220,30 @@ class PdfQueue extends ChangeNotifier {
   void dismiss(String id) {
     jobs.removeWhere((j) => j.id == id && !j.active);
     notifyListeners();
+  }
+
+  /// × on a row: a running PDF is stopped first (the UI asks before), then the row is gone
+  /// for good — the list lives only in memory, so nothing brings it back after a restart.
+  void remove(String id) {
+    final j = jobs.where((e) => e.id == id).firstOrNull;
+    if (j == null) return;
+    if (j.active) cancel(id);
+    jobs.remove(j);
+    _waiting.remove(j);
+    notifyListeners();
+  }
+
+  /// "तैयार हटाएँ": drops every finished / failed / stopped row.
+  void clearFinished() {
+    jobs.removeWhere((j) => !j.active);
+    notifyListeners();
+  }
+
+  /// Overall progress of the PDFs being made (for the status-bar notification).
+  int get overallPercent {
+    final a = jobs.where((j) => j.active).toList();
+    if (a.isEmpty) return 100;
+    return (a.fold<int>(0, (n, j) => n + j.percent) / a.length).round();
   }
 
   void _pump() {

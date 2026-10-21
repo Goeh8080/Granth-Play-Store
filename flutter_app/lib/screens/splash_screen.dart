@@ -39,6 +39,11 @@ class _AnimatedSplashState extends State<AnimatedSplash> with TickerProviderStat
   late final AnimationController _intro = AnimationController(vsync: this, duration: widget.duration);
   late final AnimationController _out = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
   bool _done = false;
+
+  /// Keeps the app under the splash alive when the splash leaves. Without it the tree
+  /// shape changed (Stack → child) and the whole home screen was built again: the
+  /// header counters counted up from 0 a second time and early state was lost.
+  final GlobalKey _appKey = GlobalKey(debugLabel: 'app-under-splash');
   Timer? _failSafe;
   Timer? _gateTimer;
 
@@ -92,12 +97,13 @@ class _AnimatedSplashState extends State<AnimatedSplash> with TickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    if (_done) return widget.child;
+    final app = KeyedSubtree(key: _appKey, child: widget.child);
+    if (_done) return app;
     return Stack(key: AnimatedSplash.overlayKey, fit: StackFit.expand, children: [
       // The app underneath scales up into place as the splash leaves.
       AnimatedBuilder(
         animation: _out,
-        child: widget.child,
+        child: app,
         builder: (context, child) {
           final t = Curves.easeOutCubic.transform(_out.value);
           return Opacity(opacity: t, child: Transform.scale(scale: 0.94 + 0.06 * t, child: child));

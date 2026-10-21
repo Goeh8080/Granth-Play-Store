@@ -51,6 +51,14 @@ class NativeBridge {
     }
   }
 
+  /// PDF foreground service / notifications (`pdfProgress`, `pdfStop`, `pdfDone`,
+  /// `askNotifications`). Never throws; does nothing off-device.
+  static Future<void> pdfNotice(String method, Map<String, Object?> args) async {
+    try {
+      await _ch.invokeMethod<void>(method, args).timeout(const Duration(seconds: 3));
+    } catch (_) {}
+  }
+
   /// Free bytes on the volume holding the app's files (null when unknown).
   static Future<int?> freeBytes() async {
     try {

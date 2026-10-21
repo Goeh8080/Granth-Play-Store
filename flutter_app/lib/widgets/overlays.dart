@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../theme/colors.dart';
 import 'common.dart';
 import 'granth_image.dart';
+import 'zoom.dart';
 
 /// `.pdf-pop` + `.pdf-sheet` animation (sheet-fade .22s + sheet-rise .28s cubic(.22,1,.36,1)).
 const Curve kRise = Cubic(0.22, 1, 0.36, 1);
@@ -169,7 +170,7 @@ Future<String?> promptPop(BuildContext context, String title, {String initial = 
   );
 }
 
-/// `Gh` — full-screen page viewer; pinch-zoom 1–4× per image, Hero from the tapped card.
+/// `Gh` — full-screen page viewer; [ZoomStage] per picture (pinch 1–4×, double tap, pan), Hero from the tapped card.
 Future<void> openLightbox(BuildContext context, List<String> paths, {Object? heroTag, Widget? footer, bool closeIcon = true}) {
   return Navigator.of(context).push(PageRouteBuilder<void>(
     opaque: false,
@@ -221,13 +222,10 @@ class _Lightbox extends StatelessWidget {
                       if (i > 0) const SizedBox(height: 12),
                       SizedBox(
                         height: stageH,
-                        child: ClipRect(
-                          child: InteractiveViewer(
-                            minScale: 1,
-                            maxScale: 4,
-                            child: Center(
-                              child: GranthImage(path: paths[i], kind: ShotKind.lightbox, heroTag: i == 0 ? heroTag : null),
-                            ),
+                        child: ZoomStage(
+                          key: ValueKey('zoom-$i'),
+                          child: Center(
+                            child: GranthImage(path: paths[i], kind: ShotKind.lightbox, heroTag: i == 0 ? heroTag : null),
                           ),
                         ),
                       ),

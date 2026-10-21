@@ -13,7 +13,7 @@ double panelDx() => 28.0 * AppNav.I.direction;
 
 /// `.page-header` (+ `.sticky-bar` when [sticky]).
 class PageHeader extends StatelessWidget {
-  const PageHeader({super.key, required this.tone, required this.icon, required this.title, required this.subtitle, this.trailing, this.tools});
+  const PageHeader({super.key, required this.tone, required this.icon, required this.title, required this.subtitle, this.trailing, this.tools, this.trailingLow = false});
   final Tone tone;
   final String icon;
   final String title;
@@ -21,8 +21,42 @@ class PageHeader extends StatelessWidget {
   final Widget? trailing;
   final Widget? tools;
 
+  /// Put [trailing] a little lower, beside the subtitle, so the title keeps the full width
+  /// and stays on one line (Granths: "Multiple granth PDF" made "Granths" wrap at 360 dp).
+  final bool trailingLow;
+
   @override
   Widget build(BuildContext context) {
+    if (trailing != null && trailingLow) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        Row(children: [
+          IconBox(tone: tone, icon: icon),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(title, maxLines: 1, softWrap: false, style: GText.display(size: 28, color: GColors.maroon, height: 1.1)),
+              ),
+              const SizedBox(height: 2),
+              LayoutBuilder(
+                builder: (context, c) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Expanded(child: Text(subtitle, style: GText.sans(size: 13, color: GColors.muted, height: 1.5))),
+                  const SizedBox(width: 10),
+                  // Large font sizes: the button shrinks a little instead of overflowing.
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: c.maxWidth * 0.62),
+                    child: FittedBox(fit: BoxFit.scaleDown, child: KeyedSubtree(key: const ValueKey('header-trailing'), child: trailing!)),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
+        ]),
+        if (tools != null) ...[const SizedBox(height: 16), tools!],
+      ]);
+    }
     final titleRow = Row(children: [
       IconBox(tone: tone, icon: icon),
       const SizedBox(width: 12),

@@ -18,6 +18,14 @@ class DashboardPanel extends StatefulWidget {
 
 class _DashboardPanelState extends State<DashboardPanel> with LivePanel {
   @override
+  void initState() {
+    super.initState();
+    // A fresh dashboard open counts up from 0 once; data that arrives later animates on
+    // from the number on screen.
+    CountUp.replay('dash:');
+  }
+
+  @override
   Widget build(BuildContext context) {
     final s = CatalogStore.I;
     final dx = panelDx();
@@ -62,12 +70,7 @@ class _DashCard extends StatelessWidget {
               const SizedBox(width: 16),
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 // Count-up micro-animation.
-                TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0, end: count.toDouble()),
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, v, _) => Text(count == 0 ? '—' : '${v.round()}', style: GText.display(size: 36, color: GColors.maroon, height: 1)),
-                ),
+                CountUp(value: count, memo: 'dash:$label', style: GText.display(size: 36, color: GColors.maroon, height: 1)),
                 const SizedBox(height: 4),
                 Text(label, style: GText.sans(size: 15, weight: FontWeight.w700, color: GColors.muted)),
               ]),

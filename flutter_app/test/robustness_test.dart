@@ -146,6 +146,34 @@ void main() {
       await until(() => q.activeCount == 0);
     });
 
+    test('the same PDF asked again on purpose gets its own entry', () async {
+      final q = PdfQueue.I;
+      final g = Gate();
+      final a = q.start(job('x', key: 'k'), g.run);
+      a.startedAt -= PdfQueue.doubleTapWindowMs + 1;
+      final b = q.start(job('y', key: 'k'), g.run);
+      expect(identical(a, b), isFalse);
+      expect(q.jobs.length, 2);
+      g.c.complete();
+      await until(() => q.activeCount == 0);
+      expect(q.jobs.length, 2);
+    });
+
+    test('× removes a row for good; a running PDF is stopped first; clear finished', () async {
+      final q = PdfQueue.I;
+      final g = Gate();
+      final a = q.start(job('a', key: 'a'), g.run);
+      final b = q.start(job('b', key: 'b'), g.run);
+      q.remove(a.id);
+      expect(a.cancelled, isTrue);
+      expect(q.jobs.map((e) => e.id), ['b']);
+      g.c.complete();
+      await until(() => q.activeCount == 0);
+      expect(b.phase, PdfPhase.done);
+      q.clearFinished();
+      expect(q.jobs, isEmpty);
+    });
+
     test('free-space estimate grows with the book', () {
       expect(PdfQueue.bytesNeeded(500), greaterThan(PdfQueue.bytesNeeded(10)));
     });

@@ -14,6 +14,7 @@ import 'services/events.dart';
 import 'services/storage.dart';
 import 'state/router.dart';
 import 'theme/colors.dart';
+import 'widgets/zoom.dart';
 
 void main() {
   runZonedGuarded<Future<void>>(() async {
@@ -160,7 +161,8 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
         theme: buildTheme(),
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3)),
-          child: child!,
+          // Whole-app pinch zoom like the original WebView (viewport maximum-scale=5).
+          child: AppZoom(child: child!),
         ),
         home: widget.splash ? AnimatedSplash(ready: widget.ready, child: const HomeShell()) : const HomeShell(),
       );

@@ -11,6 +11,7 @@ import '../state/toast.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
 import '../widgets/common.dart';
+import '../widgets/zoom.dart';
 import '../widgets/live_panel.dart';
 import '../widgets/overlays.dart';
 import '../widgets/panel.dart';
@@ -289,13 +290,9 @@ class _GalleryViewer extends StatelessWidget {
                 if (d.kind == GalleryKind.image)
                   SizedBox(
                     height: h,
-                    child: ClipRect(
-                      child: InteractiveViewer(
-                        minScale: 1,
-                        maxScale: 4,
-                        child: Center(
-                          child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.file(File(d.filePath), fit: BoxFit.contain)),
-                        ),
+                    child: ZoomStage(
+                      child: Center(
+                        child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.file(File(d.filePath), fit: BoxFit.contain)),
                       ),
                     ),
                   ),

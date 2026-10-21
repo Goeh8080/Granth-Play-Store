@@ -41,6 +41,53 @@ class ImageStore {
     return out;
   }
 
+  /// Repair check: a saved picture is good when it exists, is not tiny and starts with a
+  /// JPEG / PNG / GIF / WEBP header (a JPEG must also end with its end marker, which a cut-off
+  /// download does not). Bad files are deleted so the download fetches them again.
+  Future<Set<String>> verify(List<String> paths, {void Function(int checked)? onProgress}) async {
+    final good = <String>{};
+    var n = 0;
+    for (final p in paths) {
+      final f = fileFor(p);
+      if (await fileLooksGood(f)) {
+        good.add(p);
+      } else {
+        try {
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }
+      n++;
+      if (onProgress != null && (n % 25 == 0 || n == paths.length)) onProgress(good.length);
+    }
+    return good;
+  }
+
+  static Future<bool> fileLooksGood(File f) async {
+    RandomAccessFile? r;
+    try {
+      if (!await f.exists()) return false;
+      final len = await f.length();
+      if (len <= 32) return false;
+      r = await f.open();
+      final head = await r.read(12);
+      if (!_looksLikeImage(head)) return false;
+      if (head[0] == 0xFF && head[1] == 0xD8) {
+        final k = len < 256 ? len : 256;
+        await r.setPosition(len - k);
+        final tail = await r.read(k);
+        for (var i = tail.length - 2; i >= 0; i--) {
+          if (tail[i] == 0xFF && tail[i + 1] == 0xD9) return true;
+        }
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      await r?.close();
+    }
+  }
+
   int countSync() {
     try {
       return Directory(Store.I.imagesDir).listSync().whereType<File>().where((f) => !f.path.endsWith('.part')).length;

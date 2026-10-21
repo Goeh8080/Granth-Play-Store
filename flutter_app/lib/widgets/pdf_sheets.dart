@@ -189,17 +189,18 @@ Widget _doneActions(BuildContext context, PdfJob j, VoidCallback refresh) => Pad
       ]),
     );
 
-/// `.pdf-deck` — progress of every PDF being made. There is no queue: each PDF has its
-/// own row with its own progress bar, रोकें / फिर कोशिश करें and the done actions.
-Future<void> openDeck(BuildContext context, {int? index}) => showPop(context, (ctx) => const _Deck());
-
-class _Deck extends StatefulWidget {
-  const _Deck();
+/// `.pdf-deck` behind the header arrow (`.pdf-arrow`, ⌄ N). Collapsed by default: only the
+/// arrow shows that PDFs are being made; a tap drops this card down under it, a second tap
+/// (or a tap outside) folds it away. Each PDF is its own row (they are made in parallel, no
+/// कतार) with its own bar, actions and × to remove it.
+class PdfDropdown extends StatefulWidget {
+  const PdfDropdown({super.key, required this.onClose});
+  final VoidCallback onClose;
   @override
-  State<_Deck> createState() => _DeckState();
+  State<PdfDropdown> createState() => _PdfDropdownState();
 }
 
-class _DeckState extends State<_Deck> {
+class _PdfDropdownState extends State<PdfDropdown> {
   Timer? _tick;
 
   @override
@@ -214,6 +215,12 @@ class _DeckState extends State<_Deck> {
     super.dispose();
   }
 
+  Future<void> _remove(PdfJob j) async {
+    if (j.active && !await confirmPop(context, 'यह PDF अभी बन रही है। रोककर सूची से हटाएँ?\n${j.title}')) return;
+    PdfQueue.I.remove(j.id);
+    if (PdfQueue.I.jobs.isEmpty) widget.onClose();
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: PdfQueue.I,
@@ -221,26 +228,35 @@ class _DeckState extends State<_Deck> {
           final jobs = PdfQueue.I.jobs;
           final now = DateTime.now().millisecondsSinceEpoch;
           final active = PdfQueue.I.activeCount;
-          return FrostCard(
+          final finished = jobs.length - active;
+          return Container(
+            key: const ValueKey('pdf-dropdown'),
+            constraints: BoxConstraints(maxHeight: (MediaQuery.sizeOf(context).height * 0.6).clamp(220.0, 560.0)),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            decoration: BoxDecoration(
+              color: GColors.paper.withValues(alpha: 0.97),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Color.lerp(Colors.white, GColors.gold, 0.3)!),
+              boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.22), blurRadius: 40, offset: const Offset(0, 16))],
+            ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Flexible(
-                  child: Text(active > 0 ? '$active PDF बन रही हैं' : 'PDF', style: GText.sans(size: 16, weight: FontWeight.w700)),
-                ),
-                Pill(label: 'बंद', onTap: () => Navigator.pop(context)),
+              Row(children: [
+                Expanded(child: Text(active > 0 ? '$active PDF बन रही हैं' : 'PDF', style: GText.sans(size: 15, weight: FontWeight.w700))),
+                if (finished > 0) ...[
+                  Pill(key: const ValueKey('pdf-clear'), label: 'तैयार हटाएँ', onTap: PdfQueue.I.clearFinished),
+                  const SizedBox(width: 6),
+                ],
+                Pill(label: 'बंद', onTap: widget.onClose),
               ]),
-              const SizedBox(height: 8),
-              if (jobs.isEmpty) Text('अभी कोई PDF नहीं बन रही।', style: GText.sans(size: 15, color: GColors.muted)),
+              const SizedBox(height: 6),
+              if (jobs.isEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('अभी कोई PDF नहीं बन रही।', style: GText.sans(size: 14, color: GColors.muted))),
               Flexible(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.62),
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    padding: EdgeInsets.zero,
-                    itemCount: jobs.length,
-                    separatorBuilder: (_, _) => const Divider(height: 18, color: GColors.creamDark),
-                    itemBuilder: (context, i) => _JobRow(key: ValueKey(jobs[i].id), job: jobs[i], now: now, refresh: () => setState(() {})),
-                  ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: EdgeInsets.zero,
+                  itemCount: jobs.length,
+                  separatorBuilder: (_, _) => const Divider(height: 16, color: GColors.creamDark),
+                  itemBuilder: (context, i) => _JobRow(key: ValueKey(jobs[i].id), job: jobs[i], now: now, refresh: () => setState(() {}), onRemove: () => _remove(jobs[i])),
                 ),
               ),
             ]),
@@ -249,42 +265,61 @@ class _DeckState extends State<_Deck> {
       );
 }
 
-/// One PDF: title, its own progress bar, status and actions.
+/// One PDF: title, % and ×, its own bar, facts, status and compact actions.
 class _JobRow extends StatelessWidget {
-  const _JobRow({super.key, required this.job, required this.now, required this.refresh});
+  const _JobRow({super.key, required this.job, required this.now, required this.refresh, required this.onRemove});
   final PdfJob job;
   final int now;
   final VoidCallback refresh;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
     final m = job;
     final failed = m.phase == PdfPhase.error;
+    final done = m.phase == PdfPhase.done && m.filePath != null;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(child: Text(m.title, style: GText.display(size: 19, color: GColors.maroon, height: 1.25))),
+        Expanded(child: Text(m.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: GText.display(size: 17, color: GColors.maroon, height: 1.25))),
         const SizedBox(width: 8),
         TweenAnimationBuilder<double>(
           tween: Tween(end: m.percent.toDouble()),
           duration: const Duration(milliseconds: 420),
-          builder: (context, v, _) => Text('${v.round()}%', style: GText.sans(size: 15, weight: FontWeight.w700)),
+          builder: (context, v, _) => Text('${v.round()}%', style: GText.sans(size: 14, weight: FontWeight.w700)),
+        ),
+        const SizedBox(width: 4),
+        Pressable(
+          key: ValueKey('pdf-x-${m.id}'),
+          onTap: onRemove,
+          scale: 0.85,
+          child: Container(
+            width: 30,
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: GColors.pill, borderRadius: BorderRadius.circular(999)),
+            child: const GIcon('x', size: 14, color: GColors.maroon),
+          ),
         ),
       ]),
       PdfMeter(percent: m.percent),
-      Text(jobLine(m, now), style: GText.sans(size: 13)),
-      const SizedBox(height: 2),
-      Text(phaseText(m), style: GText.sans(size: 13, color: failed ? GColors.maroon : GColors.text, weight: failed ? FontWeight.w700 : FontWeight.w400)),
+      Text('${jobLine(m, now)} · ${phaseText(m)}', style: GText.sans(size: 12.5, color: failed ? GColors.maroon : GColors.text, weight: failed ? FontWeight.w700 : FontWeight.w400)),
       if (m.phase == PdfPhase.done && m.missingImages > 0) Text('${m.missingImages} चित्र लोड नहीं हुए — उनकी जगह खाली फ्रेम है', style: GText.sans(size: 12, color: GColors.muted)),
-      if (m.active) ...[const SizedBox(height: 8), SheetButton(label: 'रोकें', onTap: () => PdfQueue.I.cancel(m.id))],
+      if (m.active) ...[
+        const SizedBox(height: 8),
+        Align(alignment: Alignment.centerLeft, child: Pill(label: 'रोकें', icon: 'x', tone: PillTone.maroon, onTap: () => PdfQueue.I.cancel(m.id))),
+      ],
       if (m.canRetry) ...[
         const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: SheetButton(label: 'फिर कोशिश करें', primary: true, onTap: () => PdfQueue.I.retry(m.id))),
-          const SizedBox(width: 10),
-          Expanded(child: SheetButton(label: 'हटाएँ', onTap: () => PdfQueue.I.dismiss(m.id))),
+        Align(alignment: Alignment.centerLeft, child: Pill(label: 'फिर कोशिश करें', icon: 'refresh-cw', tone: PillTone.maroon, onTap: () => PdfQueue.I.retry(m.id))),
+      ],
+      if (done) ...[
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 6, children: [
+          Pill(label: 'PDF खोलें', tone: PillTone.maroon, onTap: () => FileActions.open(m.filePath!, m.fileName)),
+          Pill(label: _sharing ? 'खुल रहा है…' : 'शेयर', icon: 'share-2', enabled: !_sharing, onTap: () => _share(m, refresh)),
+          Pill(label: 'सेव', icon: 'folder-down', onTap: () => _saveToGallery(context, m)),
         ]),
       ],
-      if (m.phase == PdfPhase.done && m.filePath != null) _doneActions(context, m, refresh),
     ]);
   }
 }

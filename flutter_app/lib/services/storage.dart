@@ -28,6 +28,9 @@ class Store {
   /// Signature of the last library the "सारे ग्रंथ ऑफलाइन" card was shown for.
   static const kOfflineReady = 'granth-offline-ready';
 
+  /// Notification permission asked once (first PDF).
+  static const kNotifAsked = 'granth-notif-asked';
+
   /// Never throws and never hangs: each step has a timeout, and if the app documents
   /// directory is unavailable the cache falls back to a temp directory so the app still opens.
   Future<void> init() async {

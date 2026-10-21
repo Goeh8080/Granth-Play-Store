@@ -61,6 +61,7 @@ class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
             icon: 'library',
             title: 'Granths',
             subtitle: 'Sacred texts and scriptures',
+            trailingLow: true,
             trailing: Pressable(
               onTap: () => showPop<void>(context, (ctx) => _MultiGranthSheet(granths: rows.isEmpty ? all : rows)),
               child: Container(

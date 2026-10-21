@@ -665,3 +665,77 @@ class _EntryState extends State<Entry> with SingleTickerProviderStateMixin {
         },
       );
 }
+
+/// Count-up number (`.stat-num` / dashboard counts).
+///
+/// Counts 0 → value once, and only when real data is there (0 shows "—" and waits).
+/// A later change (sync brought new data) animates from the number on screen to the new
+/// one — it never starts from 0 again. The shown value is remembered under [memo], so a
+/// rebuild or a re-created widget continues where it was; [CountUp.replay] clears it for a
+/// fresh dashboard open.
+class CountUp extends StatefulWidget {
+  const CountUp({super.key, required this.value, required this.memo, required this.style, this.duration = const Duration(milliseconds: 900)});
+  final int value;
+  final String memo;
+  final TextStyle style;
+  final Duration duration;
+
+  static final Map<String, double> _shown = {};
+
+  /// Next build of counters whose memo starts with [prefix] counts from 0 again.
+  static void replay(String prefix) => _shown.removeWhere((k, _) => k.startsWith(prefix));
+
+  @visibleForTesting
+  static void debugClear() => _shown.clear();
+
+  @override
+  State<CountUp> createState() => _CountUpState();
+}
+
+class _CountUpState extends State<CountUp> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: widget.duration);
+  double _from = 0;
+  double _to = 0;
+
+  double get _now => _from + (_to - _from) * Curves.easeOutCubic.transform(_c.value);
+
+  @override
+  void initState() {
+    super.initState();
+    _c.addListener(() => CountUp._shown[widget.memo] = _now);
+    _from = CountUp._shown[widget.memo] ?? 0;
+    _to = _from;
+    _go(widget.value);
+  }
+
+  void _go(int v) {
+    if (v <= 0) return;
+    final target = v.toDouble();
+    if (target == _to && (_c.isAnimating || _now == target)) return;
+    _from = _c.isAnimating ? _now : _to;
+    _to = target;
+    if (_from == _to) {
+      CountUp._shown[widget.memo] = _to;
+      return;
+    }
+    _c.forward(from: 0);
+  }
+
+  @override
+  void didUpdateWidget(covariant CountUp old) {
+    super.didUpdateWidget(old);
+    if (old.value != widget.value) _go(widget.value);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) => Text(widget.value <= 0 && _to <= 0 ? '—' : '${_now.round()}', style: widget.style),
+      );
+}

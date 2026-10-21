@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../services/catalog_store.dart';
 import '../services/file_actions.dart';
 import '../services/native_bridge.dart';
+import '../services/pdf_notify.dart';
 import '../services/pdf_queue.dart';
 import '../services/storage.dart';
 import '../state/router.dart';
@@ -34,7 +35,6 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
   late final AnimationController _panelIn = AnimationController(vsync: this, duration: const Duration(milliseconds: 320), value: 1);
   final ValueNotifier<bool> _showTop = ValueNotifier(false);
   String _routeKey = '';
-  String _seenActive = '';
   bool _deckOpen = false;
   bool _exitOpen = false;
 
@@ -49,6 +49,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     nav.onExitRequest = _askExit;
     PdfQueue.I.addListener(_onQueue);
     PdfQueue.I.finished.addListener(_onFinished);
+    PdfNotify.I.attach();
     CatalogStore.I.offlineReady.addListener(_onOfflineReady);
     _scroll.addListener(() => _showTop.value = _scroll.hasClients && _scroll.offset > 480);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -115,27 +116,37 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     setState(() {});
   }
 
-  // ---------- PDF progress → deck / done (`Zh`) ----------
-  void _onQueue() {
-    if (!mounted) return;
-    setState(() {});
-    final jobs = PdfQueue.I.jobs;
-    final active = jobs.where((j) => j.active).firstOrNull;
-    if (active == null || _seenActive == active.id) return;
-    _seenActive = active.id;
-    _openDeck(0);
+  // ---------- PDF progress → arrow + dropdown / done (`PdfDock`) ----------
+  final LayerLink _deckLink = LayerLink();
+  final GlobalKey _stackKey = GlobalKey();
+  static final GlobalKey arrowKey = GlobalKey();
+
+  /// Horizontal nudge so the dropdown's right edge sits 12 px from the screen edge
+  /// (it hangs under the arrow, but must never run off the left side).
+  double _deckDx() {
+    final stack = _stackKey.currentContext?.findRenderObject() as RenderBox?;
+    final arrow = arrowKey.currentContext?.findRenderObject() as RenderBox?;
+    if (stack == null || arrow == null || !stack.hasSize || !arrow.attached) return 0;
+    final right = stack.globalToLocal(arrow.localToGlobal(arrow.size.bottomRight(Offset.zero))).dx;
+    return stack.size.width - 12 - right;
   }
 
-  Future<void> _openDeck([int? index]) async {
-    if (_deckOpen) return;
-    _deckOpen = true;
+  void _onQueue() {
+    if (!mounted) return;
+    // Collapsed by default: a new PDF only shows in the header arrow (⌄ N). The list opens
+    // when the arrow is tapped.
+    if (PdfQueue.I.jobs.isEmpty) _deckOpen = false;
     setState(() {});
-    try {
-      await openDeck(context, index: index);
-    } finally {
-      _deckOpen = false;
-      if (mounted) setState(() {});
-    }
+  }
+
+  void _openDeck([int? index]) => setState(() {
+        _deckOpen = !_deckOpen;
+        if (_deckOpen) _dx = _deckDx();
+      });
+  double _dx = 0;
+
+  void _closeDeck() {
+    if (_deckOpen) setState(() => _deckOpen = false);
   }
 
   bool _readyOpen = false;
@@ -159,7 +170,9 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     final j = PdfQueue.I.finished.value;
     if (j == null || j.filePath == null || !mounted) return;
     // Auto-save every finished PDF to Downloads, like `xe()` in the original. Never throws.
-    final exported = FileActions.exportToDevice(j.filePath!, j.fileName).catchError((Object _) => false);
+    final uri = FileActions.exportToDeviceUri(j.filePath!, j.fileName).catchError((Object _) => null);
+    final exported = uri.then((u) => u != null);
+    uri.then((u) => PdfNotify.I.done(j, u));
     if (_deckOpen || PdfQueue.I.activeCount > 0) {
       // Several PDFs in progress: the row in the deck shows the actions; just confirm with a toast.
       exported.then((ok) => Toast.show(ok ? 'PDF तैयार: ${j.fileName} — Downloads में सेव' : 'PDF तैयार: ${j.fileName}'));
@@ -187,6 +200,14 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     }
     if (f != null && f.hasPrimaryFocus && f.context?.findAncestorWidgetOfExactType<EditableText>() != null) {
       f.unfocus();
+      return;
+    }
+    if (_deckOpen) {
+      _closeDeck();
+      return;
+    }
+    if (SyncStrip.open.value) {
+      SyncStrip.open.value = false;
       return;
     }
     if (nav.menuOpen) {
@@ -217,6 +238,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
         child: Scaffold(
           backgroundColor: GColors.cream,
           body: Stack(
+            key: _stackKey,
             children: [
               const Positioned.fill(child: _RootBackground()),
               ListenableBuilder(
@@ -229,11 +251,11 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                     physics: const ClampingScrollPhysics(),
                     slivers: [
                       SliverToBoxAdapter(
-                        child: _Mast(deckOpen: _deckOpen, onDeck: () => _openDeck(0)),
+                        child: _Mast(deckOpen: _deckOpen, onDeck: () => _openDeck(0), link: _deckLink),
                       ),
                       SliverToBoxAdapter(child: _Hamburger(open: nav.menuOpen)),
                       SliverToBoxAdapter(child: _NavMenu(open: nav.menuOpen)),
-                      const SliverToBoxAdapter(child: _SyncStrip()),
+                      const SliverToBoxAdapter(child: SyncStrip()),
                       SliverPadding(
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 72),
                         sliver: SliverMainAxisGroup(
@@ -245,6 +267,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                                 child: EmptyState(title: 'अभी खाली है', body: s.error, actionLabel: 'फिर कोशिश करें', onAction: () => CatalogStore.I.retry()),
                               ),
                             SliverFadeTransition(
+                              key: const ValueKey('panel'),
                               opacity: CurvedAnimation(parent: _panelIn, curve: Curves.easeOut),
                               sliver: KeyedSubtree(key: ValueKey(r.key), child: _panel(r)),
                             ),
@@ -287,6 +310,32 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                 ),
               ),
               const SyncProgressPill(),
+              // PDF list dropdown under the header arrow.
+              if (_deckOpen) Positioned.fill(child: GestureDetector(key: const ValueKey('pdf-shade'), behavior: HitTestBehavior.opaque, onTap: _closeDeck)),
+              Positioned(
+                left: 0,
+                top: 0,
+                child: CompositedTransformFollower(
+                  link: _deckLink,
+                  showWhenUnlinked: false,
+                  targetAnchor: Alignment.bottomRight,
+                  followerAnchor: Alignment.topRight,
+                  offset: Offset(_dx, 10),
+                  child: SizedBox(
+                    width: math.min(420, ((_stackKey.currentContext?.findRenderObject() as RenderBox?)?.size.width ?? MediaQuery.sizeOf(context).width) - 24),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 240),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (c, a) => FadeTransition(
+                        opacity: a,
+                        child: ScaleTransition(scale: Tween(begin: 0.92, end: 1.0).animate(a), alignment: Alignment.topRight, child: c),
+                      ),
+                      child: _deckOpen && PdfQueue.I.jobs.isNotEmpty ? PdfDropdown(onClose: _closeDeck) : const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              ),
               const _ToastLayer(),
             ],
           ),
@@ -321,9 +370,10 @@ class _RootBackground extends StatelessWidget {
 
 /// `.mast`
 class _Mast extends StatelessWidget {
-  const _Mast({required this.deckOpen, required this.onDeck});
+  const _Mast({required this.deckOpen, required this.onDeck, required this.link});
   final bool deckOpen;
   final VoidCallback onDeck;
+  final LayerLink link;
 
   @override
   Widget build(BuildContext context) {
@@ -381,7 +431,11 @@ class _Mast extends StatelessWidget {
                               ? const SizedBox.shrink()
                               : Padding(
                                   padding: const EdgeInsets.only(right: 6),
-                                  child: Pressable(
+                                  child: CompositedTransformTarget(
+                                    key: _HomeShellState.arrowKey,
+                                    link: link,
+                                    child: Pressable(
+                                    key: const ValueKey('pdf-arrow'),
                                     onTap: onDeck,
                                     child: Container(
                                       height: 44,
@@ -410,6 +464,7 @@ class _Mast extends StatelessWidget {
                                         ],
                                       ),
                                     ),
+                                  ),
                                   ),
                                 ),
                         );
@@ -496,12 +551,7 @@ class _Stat extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0, end: n.toDouble()),
-                    duration: const Duration(milliseconds: 900),
-                    curve: Curves.easeOutCubic,
-                    builder: (context, v, _) => Text(n == 0 ? '—' : '${v.round()}', style: GText.display(size: 22, color: GColors.goldLight, height: 1.1)),
-                  ),
+                  CountUp(value: n, memo: 'mast:$label', style: GText.display(size: 22, color: GColors.goldLight, height: 1.1)),
                   const SizedBox(height: 2),
                   Text(
                     label,
@@ -666,54 +716,141 @@ String hiDate(int? ms) {
   return '${d.day} ${_hiMonths[d.month - 1]}, ${h12.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')} ${d.hour < 12 ? 'am' : 'pm'}';
 }
 
-/// `.sync-strip`
-class _SyncStrip extends StatelessWidget {
-  const _SyncStrip();
+/// `.sync-strip` — status line + सिंक button, and the sync card that opens under it.
+///
+/// It listens to the store itself. (It used to be a `const` child of the scroll view, so a
+/// store change never rebuilt it: the सिंक tap ran, but the spinner, the text and the page
+/// count stayed frozen — the "sync button does nothing" bug.)
+class SyncStrip extends StatelessWidget {
+  const SyncStrip({super.key});
+
+  /// Sync card open / closed (opens on a सिंक tap, the arrow closes it).
+  static final ValueNotifier<bool> open = ValueNotifier(false);
+
+  static void tapSync() {
+    open.value = true;
+    CatalogStore.I.manualSync();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Listenable.merge([CatalogStore.I, open]),
+        builder: (context, _) {
+          final s = CatalogStore.I;
+          final u = s.images;
+          final syncing = s.status == SyncStatus.syncing;
+          final busy = syncing || (u.manual && u.running);
+          final ce = u.total > 0
+              ? (u.running && !(u.checking && !u.manual)
+                  ? 'पेज सेव हो रहे हैं ${u.done}/${u.total}'
+                  : (u.done >= u.total ? 'सभी पेज इस डिवाइस पर सेव हैं' : 'सेव पेज ${u.done}/${u.total}'))
+              : (syncing ? 'सूची सेव हो रही है…' : '');
+          final main = syncing
+              ? 'ऑनलाइन सिंक हो रहा है — सूची डिवाइस पर लिखी जा रही है'
+              : (s.error ?? (s.online ? 'ऑफलाइन तैयार${s.syncedAt != null ? ' · ${hiDate(s.syncedAt)}' : ''}' : 'इंटरनेट नहीं · सेव किया डेटा चल रहा है'));
+          return Container(
+            decoration: const BoxDecoration(
+              color: GColors.syncStrip,
+              border: Border(bottom: BorderSide(color: GColors.creamDark)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(color: s.online ? GColors.online : GColors.maroon, shape: BoxShape.circle),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        layoutBuilder: (cur, prev) => Stack(alignment: Alignment.topLeft, children: [...prev, ?cur]),
+                        child: Text(
+                          '$main${ce.isNotEmpty ? ' · $ce' : ''}',
+                          key: ValueKey(main + ce),
+                          style: GText.sans(size: 13, color: GColors.brown, height: 1.4),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Pressable(
+                      key: const ValueKey('sync-card-toggle'),
+                      onTap: () => open.value = !open.value,
+                      scale: 0.9,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: AnimatedRotation(
+                          turns: open.value ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 240),
+                          child: const GIcon('chevron-down', size: 16, color: GColors.maroon),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    _SyncButton(syncing: busy),
+                  ],
+                ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: open.value ? _SyncCard(s: s) : const SizedBox(width: double.infinity),
+              ),
+            ]),
+          );
+        },
+      );
+}
+
+/// What is saved on this phone: "985 में से 985 पेज सेव", a bar, and the last sync time.
+class _SyncCard extends StatelessWidget {
+  const _SyncCard({required this.s});
+  final CatalogStore s;
+
   @override
   Widget build(BuildContext context) {
-    final s = CatalogStore.I;
     final u = s.images;
+    final total = u.total;
+    final done = u.done.clamp(0, total == 0 ? 0 : total);
     final syncing = s.status == SyncStatus.syncing;
-    final ce = u.total > 0
-        ? (u.running ? 'पेज सेव हो रहे हैं ${u.done}/${u.total}' : (u.done >= u.total ? 'सभी पेज इस डिवाइस पर सेव हैं' : 'सेव पेज ${u.done}/${u.total}'))
-        : (syncing ? 'सूची सेव हो रही है…' : '');
-    final main = syncing
-        ? 'ऑनलाइन सिंक हो रहा है — सूची डिवाइस पर लिखी जा रही है'
-        : (s.error ?? (s.online ? 'ऑफलाइन तैयार${s.syncedAt != null ? ' · ${hiDate(s.syncedAt)}' : ''}' : 'इंटरनेट नहीं · सेव किया डेटा चल रहा है'));
+    final working = syncing || u.running;
+    final head = syncing ? 'सूची सिंक हो रही है…' : (working ? 'पेज जाँचे और सेव हो रहे हैं…' : (total > 0 && done >= total ? 'सब पेज फ़ोन में सेव हैं' : 'पेज सेव'));
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: const BoxDecoration(
-        color: GColors.syncStrip,
-        border: Border(bottom: BorderSide(color: GColors.creamDark)),
+      key: const ValueKey('sync-card'),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: GColors.paper,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: GColors.gold.withValues(alpha: 0.6)),
+        boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.10), blurRadius: 10, offset: const Offset(0, 3))],
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: s.online ? GColors.online : GColors.maroon, shape: BoxShape.circle),
-            ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(head, style: GText.sans(size: 14, weight: FontWeight.w700, color: GColors.maroon)),
+        const SizedBox(height: 6),
+        Text(total > 0 ? '$total में से $done पेज सेव' : 'पेज की सूची अभी नहीं आई', style: GText.display(size: 20, color: GColors.maroon, height: 1.2)),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: LinearProgressIndicator(
+            value: syncing && total == 0 ? null : (total == 0 ? 0 : done / total),
+            minHeight: 6,
+            backgroundColor: GColors.creamDark,
+            valueColor: const AlwaysStoppedAnimation(GColors.saffron),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              layoutBuilder: (cur, prev) => Stack(alignment: Alignment.topLeft, children: [...prev, ?cur]),
-              child: Text(
-                '$main${ce.isNotEmpty ? ' · $ce' : ''}',
-                key: ValueKey(main + ce),
-                style: GText.sans(size: 13, color: GColors.brown, height: 1.4),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          _SyncButton(syncing: syncing),
-        ],
-      ),
+        ),
+        const SizedBox(height: 8),
+        Text(s.syncedAt != null ? 'आख़िरी सिंक: ${hiDate(s.syncedAt)}' : 'अभी सिंक नहीं हुआ', style: GText.sans(size: 13, color: GColors.muted)),
+      ]),
     );
   }
 }
@@ -749,8 +886,9 @@ class _SyncButtonState extends State<_SyncButton> with SingleTickerProviderState
 
   @override
   Widget build(BuildContext context) => Pressable(
-        enabled: !widget.syncing,
-        onTap: widget.syncing ? null : () => CatalogStore.I.sync().then((_) => CatalogStore.I.savePages()),
+        key: const ValueKey('sync-button'),
+        // While a sync runs, a tap just opens the sync card (the original disabled the button).
+        onTap: widget.syncing ? () => SyncStrip.open.value = true : SyncStrip.tapSync,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
@@ -792,7 +930,7 @@ class SyncProgressPill extends StatelessWidget {
               final s = CatalogStore.I;
               final u = s.images;
               final syncing = s.status == SyncStatus.syncing;
-              final pages = u.running && u.total > 0;
+              final pages = u.running && u.total > 0 && (!u.checking || u.manual);
               final show = syncing || pages;
               final label = pages ? 'सिंक हो रहा है… ${u.done} / ${u.total} पेज' : 'सिंक हो रहा है… सूची';
               final value = pages ? (u.done / u.total).clamp(0.0, 1.0) : null;

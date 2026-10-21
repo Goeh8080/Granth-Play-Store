@@ -15,10 +15,16 @@ import 'storage.dart';
 enum SyncStatus { booting, ready, offline, syncing, error }
 
 class ImageProgress {
-  const ImageProgress(this.done, this.total, this.running, {this.failed = 0, this.lowSpace = false});
+  const ImageProgress(this.done, this.total, this.running, {this.failed = 0, this.lowSpace = false, this.checking = false, this.manual = false});
   final int done;
   final int total;
   final bool running;
+
+  /// Saved pictures are being checked (exists, size, image header) before missing ones download.
+  final bool checking;
+
+  /// Started from the सिंक button: progress is always shown, even when nothing is missing.
+  final bool manual;
 
   /// Pictures that could not be fetched after every retry (tried again on the next sync).
   final int failed;
@@ -175,7 +181,7 @@ class CatalogStore extends ChangeNotifier {
     _listen();
     if (online) {
       await sync();
-      if (hasData) savePages();
+      if (hasData) savePages(verify: true);
     } else if (hasData) {
       status = SyncStatus.offline;
       error = null;
@@ -330,6 +336,24 @@ class CatalogStore extends ChangeNotifier {
   @visibleForTesting
   Future<int?> Function() freeBytes = NativeBridge.freeBytes;
 
+  /// Checks saved pictures; returns the good ones (bad files are deleted). Replaceable in tests.
+  @visibleForTesting
+  Future<Set<String>> Function(List<String> paths, void Function(int checked) progress) verifyPages = (p, f) => ImageStore.I.verify(p, onProgress: f);
+
+  /// How long the result of a manual sync stays on screen at least.
+  @visibleForTesting
+  Duration minManualShow = const Duration(milliseconds: 900);
+
+  /// सिंक button (`sync().then(savePages)` in the original): fetch the lists again, then
+  /// check every saved picture and download anything missing or damaged.
+  Future<void> manualSync() async {
+    images = ImageProgress(images.done, images.total, true, manual: true, checking: true);
+    online = true; // like the original button: always try the network
+    notifyListeners();
+    if (status != SyncStatus.syncing) await sync();
+    savePages(verify: true, manual: true);
+  }
+
   /// Wait between retries of one picture (1×, 3×) and before the second pass.
   @visibleForTesting
   Duration retryBase = const Duration(seconds: 1);
@@ -358,15 +382,33 @@ class CatalogStore extends ChangeNotifier {
   /// download continues where it left off on the next start / sync. Each picture is
   /// tried 3 times, and failures get a second pass; the rest wait for the next sync.
   /// Stops (with a message) when the phone is almost full.
-  void savePages() {
+  void savePages({bool verify = false, bool manual = false}) {
     final g = _imageGroups();
     final all = [...g.first, ...g.rest];
-    if (all.isEmpty) return;
+    if (all.isEmpty) {
+      if (manual) {
+        images = const ImageProgress(0, 0, false, manual: true);
+        notifyListeners();
+      }
+      return;
+    }
     final run = ++_saveRun;
-    images = ImageProgress(images.done, all.length, true);
+    final shownAt = DateTime.now();
+    images = ImageProgress(manual ? 0 : images.done, all.length, true, checking: verify, manual: manual);
     notifyListeners();
     () async {
-      final have = await havePages(all);
+      final Set<String> have;
+      if (verify) {
+        // Repair pass: every saved picture is checked; missing / empty / damaged files are
+        // deleted here and downloaded again below. Counts update live.
+        have = await verifyPages(all, (n) {
+          if (run != _saveRun) return;
+          images = ImageProgress(n, all.length, true, checking: true, manual: manual);
+          notifyListeners();
+        });
+      } else {
+        have = await havePages(all);
+      }
       var done = 0;
       final a = <String>[];
       final b = <String>[];
@@ -377,8 +419,13 @@ class CatalogStore extends ChangeNotifier {
         have.contains(e) ? done++ : b.add(e);
       }
       if (run != _saveRun) return;
+      if (!online || error == kStaleError) {
+        // No internet right now: only the check ran; missing pictures download on the next sync.
+        a.clear();
+        b.clear();
+      }
       final missing = a.length + b.length;
-      images = ImageProgress(done, all.length, missing > 0);
+      images = ImageProgress(done, all.length, missing > 0 || manual, manual: manual);
       notifyListeners();
       var lowSpace = false;
       if (missing > 0) {
@@ -407,7 +454,7 @@ class CatalogStore extends ChangeNotifier {
               failed.add(list[i]);
             }
             if (run == _saveRun && (done % 3 == 0 || done == all.length)) {
-              images = ImageProgress(done, all.length, done < all.length, failed: failed.length);
+              images = ImageProgress(done, all.length, done < all.length, failed: failed.length, manual: manual);
               notifyListeners();
             }
           }
@@ -427,7 +474,17 @@ class CatalogStore extends ChangeNotifier {
         await pool(again);
       }
       if (run != _saveRun) return;
-      images = ImageProgress(done, all.length, false, failed: failed.length, lowSpace: lowSpace);
+      if (manual) {
+        // A tap on सिंक always shows its result (e.g. 985 / 985) for a moment.
+        final left = minManualShow - DateTime.now().difference(shownAt);
+        if (left > Duration.zero) {
+          images = ImageProgress(done, all.length, true, failed: failed.length, manual: true);
+          notifyListeners();
+          await Future<void>.delayed(left);
+          if (run != _saveRun) return;
+        }
+      }
+      images = ImageProgress(done, all.length, false, failed: failed.length, lowSpace: lowSpace, manual: manual);
       if (lowSpace) error = kLowSpaceStop;
       // A granth is offline when all of its pictures are saved.
       final missingNow = {...failed, if (lowSpace) ...all.where((p) => ImageStore.I.cachedSync(p) == null)};

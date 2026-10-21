@@ -110,18 +110,20 @@ class FileActions {
   }
 
   /// `xe()`/`we()` — save to the phone: PDFs to Downloads, pictures to the album.
-  static Future<bool> exportToDevice(String sourcePath, String name) async {
+  static Future<bool> exportToDevice(String sourcePath, String name) async => await exportToDeviceUri(sourcePath, name) != null;
+
+  /// Same as [exportToDevice]; returns where the copy went (MediaStore URI or path), or null.
+  static Future<String?> exportToDeviceUri(String sourcePath, String name) async {
     final File local;
     try {
       local = await ensureLocal(sourcePath, name);
     } catch (_) {
-      return false;
+      return null;
     }
     final mime = mimeOf(name);
-    final r = isPdf(name)
+    return isPdf(name)
         ? await NativeBridge.copyToDownloads(local.path, safeName(name), mime)
         : await NativeBridge.saveImageToAlbum(local.path, safeName(name), mime);
-    return r != null;
   }
 
   /// `Ce()` — open a PDF with the system viewer.

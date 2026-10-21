@@ -24,7 +24,8 @@
 | Resume (`granth-resume`, reload if the WebView went blank) | ➕ | No WebView, so there is no blank state to reload. Resume syncs silently when the app was away ≥ 30 s or the data is > 2 min old. |
 | Deep links `granth://open?topic|granth|id=…` and `https://granth.grok.me/open?...` | ➕ | Cold start (`getInitialLink`) and warm start (`onNewIntent` + `setIntent`). Not-found shows a message with a Dashboard button. Tested. |
 | `public/open` web page / `assetlinks.json` | ⏭ | Server-side files; nothing to port into the app. |
-| Startup permission prompt (notifications, media) | ⏭ (on purpose) | The original asks for notifications but never posts any. Storage permission is asked only when saving on Android ≤ 9; MediaStore needs none on Android 10+. |
+| Startup permission prompt (notifications, media) | ⏭ (on purpose) | The original asks for notifications at start but never posts any. Here, notifications are asked once on Android 13+, the first time a PDF starts; PDFs still work if denied. Storage permission is asked only when saving on Android ≤ 9; MediaStore needs none on Android 10+. |
+| Whole-app pinch zoom (WebView viewport `maximum-scale=5, user-scalable=yes`, `touch-action: manipulation`) | ✅ | `AppZoom` wraps every screen: two-finger pinch 1–5× at the fingers, the layout never reflows (it is a transform), taps land on the right spot, one-finger sideways drag pans while zoomed, vertical drags still scroll lists, snaps back to 1× near 1. No double-tap zoom, same as the original (`touch-action: manipulation`). The picture viewer's own zoom wins inside the viewer. |
 | Status bar maroon, safe-area padding | ✅ | |
 
 ## Data, sync, storage
@@ -34,6 +35,7 @@
 | `getTopics` / `getGranths` / `getPramans` from granth.wnmsolutions.com | ✅ | Same API and `text/html` JSON handling. 20 s overall timeout (the bridge used 50 s), so a dead network never keeps the spinner up. |
 | Boot: show the saved copy instantly, then sync, then save pages | ✅ | `CatalogStore.boot` mirrors the zustand `cn.boot`. |
 | Sync every 3 min, on reconnect, on resume, सिंक button | ➕ | An identical download changes nothing (no rebuild or re-index). JSON is decoded off the UI thread. |
+| सिंक button (`sync().then(savePages)`, spinning icon, live strip text) | ✅ ➕ | Tap re-fetches all three lists, spins, then checks every saved page on disk (exists, real size, valid JPEG/PNG/GIF/WEBP header, JPEG end marker) and quietly re-downloads missing or damaged ones. It always shows progress, even when everything is already saved (counts up to 985/985, then done). A collapsible sync card (chevron) shows "985 में से 985 पेज सेव", a bar and "आख़िरी सिंक". No missing/failed counts are shown. The silent check also runs at app start. Cached data still shows instantly. |
 | Status texts (सिंक हो रहा है, इंटरनेट नहीं · सेव किया डेटा चल रहा है, नया डेटा नहीं मिला…) | ✅ | |
 | Background page download (`savePages`): covers first, then pages, 6 workers, progress | ✅ ➕ | App-level service (`CatalogStore`), not tied to a screen. Runs on any screen, like the original. Downloads every picture the app shows (granth cover + प्रकाशन, every praman page + its granth picture), visited or not: 985 files / ≈570 MB for the live catalog on 2026-10-21. Incremental and resumable (saved files are skipped). 3 tries per picture plus a second pass. Stops below 150 MB free with a message. A granth is marked offline only when all of its pictures are saved. |
 | Visible download progress | ➕ (new) | Floating pill on every screen: "सिंक हो रहा है… 245 / 985 पेज" with a bar. It does not block taps and hides when done. |
@@ -51,13 +53,14 @@
 | Mast: gradient, gold strip, logo, title, gallery + settings buttons | ✅ | Same CSS values. |
 | Header stats (विषय / पवित्र ग्रन्थ / नए प्रमाण) with active glow | ✅ | Exact CSS: `0 0 0 2px gold, 0 0 18px gold-light 80%`, painted outside the tile only (like CSS). Fades in instead of snapping. |
 | Hamburger menu (Dashboard / Topics / Granths / प्रमाण / Gallery) | ✅ | |
-| Dashboard cards + note card | ➕ | Counts now update live after the first sync (they stayed 0 before). |
+| Dashboard cards + note card | ➕ | Counts now update live after the first sync (they stayed 0 before). Numbers (cards and header stats) count up 0 → final once, when real data arrives. Later changes animate from the shown value. No replay on rebuild or settings change; it replays only on a fresh Dashboard open. |
 | Topics: position sort, search, 1×1/2×2, card pills (प्रमाण, n/total, Share, PDF) | ✅ | |
 | Multiple topic PDF (ordered pick, one combined PDF) | ✅ | |
+| Granths header: "Multiple granth PDF" sits ~8 px lower so "Granths" stays on one line (checked at 360 dp, font scale 1.0 and 1.3) | ➕ | |
 | Granths: position sort, search, 1×1/2×2/3×3, book-open animation, offline badge, granth URL, share, PDF | ✅ | |
 | Multiple granth PDF | ➕ (new, requested) | Tick several granths; one PDF each, built in parallel. |
 | Pramans: filters by topic / granth / id, chip with सभी प्रमाण, order rules (`order.ts`), card actions (zoom, save picture, share, PDF, YouTube) | ✅ | |
-| Picture zoom (pinch, double-tap, pan) | ✅ | |
+| Picture zoom (`PinchView`: pinch 1–4×, pan when zoomed, kept inside the frame, snaps to 1 near 1) | ✅ ➕ | `ZoomStage` in the praman viewer and the Gallery viewer. Pinch at the fingers 1–4×, pan when zoomed, edges kept in bounds, snaps back, flick glide. Double-tap zooms 2.5× at the tap point or back to 1× (gallery-style, requested; the original has none). The viewer claims the gesture, so the list behind it can no longer steal the pinch (that was the bug). |
 | YouTube block | ✅ | |
 | Gallery: PDF / picture tabs, folders, search, open / share / save / delete, 1×1/2×2 | ✅ | |
 | सेटिंग: PDF सेटिंग, लेआउट 1×1/2×2 (all screens), hidden कार्ड स्टाइल (5 taps on Version), पीछे | ➕ | Every option now applies live and persists (before, the screens did not rebuild). |
@@ -79,6 +82,8 @@
 | Page number stamp (Helvetica 11, maroon, cream tab) | ✅ | |
 | Picture prep: JPEG kept as-is when it fits, else flatten on white + scale to 1800 px + JPEG | ➕ | Done natively (Android codec, worker threads, reduced-size decode of huge photos). JPEGs up to 2600 px / 1.5 MB are embedded untouched (faster). |
 | Progress tray: phases, %, ETA, रोकें, open / share / save, auto-save to Downloads | ➕ | No queue: up to 3 at once (1–2 on low-RAM phones), each with its own row and retry. |
+| `PdfDock` arrow (`⌄ N`, rotates when open) toggling the task list | ✅ ➕ | Same arrow in the header. The list is a compact dropdown under the arrow. It is **collapsed by default** and does not auto-open (deliberate, requested; the original auto-opens its deck). Each row has × to remove it for good (a running PDF asks first, then stops). "तैयार हटाएँ" clears finished rows. Asking for the same PDF twice on purpose makes two entries; only a double tap within 1.5 s is ignored. |
+| Background PDF + notification | ➕ (new) | Android foreground service (`PdfService`, type `dataSync`, `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC`). One ongoing notification ("2 PDF बन रही हैं — 45%"), plus a completion notification that opens the PDF (or the app). The service stops when no PDF is running. Android 15 `onTimeout` stops it cleanly. The Flutter engine is cached and kept while the service runs, so swiping the app away does not end a running PDF. Device-only behaviour (OEM killers, background rendering) is not verified in CI. |
 | File names from title (70 chars), gallery ids `pdf-granth-/pdf-topic-/pdf-topics-/pdf-praman-`, marks granths offline | ✅ | |
 | Save to Downloads (MediaStore on 10+, public folder + scan on ≤ 9) | ➕ | A failed copy deletes the pending MediaStore row or partial file. |
 
@@ -122,4 +127,6 @@
     - Here: 3 tries plus a second pass. Failures are counted and tried again on the next sync. A granth is marked offline only when all of its pictures are saved.
 15. **No storage guard for page downloads.** The original kept downloading until the disk was full.
     - Here: the download stops below 150 MB free.
+16. **Frozen sync strip.** In the port the strip was a `const` child inside the store listener, so its spinner and text never changed after a tap ("tap does nothing"). When all pages were saved, the page step ended at once, so no progress showed. Fixed: the strip rebuilds from the store, and manual sync always checks pages visibly.
+17. **Counters restarting from 0.** The splash returned its child in a different tree position when it finished, which rebuilt the whole shell. Fixed with a stable key; counters remember what they already showed.
 13. **Dashboard counts.** They stayed at 0 until you navigated away and back after the first sync (port regression, fixed).

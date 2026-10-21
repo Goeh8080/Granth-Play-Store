@@ -17,6 +17,8 @@ import android.os.StatFs
 import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -38,6 +40,28 @@ class MainActivity : FlutterActivity() {
     // JPEG codec (much faster than pure Dart, and big photos are decoded at reduced size).
     private val imageWorkers = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors().coerceIn(2, 4))
 
+    // ---- keep PDFs going when the app is swiped away ----
+    // The Flutter engine (where the PDFs are made) normally dies with the activity. It is
+    // created here and cached, and kept alive while the PDF service runs; the next launch
+    // attaches to it and shows the PDFs where they are.
+    private val engineId = "granth-main"
+
+    override fun provideFlutterEngine(context: Context): FlutterEngine? {
+        FlutterEngineCache.getInstance().get(engineId)?.let { return it }
+        val engine = FlutterEngine(context.applicationContext)
+        engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+        FlutterEngineCache.getInstance().put(engineId, engine)
+        return engine
+    }
+
+    override fun shouldDestroyEngineWithHost(): Boolean = !PdfService.running
+
+    override fun onDestroy() {
+        val destroyEngine = !PdfService.running
+        super.onDestroy()
+        if (destroyEngine) FlutterEngineCache.getInstance().remove(engineId)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
@@ -46,6 +70,26 @@ class MainActivity : FlutterActivity() {
                 "prepareImage" -> prepareImage(call, result)
                 "deviceInfo" -> result.success(deviceInfo())
                 "freeBytes" -> result.success(freeBytes())
+                "pdfProgress" -> {
+                    PdfService.update(applicationContext, call.argument<String>("title") ?: "PDF", call.argument<String>("text") ?: "", call.argument<Int>("percent") ?: 0)
+                    result.success(null)
+                }
+                "pdfStop" -> {
+                    PdfService.stop(applicationContext)
+                    result.success(null)
+                }
+                "pdfDone" -> {
+                    PdfService.done(applicationContext, call.argument<Int>("id") ?: 0, call.argument<String>("name") ?: "PDF", call.argument<String>("uri"))
+                    result.success(null)
+                }
+                "askNotifications" -> {
+                    if (Build.VERSION.SDK_INT >= 33 &&
+                        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4712)
+                    }
+                    result.success(null)
+                }
                 "exitApp" -> {
                     result.success(null)
                     finishAffinity()
