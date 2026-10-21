@@ -25,6 +25,9 @@ class Store {
   static const kOfflineIds = 'granth-offline-ids';
   static const kDevice = 'granth-device';
 
+  /// Signature of the last library the "सारे ग्रंथ ऑफलाइन" card was shown for.
+  static const kOfflineReady = 'granth-offline-ready';
+
   /// Never throws and never hangs: each step has a timeout, and if the app documents
   /// directory is unavailable the cache falls back to a temp directory so the app still opens.
   Future<void> init() async {

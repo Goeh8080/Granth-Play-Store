@@ -49,8 +49,12 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     nav.onExitRequest = _askExit;
     PdfQueue.I.addListener(_onQueue);
     PdfQueue.I.finished.addListener(_onFinished);
+    CatalogStore.I.offlineReady.addListener(_onOfflineReady);
     _scroll.addListener(() => _showTop.value = _scroll.hasClients && _scroll.offset > 480);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _restorePlace());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restorePlace();
+      _onOfflineReady();
+    });
   }
 
   @override
@@ -58,6 +62,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     nav.removeListener(_onNav);
     PdfQueue.I.removeListener(_onQueue);
     PdfQueue.I.finished.removeListener(_onFinished);
+    CatalogStore.I.offlineReady.removeListener(_onOfflineReady);
     _scroll.dispose();
     _panelIn.dispose();
     super.dispose();
@@ -131,6 +136,23 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
       _deckOpen = false;
       if (mounted) setState(() {});
     }
+  }
+
+  bool _readyOpen = false;
+
+  /// "सारे ग्रंथ ऑफलाइन हो गए हैं" — once per completed library download.
+  void _onOfflineReady() {
+    final r = CatalogStore.I.offlineReady.value;
+    if (r == null || _readyOpen || !mounted) return;
+    _readyOpen = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        _readyOpen = false;
+        return;
+      }
+      CatalogStore.I.ackOfflineReady();
+      openOfflineReady(context, r).whenComplete(() => _readyOpen = false);
+    });
   }
 
   void _onFinished() {
@@ -264,6 +286,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                   ),
                 ),
               ),
+              const SyncProgressPill(),
               const _ToastLayer(),
             ],
           ),
@@ -748,6 +771,76 @@ class _SyncButtonState extends State<_SyncButton> with SingleTickerProviderState
                 style: GText.sans(size: 13, weight: FontWeight.w600, color: GColors.maroon),
               ),
             ],
+          ),
+        ),
+      );
+}
+
+/// Floating, non-blocking progress of the background sync / offline download:
+/// "सिंक हो रहा है… 245 / 985 पेज" with a bar. Visible on every screen, gone when done.
+class SyncProgressPill extends StatelessWidget {
+  const SyncProgressPill({super.key});
+
+  @override
+  Widget build(BuildContext context) => Positioned(
+        left: 16,
+        bottom: 24 + MediaQuery.paddingOf(context).bottom,
+        child: IgnorePointer(
+          child: ListenableBuilder(
+            listenable: Listenable.merge([CatalogStore.I, Toast.message]),
+            builder: (context, _) {
+              final s = CatalogStore.I;
+              final u = s.images;
+              final syncing = s.status == SyncStatus.syncing;
+              final pages = u.running && u.total > 0;
+              final show = syncing || pages;
+              final label = pages ? 'सिंक हो रहा है… ${u.done} / ${u.total} पेज' : 'सिंक हो रहा है… सूची';
+              final value = pages ? (u.done / u.total).clamp(0.0, 1.0) : null;
+              final w = MediaQuery.sizeOf(context).width;
+              return AnimatedSlide(
+                // Steps above a toast so both stay readable.
+                offset: show ? (Toast.message.value != null ? const Offset(0, -1.15) : Offset.zero) : const Offset(0, 1.4),
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                child: AnimatedOpacity(
+                  key: const ValueKey('sync-pill'),
+                  opacity: show ? 1 : 0,
+                  duration: const Duration(milliseconds: 220),
+                  child: Container(
+                    constraints: BoxConstraints(maxWidth: math.max(200, math.min(w - 140, 320))),
+                    padding: const EdgeInsets.fromLTRB(12, 8, 14, 9),
+                    decoration: BoxDecoration(
+                      color: GColors.paper.withValues(alpha: 0.96),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: GColors.gold),
+                      boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.18), blurRadius: 12, offset: const Offset(0, 4))],
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const GIcon('refresh-cw', size: 14, color: GColors.maroon),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: GText.sans(size: 13, weight: FontWeight.w600, color: GColors.maroon, height: 1.3)),
+                          const SizedBox(height: 5),
+                          SizedBox(
+                            width: 180,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(99),
+                              child: LinearProgressIndicator(
+                                value: value,
+                                minHeight: 4,
+                                backgroundColor: GColors.creamDark,
+                                valueColor: const AlwaysStoppedAnimation(GColors.saffron),
+                              ),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ]),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       );

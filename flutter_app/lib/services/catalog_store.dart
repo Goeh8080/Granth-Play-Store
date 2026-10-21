@@ -8,17 +8,37 @@ import '../models/models.dart';
 import 'api.dart';
 import 'events.dart';
 import 'image_cache.dart';
+import 'native_bridge.dart';
 import 'search.dart';
 import 'storage.dart';
 
 enum SyncStatus { booting, ready, offline, syncing, error }
 
 class ImageProgress {
-  const ImageProgress(this.done, this.total, this.running);
+  const ImageProgress(this.done, this.total, this.running, {this.failed = 0, this.lowSpace = false});
   final int done;
   final int total;
   final bool running;
+
+  /// Pictures that could not be fetched after every retry (tried again on the next sync).
+  final int failed;
+
+  /// Stopped because the phone is almost full.
+  final bool lowSpace;
+
+  bool get complete => total > 0 && done >= total;
 }
+
+/// Shown once each time the whole library finishes downloading.
+class OfflineReady {
+  const OfflineReady({required this.pages, required this.granths, required this.bytes, required this.signature});
+  final String signature;
+  final int pages;
+  final int granths;
+  final int bytes;
+}
+
+const kLowSpaceStop = 'फ़ोन में जगह कम है — पेज डाउनलोड रुका। जगह खाली करके सिंक दबाएँ।';
 
 const kNoDataError = 'डेटा नहीं आ पाया। इंटरनेट चेक करके फिर सिंक करें।';
 const kStaleError = 'नया डेटा नहीं मिला। सेव की हुई कॉपी चल रही है।';
@@ -148,7 +168,7 @@ class CatalogStore extends ChangeNotifier {
         } catch (_) {}
         _catalogChanged();
         status = online ? SyncStatus.ready : SyncStatus.offline;
-        images = ImageProgress(ImageStore.I.countSync(), _allImagePaths().length, false);
+        images = ImageProgress(_haveCount(), _allImagePaths().length, false);
         notifyListeners();
       }
     } catch (_) {}
@@ -251,7 +271,7 @@ class CatalogStore extends ChangeNotifier {
       }
       status = SyncStatus.ready;
       error = null;
-      images = ImageProgress(ImageStore.I.countSync(), _allImagePaths().length, images.running);
+      images = ImageProgress(_haveCount(), _allImagePaths().length, images.running);
       EventLog.I.log('sync', 'catalog');
     } catch (e) {
       debugPrint('sync failed: $e');
@@ -288,7 +308,56 @@ class CatalogStore extends ChangeNotifier {
     return [...g.first, ...g.rest];
   }
 
-  /// `savePages` — download every page image (granth covers first) with 6 workers.
+  int _haveCount() {
+    var n = 0;
+    for (final p in _allImagePaths()) {
+      if (ImageStore.I.cachedSync(p) != null) n++;
+    }
+    return n;
+  }
+
+  // ---------- full offline download ----------
+
+  /// Fetches one picture; true when it is on the device. Replaceable in tests.
+  @visibleForTesting
+  Future<bool> Function(String path) fetchPage = (p) async => (await ImageStore.I.get(p)) != null;
+
+  /// Pictures already on the device. Replaceable in tests.
+  @visibleForTesting
+  Future<Set<String>> Function(List<String> paths) havePages = (p) => ImageStore.I.which(p);
+
+  /// Free bytes on the app volume (null = unknown). Replaceable in tests.
+  @visibleForTesting
+  Future<int?> Function() freeBytes = NativeBridge.freeBytes;
+
+  /// Wait between retries of one picture (1×, 3×) and before the second pass.
+  @visibleForTesting
+  Duration retryBase = const Duration(seconds: 1);
+
+  /// Download stops below this much free space (the catalog and settings still save).
+  static const lowSpaceBytes = 150 << 20;
+
+  /// Fires each time the whole library has just become available offline.
+  final ValueNotifier<OfflineReady?> offlineReady = ValueNotifier(null);
+
+  Future<bool> _fetchWithRetry(String path, int run) async {
+    for (var i = 0; i < 3; i++) {
+      if (run != _saveRun) return false;
+      try {
+        if (await fetchPage(path)) return true;
+      } catch (_) {}
+      if (i < 2) await Future<void>.delayed(retryBase * (i == 0 ? 1 : 3));
+    }
+    return false;
+  }
+
+  /// `savePages` — download every picture the app shows (granth covers and प्रकाशन
+  /// pages first, then every praman page), so every granth works with no internet.
+  ///
+  /// Incremental and resumable: pictures already saved are skipped, so a stopped
+  /// download continues where it left off on the next start / sync. Each picture is
+  /// tried 3 times, and failures get a second pass; the rest wait for the next sync.
+  /// Stops (with a message) when the phone is almost full.
   void savePages() {
     final g = _imageGroups();
     final all = [...g.first, ...g.rest];
@@ -297,7 +366,7 @@ class CatalogStore extends ChangeNotifier {
     images = ImageProgress(images.done, all.length, true);
     notifyListeners();
     () async {
-      final have = await ImageStore.I.which(all);
+      final have = await havePages(all);
       var done = 0;
       final a = <String>[];
       final b = <String>[];
@@ -308,20 +377,37 @@ class CatalogStore extends ChangeNotifier {
         have.contains(e) ? done++ : b.add(e);
       }
       if (run != _saveRun) return;
-      images = ImageProgress(done, all.length, a.length + b.length > 0);
+      final missing = a.length + b.length;
+      images = ImageProgress(done, all.length, missing > 0);
       notifyListeners();
+      var lowSpace = false;
+      if (missing > 0) {
+        final free = await freeBytes().catchError((Object _) => null);
+        if (free != null && free < lowSpaceBytes) lowSpace = true;
+      }
+      final failed = <String>[];
+      var sinceCheck = 0;
       Future<void> pool(List<String> list) async {
         var next = 0;
         Future<void> worker() async {
-          while (run == _saveRun) {
+          while (run == _saveRun && !lowSpace) {
             final i = next++;
             if (i >= list.length) return;
-            try {
-              await ImageStore.I.get(list[i]);
-            } catch (_) {}
-            done++;
+            if (++sinceCheck >= 25) {
+              sinceCheck = 0;
+              final free = await freeBytes().catchError((Object _) => null);
+              if (free != null && free < lowSpaceBytes) {
+                lowSpace = true;
+                return;
+              }
+            }
+            if (await _fetchWithRetry(list[i], run)) {
+              done++;
+            } else {
+              failed.add(list[i]);
+            }
             if (run == _saveRun && (done % 3 == 0 || done == all.length)) {
-              images = ImageProgress(done, all.length, done < all.length);
+              images = ImageProgress(done, all.length, done < all.length, failed: failed.length);
               notifyListeners();
             }
           }
@@ -333,12 +419,66 @@ class CatalogStore extends ChangeNotifier {
 
       await pool(a);
       await pool(b);
-      if (run == _saveRun) {
-        images = ImageProgress(all.length, all.length, false);
-        markOffline(granths.map((e) => e.id));
-        notifyListeners();
+      if (failed.isNotEmpty && run == _saveRun && !lowSpace && online) {
+        // Second pass for flaky networks.
+        await Future<void>.delayed(retryBase * 5);
+        final again = [...failed];
+        failed.clear();
+        await pool(again);
       }
+      if (run != _saveRun) return;
+      images = ImageProgress(done, all.length, false, failed: failed.length, lowSpace: lowSpace);
+      if (lowSpace) error = kLowSpaceStop;
+      // A granth is offline when all of its pictures are saved.
+      final missingNow = {...failed, if (lowSpace) ...all.where((p) => ImageStore.I.cachedSync(p) == null)};
+      markOffline(granths.where((e) => _granthPaths(e).every((p) => !missingNow.contains(p))).map((e) => e.id));
+      notifyListeners();
+      if (done >= all.length) _celebrate(all);
     }();
+  }
+
+  Iterable<String> _granthPaths(Granth g) sync* {
+    for (final p in [g.imagePath, g.editorImagePath]) {
+      final r = mediaPath(p);
+      if (r != null) yield r;
+    }
+    for (final p in pramans) {
+      if (p.granthId != g.id) continue;
+      for (final q in [p.granthImage, p.imagePath, p.editorImagePath]) {
+        final r = mediaPath(q);
+        if (r != null) yield r;
+      }
+    }
+  }
+
+  /// Shows the "सारे ग्रंथ ऑफलाइन" card once per completed library: the first time,
+  /// and again only when new content has finished downloading.
+  void _celebrate(List<String> all) {
+    final sorted = [...all]..sort();
+    var h = 0;
+    for (final p in sorted) {
+      for (final c in p.codeUnits) {
+        h = (h * 31 + c) & 0x3fffffff;
+      }
+    }
+    final key = '${all.length}-$h';
+    if (Store.I.getString(Store.kOfflineReady) == key || offlineReady.value?.signature == key) return;
+    var bytes = 0;
+    for (final p in all) {
+      try {
+        bytes += ImageStore.I.cachedSync(p)?.lengthSync() ?? 0;
+      } catch (_) {}
+    }
+    offlineReady.value = OfflineReady(pages: all.length, granths: granths.length, bytes: bytes, signature: key);
+  }
+
+  /// The card was shown: remember it so it is not shown again for the same library
+  /// (only saved once seen, so a kill before it shows brings it back next start).
+  void ackOfflineReady() {
+    final r = offlineReady.value;
+    if (r == null) return;
+    Store.I.setString(Store.kOfflineReady, r.signature);
+    offlineReady.value = null;
   }
 
   void stopSave() {

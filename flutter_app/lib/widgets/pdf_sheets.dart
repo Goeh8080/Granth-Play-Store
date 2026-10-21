@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/models.dart';
+import '../services/catalog_store.dart';
 import '../services/file_actions.dart';
 import '../services/gallery_service.dart';
 import '../services/pdf_builder.dart';
@@ -333,6 +334,33 @@ class _DoneState extends State<_Done> {
       ]),
     );
   }
+}
+
+/// "सारे ग्रंथ ऑफलाइन" — same card, shape, colours and pop animation as the PDF-done card.
+Future<void> openOfflineReady(BuildContext context, OfflineReady r) => showPop(context, (ctx) => OfflineReadyCard(ready: r));
+
+class OfflineReadyCard extends StatelessWidget {
+  const OfflineReadyCard({super.key, required this.ready});
+  final OfflineReady ready;
+
+  @override
+  Widget build(BuildContext context) => FrostCard(
+        maxWidth: 480,
+        alpha: 0.92,
+        radius: 18,
+        border: GColors.gold,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Align(alignment: Alignment.centerRight, child: Pill(icon: 'x', label: 'पीछे', onTap: () => Navigator.pop(context))),
+          const SizedBox(height: 6),
+          Text('सारे ग्रंथ ऑफलाइन हो गए हैं — अब बिना इंटरनेट के चलेंगे', style: GText.display(size: 22, color: GColors.maroon, height: 1.25)),
+          const SizedBox(height: 6),
+          Text('${ready.granths} ग्रंथ · ${ready.pages} पेज${ready.bytes > 0 ? ' · ${formatBytes(ready.bytes)}' : ''}', style: GText.sans(size: 16)),
+          const SizedBox(height: 4),
+          Text('फ़ोन में सेव हो गया', style: GText.sans(size: 16, color: GColors.online)),
+          const SizedBox(height: 12),
+          SheetButton(label: 'ठीक है', primary: true, onTap: () => Navigator.pop(context)),
+        ]),
+      );
 }
 
 /// `ng` — सेटिंग sheet (PDF style, layout, hidden card style after 5 taps on Version).

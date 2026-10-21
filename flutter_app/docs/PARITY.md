@@ -35,7 +35,10 @@
 | Boot: show the saved copy instantly, then sync, then save pages | ✅ | `CatalogStore.boot` mirrors the zustand `cn.boot`. |
 | Sync every 3 min, on reconnect, on resume, सिंक button | ➕ | An identical download changes nothing (no rebuild or re-index). JSON is decoded off the UI thread. |
 | Status texts (सिंक हो रहा है, इंटरनेट नहीं · सेव किया डेटा चल रहा है, नया डेटा नहीं मिला…) | ✅ | |
-| Background page download (`savePages`): covers first, then pages, 6 workers, progress | ✅ | App-level service (`CatalogStore`), not tied to a screen. Runs on any screen, like the original. |
+| Background page download (`savePages`): covers first, then pages, 6 workers, progress | ✅ ➕ | App-level service (`CatalogStore`), not tied to a screen. Runs on any screen, like the original. Downloads every picture the app shows (granth cover + प्रकाशन, every praman page + its granth picture), visited or not: 985 files / ≈570 MB for the live catalog on 2026-10-21. Incremental and resumable (saved files are skipped). 3 tries per picture plus a second pass. Stops below 150 MB free with a message. A granth is marked offline only when all of its pictures are saved. |
+| Visible download progress | ➕ (new) | Floating pill on every screen: "सिंक हो रहा है… 245 / 985 पेज" with a bar. It does not block taps and hides when done. |
+| "सारे ग्रंथ ऑफलाइन हो गए हैं" card | ➕ (new) | Same card as PDF-done. Shown once per completed library and again only after new content finishes downloading. The library signature is saved when the card is shown. |
+| Online-only by design | ℹ️ | YouTube videos and the external "मूल ग्रंथ" links (`granthURL`: 63 archive.org, 3 share.google, 2 pCloud) open in the browser, as in the original. Fonts are bundled. |
 | Storage: IndexedDB `granth-offline` (meta/images/gallery/folders) + localStorage keys | ✅ | App documents dir (`app_flutter/granth`), not the cache dir: `catalog.json`, `images/`, `gallery/`, `gallery.json`, `folders.json`. SharedPreferences use the same key names (`ui-cols`, `topic-cols`, `granth-cols`, `praman-cols`, `gallery-cols`, `granth-look`, `pdf-style`, `granth-hash`, `granth-nav`, `granth-offline-ids`). |
 | Damaged / restored data | ➕ | Bad JSON → ignored, fresh sync. Gallery rows whose file is gone are dropped. Offline ids are reset when no pictures exist (restored backup). |
 | Keep data on uninstall / reinstall | ➕ (new) | `hasFragileUserData=true` (Android 10+ "keep app data"). Auto Backup is on for settings + catalog only (no pictures/PDFs). The original had `allowBackup=false`. |
@@ -115,4 +118,8 @@
     - Here: `.part` files, cleanup at start, and delete-on-failure.
 12. **No free-space check.** A full disk fails late with a generic error.
     - Here: space is checked first, and ENOSPC is mapped to a clear message.
+14. **Failed downloads counted as saved.** The original `savePages` counted a failed picture as done and always ended with done = total, with no retry. The strip then said "सभी पेज इस डिवाइस पर सेव हैं" even when pictures were missing.
+    - Here: 3 tries plus a second pass. Failures are counted and tried again on the next sync. A granth is marked offline only when all of its pictures are saved.
+15. **No storage guard for page downloads.** The original kept downloading until the disk was full.
+    - Here: the download stops below 150 MB free.
 13. **Dashboard counts.** They stayed at 0 until you navigated away and back after the first sync (port regression, fixed).
