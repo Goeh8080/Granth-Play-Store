@@ -74,6 +74,15 @@ class MainActivity : FlutterActivity() {
                 "copyToDownloads", "saveImage" -> withLegacyPermission(call, result)
                 "prepareImage" -> prepareImage(call, result)
                 "deviceInfo" -> result.success(deviceInfo())
+                "keepScreenOn" -> {
+                    // Settings: "पढ़ते समय स्क्रीन चालू रखें" — only while this window is visible.
+                    val on = call.argument<Boolean>("on") == true
+                    runOnUiThread {
+                        if (on) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                    result.success(null)
+                }
                 "freeBytes" -> result.success(freeBytes())
                 "pdfProgress" -> {
                     PdfService.update(applicationContext, call.argument<String>("title") ?: "PDF", call.argument<String>("text") ?: "", call.argument<Int>("percent") ?: 0)

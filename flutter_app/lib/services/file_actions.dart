@@ -29,9 +29,6 @@ class FileActions {
     return 'image/jpeg';
   }
 
-  /// Writes bytes into `documents/granth/Granth/name`.
-  static Future<File> writeLocal(Uint8List bytes, String name) => writeAtomic(File('${Store.I.pdfDir}/${safeName(name)}'), bytes);
-
   /// Moves a finished temp file into `documents/granth/Granth/name` (rename, or copy +
   /// delete across volumes).
   static Future<File> moveLocal(String source, String name) async {

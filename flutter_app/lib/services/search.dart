@@ -290,9 +290,6 @@ int _scoreVariants(List<SearchVariant> vs, SearchDoc t) {
   return n;
 }
 
-/// `Pn`
-int scoreToken(String token, SearchDoc t) => _scoreVariants(expandToken(token).map(SearchVariant.new).toList(), t);
-
 int scorePlan(QueryPlan p, SearchDoc t) {
   if (p.empty) return 1;
   final i = p.tokens;
@@ -308,9 +305,6 @@ int scorePlan(QueryPlan p, SearchDoc t) {
   final s = o / i.length;
   return i.length > 1 && a < i.length ? (s * 0.65).round() : s.round();
 }
-
-/// `In`
-int scoreQuery(String query, SearchDoc t) => scorePlan(QueryPlan(query), t);
 
 /// `Ln` — exact substring hits first (by position), else fuzzy-scored results.
 List<T> searchRows<T>(List<T> rows, String query, SearchDoc Function(T) doc) {

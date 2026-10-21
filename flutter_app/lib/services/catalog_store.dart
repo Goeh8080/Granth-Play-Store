@@ -98,7 +98,26 @@ class CatalogStore extends ChangeNotifier {
   SyncStatus status = SyncStatus.booting;
   bool online = true;
   String? error;
-  ImageProgress images = const ImageProgress(0, 0, false);
+  ImageProgress _images = const ImageProgress(0, 0, false);
+
+  /// Page counts right now (always current, for logic).
+  ImageProgress get images => _images;
+  set images(ImageProgress v) {
+    _images = v;
+    _countTimer?.cancel();
+    _countTimer = null;
+    progress.value = v;
+  }
+
+  /// What the sync strip / sync card show. Only these few widgets listen to it: a saved
+  /// page used to notify the whole store, which rebuilt the entire home screen (~330
+  /// widgets) 8 times a second during a download — the jank in build 1.0.0. Live counts
+  /// are batched to ~3 updates a second; state changes (start / stop / check) show at once.
+  final ValueNotifier<ImageProgress> progress = ValueNotifier(const ImageProgress(0, 0, false));
+
+  /// Time of the last good sync, for the strip / sync card only. A quiet 2-minute sync with
+  /// unchanged data updates just this (it used to rebuild the whole home screen).
+  final ValueNotifier<int?> lastSync = ValueNotifier(null);
   bool booted = false;
   Set<String> offlineIds = {};
   int _saveRun = 0;
@@ -187,6 +206,7 @@ class CatalogStore extends ChangeNotifier {
     try {
       final res = await Connectivity().checkConnectivity().timeout(const Duration(seconds: 3));
       online = !res.contains(ConnectivityResult.none);
+      _net = res;
     } catch (_) {
       online = true;
     }
@@ -194,19 +214,18 @@ class CatalogStore extends ChangeNotifier {
     try {
       // Decoded off the UI thread; a damaged / old-format file is ignored and a fresh sync
       // replaces it.
-      final raw = await Store.I.readJson('catalog.json', background: true).timeout(const Duration(seconds: 8));
+      final text = await Store.I.readText('catalog.json').timeout(const Duration(seconds: 8));
       Catalog? cached;
       try {
-        cached = Catalog.fromJson(raw);
+        // Decode + compare key off the UI thread for a real (~1.5 MB) catalog.
+        if (text != null) cached = text.length > 100000 ? await compute(loadCatalogText, text) : loadCatalogText(text);
       } catch (e) {
         debugPrint('catalog.json unreadable, will sync fresh: $e');
       }
       if (cached != null && cached.topics.isEmpty && cached.granths.isEmpty) cached = null;
       if (cached != null) {
         _catalog = cached;
-        try {
-          _lastJson = _contentKey(cached);
-        } catch (_) {}
+        _lastJson = cached.contentKey;
         _catalogChanged();
         status = online ? SyncStatus.ready : SyncStatus.offline;
         // Real count at once, from one folder listing (no picture is opened).
@@ -236,6 +255,10 @@ class CatalogStore extends ChangeNotifier {
     try {
       _sub ??= (_connectivity ?? Connectivity().onConnectivityChanged).listen((r) {
         final now = !r.contains(ConnectivityResult.none);
+        final wasWifi = onWifi;
+        _net = r;
+        // "Download only on WiFi": the waiting download starts when WiFi comes back.
+        if (now && online && !wasWifi && onWifi && _wifiOnly() && hasData) savePages();
         if (now && !online) {
           online = true;
           notifyListeners();
@@ -251,6 +274,24 @@ class CatalogStore extends ChangeNotifier {
     _timer ??= Timer.periodic(autoSyncEvery, (_) => autoSync());
   }
 
+  /// Every page the app can save (covers + praman pages).
+  int get allPages => _all.length;
+
+  /// Last connection types (null = not known yet).
+  List<ConnectivityResult>? _net;
+
+  /// On WiFi (or a cable). Unknown counts as WiFi so nothing is blocked by mistake.
+  bool get onWifi => _net == null || _net!.contains(ConnectivityResult.wifi) || _net!.contains(ConnectivityResult.ethernet);
+
+  /// Settings, read from the stored values (replaceable in tests).
+  @visibleForTesting
+  bool Function() autoSyncOn = () => Store.I.getString(Store.kAutoSync) != '0';
+  bool _wifiOnly() => Store.I.getString(Store.kWifiOnly) == '1';
+
+  /// For tests: pretend the phone is on these networks.
+  @visibleForTesting
+  void debugSetNet(List<ConnectivityResult> r) => _net = r;
+
   /// How often the lists are fetched again while the app is open.
   static const autoSyncEvery = Duration(minutes: 2);
 
@@ -260,7 +301,7 @@ class CatalogStore extends ChangeNotifier {
   /// download only what is new or still missing. Skipped while another sync is running,
   /// while the app is in the background, or offline.
   Future<void> autoSync() async {
-    if (!online || !_foreground || _syncing != null) return;
+    if (!online || !_foreground || _syncing != null || !autoSyncOn()) return;
     final changed = await sync(silent: true);
     if (!hasData) return;
     if (changed || (!_saveActive && savedPages < _all.length)) savePages();
@@ -301,10 +342,7 @@ class CatalogStore extends ChangeNotifier {
   /// no re-index, no disk write).
   String? _lastJson;
 
-  static String _contentKey(Catalog c) {
-    final j = c.toJson()..remove('syncedAt');
-    return jsonEncode(j);
-  }
+  static String _contentKey(Catalog c) => catalogContentKey(c);
 
   Future<bool>? _syncing;
 
@@ -336,12 +374,14 @@ class CatalogStore extends ChangeNotifier {
       notifyListeners();
     }
     var changed = false;
+    final was = (status, error);
     try {
       final c = await _api.fetchCatalog();
       _lastSyncAt = DateTime.now();
-      final enc = _contentKey(c);
+      final enc = c.contentKey ?? _contentKey(c);
       if (enc != _lastJson || !hasData) {
-        await Store.I.writeJson('catalog.json', c.toJson());
+        final file = c.fileText;
+        await (file != null ? Store.I.writeText('catalog.json', file) : Store.I.writeJson('catalog.json', c.toJson()));
         _lastJson = enc;
         _catalog = c;
         _catalogChanged();
@@ -362,6 +402,8 @@ class CatalogStore extends ChangeNotifier {
         images = images.copyWith(done: savedPages, total: _all.length);
       }
       EventLog.I.log('sync', 'catalog');
+      lastSync.value = syncedAt;
+      if (silent && !changed && was == (status, error)) return false;
     } catch (e) {
       debugPrint('sync failed: $e');
       if (silent && hasData) {
@@ -442,18 +484,25 @@ class CatalogStore extends ChangeNotifier {
   void pageSaved(String path, bool saved) {
     final changed = saved ? _saved.add(path) : _saved.remove(path);
     if (!changed || !_all.contains(path)) return;
-    images = images.copyWith(done: savedPages, total: _all.length);
-    // Many pictures can land in one frame: one repaint for all of them (~8 a second).
-    _countTimer ??= Timer(const Duration(milliseconds: 120), () {
+    _images = _images.copyWith(done: savedPages, total: _all.length);
+    _showSoon();
+  }
+
+  /// Many pictures land (or are checked) close together: the number on screen moves
+  /// ~3 times a second instead of once per picture.
+  void _showSoon() {
+    _countTimer ??= Timer(countEvery, () {
       _countTimer = null;
-      notifyListeners();
+      progress.value = _images;
     });
   }
 
+  /// How often the live page count on screen moves during a download.
+  static const countEvery = Duration(milliseconds: 300);
+
   void _setImages(ImageProgress next) {
-    if (next == images) return;
+    if (next == _images && next == progress.value) return;
     images = next;
-    notifyListeners();
   }
 
   // ---------- full offline download ----------
@@ -524,6 +573,12 @@ class CatalogStore extends ChangeNotifier {
   /// tried 3 times, and failures get a second pass; the rest wait for the next sync.
   /// Stops (with a message) when the phone is almost full.
   void savePages({bool verify = false, bool manual = false}) {
+    // Settings → "सिर्फ़ WiFi पर डाउनलोड": background downloads wait for WiFi. A tap on
+    // सिंक (manual) is the user's own choice and always runs.
+    if (!manual && _wifiOnly() && !onWifi) {
+      _images = _images.copyWith(running: false);
+      return;
+    }
     final g = _imageGroups();
     final all = [...g.first, ...g.rest];
     if (all.isEmpty) {
@@ -576,7 +631,8 @@ class CatalogStore extends ChangeNotifier {
       // deleted here and downloaded again below. The count shown stays the real one.
       have = await verifyPages(all, (n) {
         if (run != _saveRun || !manual) return;
-        _setImages(images.copyWith(checked: n));
+        _images = _images.copyWith(checked: n);
+        _showSoon();
       });
     } else {
       have = await havePages(all);
@@ -646,8 +702,6 @@ class CatalogStore extends ChangeNotifier {
     for (final p in failed) {
       _failedAt[p] = at;
     }
-    _countTimer?.cancel();
-    _countTimer = null;
     if (manual) {
       // A tap on सिंक always shows its result (e.g. 985 / 985) for a moment.
       final left = minManualShow - DateTime.now().difference(shownAt);
@@ -746,6 +800,8 @@ class CatalogStore extends ChangeNotifier {
     _timer?.cancel();
     _saveSub?.cancel();
     _countTimer?.cancel();
+    progress.dispose();
+    lastSync.dispose();
     super.dispose();
   }
 }

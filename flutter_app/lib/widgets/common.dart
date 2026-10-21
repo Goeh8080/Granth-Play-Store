@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -23,14 +24,116 @@ class GIcon extends StatelessWidget {
       );
 }
 
+/// Tap decided by the finger alone, like the original's buttons in the WebView (`onClick`,
+/// and `onPointerUp` on the touch-critical ones): it fires when the finger lifts within
+/// [kTouchSlop] (18 dp) of where it went down. It never enters the gesture arena, so the
+/// scrolling list around it, the app-wide pinch layer or a sheet can't swallow it, and a
+/// finger that moves a little (Android's own tap limit is 8 dp) still counts. A real scroll or
+/// a second finger (pinch) cancels it.
+class TapTarget extends StatefulWidget {
+  const TapTarget({super.key, required this.child, this.onTap, this.onHighlight, this.behavior = HitTestBehavior.opaque});
+  final Widget child;
+  final VoidCallback? onTap;
+
+  /// Finger down on it (true) / lifted or moved away (false): for the press effect.
+  final ValueChanged<bool>? onHighlight;
+  final HitTestBehavior behavior;
+
+  @override
+  State<TapTarget> createState() => _TapTargetState();
+}
+
+class _TapTargetState extends State<TapTarget> {
+  int? _pointer;
+  Offset _start = Offset.zero;
+
+  void _cancel() {
+    if (_pointer == null) return;
+    _pointer = null;
+    widget.onHighlight?.call(false);
+  }
+
+  void _down(PointerDownEvent e) {
+    if (widget.onTap == null) return;
+    if (_pointer != null || TouchCount.multi) {
+      _cancel(); // second finger: a pinch, not a tap
+      return;
+    }
+    if (e.kind == PointerDeviceKind.mouse && e.buttons != kPrimaryButton) return;
+    _pointer = e.pointer;
+    _start = e.position;
+    widget.onHighlight?.call(true);
+  }
+
+  void _move(PointerMoveEvent e) {
+    if (e.pointer != _pointer) return;
+    if ((e.position - _start).distance > kTouchSlop || TouchCount.multi) _cancel();
+  }
+
+  void _up(PointerUpEvent e) {
+    if (e.pointer != _pointer) return;
+    final ok = !TouchCount.multi && (e.position - _start).distance <= kTouchSlop;
+    _cancel();
+    if (ok && mounted) widget.onTap?.call();
+  }
+
+  @override
+  void dispose() {
+    _pointer = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Listener(
+        behavior: widget.behavior,
+        onPointerDown: _down,
+        onPointerMove: _move,
+        onPointerUp: _up,
+        onPointerCancel: (e) {
+          if (e.pointer == _pointer) _cancel();
+        },
+        child: widget.child,
+      );
+}
+
+/// How many fingers are on the screen (fed by [AppZoom] at the root): lets a [TapTarget]
+/// tell a pinch from a tap even when the second finger lands elsewhere.
+class TouchCount {
+  static int _down = 0;
+  static bool _multi = false;
+
+  /// More than one finger has been down since the screen was last free.
+  static bool get multi => _multi;
+
+  static void down() {
+    _down++;
+    if (_down >= 2) _multi = true;
+  }
+
+  static void up() {
+    _down = _down > 0 ? _down - 1 : 0;
+    if (_down == 0) _multi = false;
+  }
+
+  @visibleForTesting
+  static void reset() {
+    _down = 0;
+    _multi = false;
+  }
+}
+
 /// Micro-interaction: a gentle press-scale (+ opacity) used on every tappable surface.
+///
+/// [direct]: the tap is a [TapTarget] (decided by the finger, can't be swallowed by a
+/// scroll / sheet / pinch layer around it) — used for the small setting and grid buttons.
 class Pressable extends StatefulWidget {
-  const Pressable({super.key, required this.child, this.onTap, this.scale = 0.96, this.enabled = true, this.behavior = HitTestBehavior.opaque});
+  const Pressable({super.key, required this.child, this.onTap, this.scale = 0.96, this.enabled = true, this.behavior = HitTestBehavior.opaque, this.direct = false});
   final Widget child;
   final VoidCallback? onTap;
   final double scale;
   final bool enabled;
   final HitTestBehavior behavior;
+  final bool direct;
 
   @override
   State<Pressable> createState() => _PressableState();
@@ -46,22 +149,26 @@ class _PressableState extends State<Pressable> {
   @override
   Widget build(BuildContext context) {
     final on = widget.enabled && widget.onTap != null;
+    final body = AnimatedScale(
+      scale: _down ? widget.scale : 1,
+      duration: Duration(milliseconds: _down ? 90 : 220),
+      curve: _down ? Curves.easeOut : Curves.elasticOut,
+      child: AnimatedOpacity(
+        opacity: widget.enabled ? 1 : 0.6,
+        duration: const Duration(milliseconds: 150),
+        child: widget.child,
+      ),
+    );
+    if (widget.direct) {
+      return TapTarget(behavior: widget.behavior, onTap: on ? widget.onTap : null, onHighlight: on ? _set : null, child: body);
+    }
     return GestureDetector(
       behavior: widget.behavior,
       onTapDown: on ? (_) => _set(true) : null,
       onTapUp: on ? (_) => _set(false) : null,
       onTapCancel: on ? () => _set(false) : null,
       onTap: on ? widget.onTap : null,
-      child: AnimatedScale(
-        scale: _down ? widget.scale : 1,
-        duration: Duration(milliseconds: _down ? 90 : 220),
-        curve: _down ? Curves.easeOut : Curves.elasticOut,
-        child: AnimatedOpacity(
-          opacity: widget.enabled ? 1 : 0.6,
-          duration: const Duration(milliseconds: 150),
-          child: widget.child,
-        ),
-      ),
+      child: body,
     );
   }
 }
@@ -84,6 +191,7 @@ class Pill extends StatelessWidget {
     this.iconSize = 13,
     this.enabled = true,
     this.maxLines,
+    this.direct = false,
   });
   final String? icon;
   final String? trailingIcon;
@@ -97,6 +205,9 @@ class Pill extends StatelessWidget {
   final double iconSize;
   final bool enabled;
   final int? maxLines;
+
+  /// Tap via [TapTarget] (see [Pressable.direct]).
+  final bool direct;
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +235,7 @@ class Pill extends StatelessWidget {
       ),
     );
     if (onTap == null) return body;
-    return Pressable(onTap: enabled ? onTap : null, enabled: enabled, scale: 0.93, child: body);
+    return Pressable(onTap: enabled ? onTap : null, enabled: enabled, scale: 0.93, direct: direct, child: body);
   }
 }
 
@@ -174,6 +285,9 @@ BoxDecoration cardDecoration(String look, {double radius = 12, bool dash = false
           borderRadius: BorderRadius.circular(radius),
           boxShadow: [BoxShadow(color: GColors.shadow(0.08), blurRadius: 8, offset: const Offset(0, 2))],
         );
+  // Ashok restyles `.dash-card` only for combo; here every style reaches the dashboard
+  // too (the whole app follows the chosen style), keeping the dashboard's own corners.
+  if (dash && look != 'combo' && look != 'classic') return themedSurface(base, look: look);
   if (dash && look != 'combo') return base;
   switch (look) {
     case 'glass':
@@ -225,12 +339,101 @@ BoxDecoration cardDecoration(String look, {double radius = 12, bool dash = false
           colors: [Color(0xFFFFFDF8), Color(0xFFF8E7CF)],
         ),
         borderRadius: BorderRadius.circular(26),
-        border: const Border(top: BorderSide(color: Color(0xE6FFFFFF), width: 1), bottom: BorderSide(color: Color(0xFFD3AA89), width: 8)),
+        // Two border colours on a rounded box cannot be painted (debug: red error; release:
+        // square corners). The 1 px white top line (nearly invisible on this near-white top)
+        // keeps its space but is not drawn, so the rounded 8 px base paints correctly.
+        border: const Border(top: BorderSide(color: Color(0xE6FFFFFF), width: 1, style: BorderStyle.none), bottom: BorderSide(color: Color(0xFFD3AA89), width: 8)),
         boxShadow: [BoxShadow(color: GColors.shadow(0.12), blurRadius: 18, offset: const Offset(0, 10))],
       );
     default:
       return base;
   }
+}
+
+/// The chosen card style (सेटिंग → कार्ड स्टाइल) applied to any other surface of the app:
+/// sheets and dialogs, PDF cards and the PDF list, the sync card, the note card, search
+/// boxes and screen banners. Ashok's CSS restyles `.card` only (and `.dash-card` for
+/// combo); the user asked for the whole app to follow the style, so these surfaces take
+/// the same colours, corners and shadows. Border *widths* never change (no layout shift):
+/// thick edges (clay / combo base, flat frame) are drawn as shadows outside the box.
+BoxDecoration themedSurface(BoxDecoration base, {String? look, double maxRadius = 28, bool keepColor = false}) {
+  final l = look ?? UiPrefs.I.look;
+  if (l == 'classic') return base;
+  final b = base.border;
+  final w = b is Border && b.isUniform ? b.top.width : 0.0;
+  final r0 = base.borderRadius?.resolve(TextDirection.ltr).topLeft.x ?? 0;
+  BorderRadius radius(double r) => BorderRadius.circular(math.min(r0 >= 999 ? 999 : r, maxRadius));
+  Border? edge(Color c) => w > 0 ? Border.all(color: c, width: w) : null;
+  final keep = keepColor && b is Border ? b.top.color : null;
+  final color = base.color;
+  switch (l) {
+    case 'glass':
+      return BoxDecoration(
+        color: Colors.white.withValues(alpha: math.max(0.42, (color?.a ?? 1) * 0.72)),
+        border: edge(keep ?? Colors.white.withValues(alpha: 0.55)),
+        borderRadius: base.borderRadius,
+        boxShadow: [BoxShadow(color: GColors.shadow(0.14), blurRadius: 28, offset: const Offset(0, 10))],
+      );
+    case 'neu':
+      return BoxDecoration(
+        color: GColors.cream,
+        border: edge(keep ?? Colors.transparent),
+        borderRadius: radius(18),
+        boxShadow: const [
+          BoxShadow(color: Color(0xFFE6D3B4), blurRadius: 16, offset: Offset(8, 8)),
+          BoxShadow(color: Color(0xFFFFFDF8), blurRadius: 14, offset: Offset(-6, -6)),
+        ],
+      );
+    case 'clay':
+      return BoxDecoration(
+        color: GColors.paper,
+        border: edge(keep ?? Colors.transparent),
+        borderRadius: radius(28),
+        boxShadow: [const BoxShadow(color: Color(0xFFD6B69B), offset: Offset(0, 6)), BoxShadow(color: GColors.shadow(0.14), blurRadius: 24, offset: const Offset(0, 14))],
+      );
+    case 'material':
+      return BoxDecoration(
+        color: GColors.paper,
+        border: edge(keep ?? Colors.transparent),
+        borderRadius: radius(4),
+        boxShadow: const [
+          BoxShadow(color: Color(0x2E000000), blurRadius: 4, offset: Offset(0, 2)),
+          BoxShadow(color: Color(0x14000000), blurRadius: 16, offset: Offset(0, 8)),
+        ],
+      );
+    case 'flat':
+      return BoxDecoration(
+        color: GColors.cream,
+        border: edge(GColors.maroon),
+        borderRadius: r0 >= 999 ? base.borderRadius : BorderRadius.zero,
+        // Frame drawn outside so a 1 px / no-border box keeps its size.
+        boxShadow: w >= 2 ? const [] : [BoxShadow(color: GColors.maroon, spreadRadius: 2 - w)],
+      );
+    case 'bento':
+      return BoxDecoration(
+        gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [GColors.paper, GColors.creamDark]),
+        border: edge(keep ?? GColors.gold.withValues(alpha: 0.55)),
+        borderRadius: radius(24),
+        boxShadow: [BoxShadow(color: GColors.shadow(0.08), blurRadius: 8, offset: const Offset(0, 2))],
+      );
+    case 'combo':
+      return BoxDecoration(
+        gradient: const LinearGradient(begin: Alignment(-0.42, -1), end: Alignment(0.42, 1), colors: [Color(0xFFFFFDF8), Color(0xFFF8E7CF)]),
+        border: edge(keep ?? Colors.transparent),
+        borderRadius: radius(26),
+        boxShadow: [const BoxShadow(color: Color(0xFFD3AA89), offset: Offset(0, 6)), BoxShadow(color: GColors.shadow(0.12), blurRadius: 18, offset: const Offset(0, 10))],
+      );
+    default:
+      return base;
+  }
+}
+
+/// Rebuilds [builder] when the card style changes.
+class LookBuilder extends StatelessWidget {
+  const LookBuilder({super.key, required this.builder});
+  final Widget Function(BuildContext context, String look) builder;
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(listenable: UiPrefs.I, builder: (context, _) => builder(context, UiPrefs.I.look));
 }
 
 /// `.card` container.
@@ -475,8 +678,8 @@ class GridSwitch extends StatelessWidget {
                   Semantics(
                     button: true,
                     selected: options[i] == value,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
+                    child: TapTarget(
+                      key: ValueKey('grid-${options[i]}'),
                       onTap: () => onChanged(options[i]),
                       child: SizedBox(
                         width: w,
@@ -554,14 +757,16 @@ class _SearchFieldState extends State<SearchField> {
   @override
   Widget build(BuildContext context) {
     final focus = _f.hasFocus;
-    return AnimatedContainer(
+    final base = BoxDecoration(
+      color: GColors.paper,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: focus ? GColors.saffron : GColors.creamDark, width: 1.5),
+      boxShadow: focus ? [BoxShadow(color: GColors.saffron.withValues(alpha: 0.18), spreadRadius: 3)] : const [],
+    );
+    // Card style reaches the search box too; the saffron focus ring always wins.
+    return LookBuilder(builder: (context, _) => AnimatedContainer(
       duration: const Duration(milliseconds: 180),
-      decoration: BoxDecoration(
-        color: GColors.paper,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: focus ? GColors.saffron : GColors.creamDark, width: 1.5),
-        boxShadow: focus ? [BoxShadow(color: GColors.saffron.withValues(alpha: 0.18), spreadRadius: 3)] : const [],
-      ),
+      decoration: focus ? base : themedSurface(base, maxRadius: 14),
       child: TextField(
         controller: _c,
         focusNode: _f,
@@ -579,7 +784,7 @@ class _SearchFieldState extends State<SearchField> {
           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         ),
       ),
-    );
+    ));
   }
 }
 

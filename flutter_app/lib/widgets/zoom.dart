@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 
+import 'common.dart' show TouchCount;
+
 /// Scale + offset of a zoomed view. The child is drawn at `offset + point * scale`
 /// (origin top-left), so its layout size never changes.
 @immutable
@@ -262,32 +264,39 @@ class _AppZoomState extends State<AppZoom> with SingleTickerProviderStateMixin {
           final k = _v.clamp(_box);
           if (k.offset != _v.offset) _v = k;
         }
-        return RawGestureDetector(
+        // Counts fingers for the whole app, so a tap button can tell a pinch from a tap.
+        return Listener(
           behavior: HitTestBehavior.translucent,
-          gestures: {
-            AppPinchRecognizer: GestureRecognizerFactoryWithHandlers<AppPinchRecognizer>(
-              () => AppPinchRecognizer(),
-              (r) => r
-                ..zoomed = (() => _v.scale > 1.01)
-                ..onBegin = () {
-                  _anim.stop();
-                  return _v;
-                }
-                ..onChange = (start, scale, focal0, focal) {
-                  final s = (start.scale * scale).clamp(1.0, widget.maxScale);
-                  final q = (focal0 - start.offset) / start.scale;
-                  _set(ZoomView(s, focal - q * s).clamp(_box));
-                }
-                ..onFinish = () {
-                  if (_v.scale <= 1.05 && _v.scale != 1) {
-                    _from = _v;
-                    _to = ZoomView.identity;
-                    _anim.forward(from: 0);
+          onPointerDown: (_) => TouchCount.down(),
+          onPointerUp: (_) => TouchCount.up(),
+          onPointerCancel: (_) => TouchCount.up(),
+          child: RawGestureDetector(
+            behavior: HitTestBehavior.translucent,
+            gestures: {
+              AppPinchRecognizer: GestureRecognizerFactoryWithHandlers<AppPinchRecognizer>(
+                () => AppPinchRecognizer(),
+                (r) => r
+                  ..zoomed = (() => _v.scale > 1.01)
+                  ..onBegin = () {
+                    _anim.stop();
+                    return _v;
                   }
-                },
-            ),
-          },
-          child: ClipRect(child: Transform(transform: _v.matrix, child: RepaintBoundary(child: widget.child))),
+                  ..onChange = (start, scale, focal0, focal) {
+                    final s = (start.scale * scale).clamp(1.0, widget.maxScale);
+                    final q = (focal0 - start.offset) / start.scale;
+                    _set(ZoomView(s, focal - q * s).clamp(_box));
+                  }
+                  ..onFinish = () {
+                    if (_v.scale <= 1.05 && _v.scale != 1) {
+                      _from = _v;
+                      _to = ZoomView.identity;
+                      _anim.forward(from: 0);
+                    }
+                  },
+              ),
+            },
+            child: ClipRect(child: Transform(transform: _v.matrix, child: RepaintBoundary(child: widget.child))),
+          ),
         );
       });
 }

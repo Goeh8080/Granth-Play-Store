@@ -13,6 +13,7 @@ import 'services/file_actions.dart';
 import 'services/events.dart';
 import 'services/storage.dart';
 import 'state/router.dart';
+import 'state/ui_prefs.dart';
 import 'theme/colors.dart';
 import 'widgets/zoom.dart';
 
@@ -97,6 +98,8 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Stored text size / keep-screen-on (settings are loaded by now).
+    UiPrefs.I.refresh(start: true);
     if (widget.links) _listenLinks();
   }
 
@@ -159,23 +162,17 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
         title: 'ग्रंथ प्रबंधन',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
-        scrollBehavior: const GranthScrollBehavior(),
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3)),
+        builder: (context, child) => ValueListenableBuilder<double>(
+          // Settings → अक्षर का आकार: a factor on the phone's own text size, same 1.3 cap.
+          valueListenable: UiPrefs.I.textFactor,
+          builder: (context, f, zoomed) {
+            final phone = MediaQuery.textScalerOf(context);
+            final scaler = f == 1.0 ? phone.clamp(maxScaleFactor: 1.3) : TextScaler.linear(phone.scale(100) / 100 * f).clamp(minScaleFactor: 0.8, maxScaleFactor: 1.3);
+            return MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: scaler), child: zoomed!);
+          },
           // Whole-app pinch zoom like the original WebView (viewport maximum-scale=5).
           child: AppZoom(child: child!),
         ),
         home: widget.splash ? AnimatedSplash(ready: widget.ready, child: const HomeShell()) : const HomeShell(),
       );
-}
-
-/// iOS-like scrolling everywhere: lists bounce at the ends (no Android glow / stretch).
-class GranthScrollBehavior extends MaterialScrollBehavior {
-  const GranthScrollBehavior();
-
-  @override
-  ScrollPhysics getScrollPhysics(BuildContext context) => const BouncingScrollPhysics(parent: RangeMaintainingScrollPhysics());
-
-  @override
-  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) => child;
 }

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:granthprabandhan/main.dart';
 import 'package:granthprabandhan/models/models.dart';
-import 'package:granthprabandhan/screens/home_shell.dart';
 import 'package:granthprabandhan/services/catalog_store.dart';
 import 'package:granthprabandhan/services/storage.dart';
 import 'package:granthprabandhan/widgets/pdf_sheets.dart';
@@ -154,30 +153,25 @@ void main() {
     expect(fresh.offlineReady.value, isNotNull);
   });
 
-  testWidgets('progress pill shows "सिंक हो रहा है… n / total पेज" while downloading and hides after', (tester) async {
+  testWidgets('no floating pill while downloading: progress shows in the strip, card after', (tester) async {
     final s = CatalogStore.I..debugSetCatalog(pictureCatalog());
     final net = FakeNet(s);
     await tester.binding.setSurfaceSize(const Size(412, 915));
     await tester.pumpWidget(const GranthApp(splash: false, links: false));
     await tester.pump(const Duration(milliseconds: 500));
-    double opacity() => tester.widget<AnimatedOpacity>(find.byKey(const ValueKey('sync-pill'))).opacity;
-    expect(opacity(), 0);
-
     net.gate = Completer<void>();
     s.savePages();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('सिंक हो रहा है… 0 / 11 पेज'), findsOneWidget);
-    expect(opacity(), 1);
-    expect(find.byType(LinearProgressIndicator), findsWidgets);
-    // Non-blocking: the dashboard underneath still takes taps.
-    expect(find.descendant(of: find.byType(SyncProgressPill), matching: find.byType(IgnorePointer)), findsWidgets);
+    await tester.pump(const Duration(milliseconds: 400));
+    // Round 5: the bottom-left pill is gone for good.
+    expect(find.byKey(const ValueKey('sync-pill')), findsNothing);
+    expect(find.textContaining('सिंक हो रहा है…'), findsNothing);
+    expect(find.textContaining('पेज सेव हो रहे हैं 0/11'), findsOneWidget);
 
     net.gate!.complete();
     for (var i = 0; i < 10; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(s.images.running, isFalse, reason: '${s.images.done}/${s.images.total} ${net.calls} ${net.saved.length}');
-    expect(opacity(), 0);
     // And the offline-ready card popped up once.
     await tester.pump(const Duration(milliseconds: 600));
     expect(find.text('सारे ग्रंथ ऑफलाइन हो गए हैं — अब बिना इंटरनेट के चलेंगे'), findsOneWidget);

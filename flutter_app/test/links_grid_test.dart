@@ -138,11 +138,15 @@ void main() {
         expect(Store.I.getInt(k), 1, reason: k);
       }
       // Hidden card styles after 5 taps on the version.
+      await tester.ensureVisible(find.textContaining('Version'));
+      await settle(tester, 3);
       for (var i = 0; i < 5; i++) {
         await tester.tap(find.textContaining('Version'));
         await tester.pump(const Duration(milliseconds: 50));
       }
       await settle(tester, 4);
+      await tester.ensureVisible(find.text('Glassmorphism'));
+      await settle(tester, 3);
       await tester.tap(find.text('Glassmorphism'));
       await settle(tester, 4);
       expect(Store.I.getString(Store.kLook), 'glass');

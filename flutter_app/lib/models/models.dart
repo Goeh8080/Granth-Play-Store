@@ -2,6 +2,8 @@
 /// https://granth.wnmsolutions.com/api/index.php (getTopics / getGranths / getPramans).
 library;
 
+import 'dart:convert';
+
 String _s(Object? v) => v == null ? '' : '$v';
 
 class Topic {
@@ -53,13 +55,19 @@ class Praman {
 }
 
 class Catalog {
-  Catalog({required this.topics, required this.granths, required this.pramans, this.syncedAt});
+  Catalog({required this.topics, required this.granths, required this.pramans, this.syncedAt, this.contentKey, this.fileText});
   final List<Topic> topics;
   final List<Granth> granths;
   final List<Praman> pramans;
   final int? syncedAt;
 
-  Catalog withSyncedAt(int? t) => Catalog(topics: topics, granths: granths, pramans: pramans, syncedAt: t ?? syncedAt);
+  /// [catalogContentKey] when it was already worked out off the UI thread (else null).
+  final String? contentKey;
+
+  /// `catalog.json` text when it was already encoded off the UI thread (else null).
+  final String? fileText;
+
+  Catalog withSyncedAt(int? t) => Catalog(topics: topics, granths: granths, pramans: pramans, syncedAt: t ?? syncedAt, contentKey: contentKey);
 
   static Catalog empty() => Catalog(topics: const [], granths: const [], pramans: const []);
 
@@ -167,3 +175,6 @@ class GalleryFolder {
   Map<String, dynamic> toJson() => {'id': id, 'name': name};
   static GalleryFolder fromJson(Map<String, dynamic> j) => GalleryFolder(id: _s(j['id']), name: _s(j['name']));
 }
+
+/// The lists without the sync time: two downloads with the same key carry the same data.
+String catalogContentKey(Catalog c) => jsonEncode(c.toJson()..remove('syncedAt'));

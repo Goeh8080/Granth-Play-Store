@@ -97,7 +97,7 @@ class _PramansPanelState extends State<PramansPanel> with LivePanel {
             child: Container(
               margin: const EdgeInsets.only(bottom: 14),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(color: GColors.paper, border: Border.all(color: GColors.maroon, width: 2), borderRadius: BorderRadius.circular(14)),
+              decoration: themedSurface(BoxDecoration(color: GColors.paper, border: Border.all(color: GColors.maroon, width: 2), borderRadius: BorderRadius.circular(14)), keepColor: true),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
                   child: Text.rich(

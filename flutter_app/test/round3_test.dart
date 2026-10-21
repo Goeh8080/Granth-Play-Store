@@ -87,8 +87,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(api.calls, 1, reason: 'the button fetches the lists again');
       expect(find.byKey(const ValueKey('sync-card')), findsOneWidget);
-      // Everything was already saved: the count is still shown (pill + card), then it ends.
-      expect(find.text('सिंक हो रहा है… 11 / 11 पेज'), findsOneWidget);
+      // Everything was already saved: the count is still shown (card), then it ends.
       expect(find.text('11 में से 11 पेज सेव'), findsOneWidget);
       expect(net.calls, isEmpty);
       await frames(tester, 15);

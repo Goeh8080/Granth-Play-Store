@@ -85,7 +85,8 @@ void main() {
         return fetch(p);
       };
       final seen = <int>[];
-      s.addListener(() => seen.add(s.images.done));
+      // Round 5: the on-screen count comes from the throttled progress notifier.
+      s.progress.addListener(() => seen.add(s.progress.value.done));
       s.savePages();
       await until(() => !s.images.running && s.images.done == 11);
       expect(net.saved.length, 11);
@@ -223,37 +224,37 @@ void main() {
   });
 
   group('smoothness', () {
-    testWidgets('lists bounce (iOS-like) and the picture zoom still wins over the list', (tester) async {
+    testWidgets('lists scroll like round 3 (no bounce) and the picture zoom still wins over the list', (tester) async {
       final key = GlobalKey<ZoomStageState>();
       final scroll = ScrollController();
       await tester.binding.setSurfaceSize(const Size(400, 800));
       await tester.pumpWidget(MaterialApp(
-        scrollBehavior: const GranthScrollBehavior(),
         home: ListView(controller: scroll, children: [
           SizedBox(height: 600, child: ZoomStage(key: key, child: Container(color: Colors.brown))),
           const SizedBox(height: 900),
         ]),
       ));
-      expect(scroll.position.physics, isA<BouncingScrollPhysics>());
+      // Round 5: round-4 iOS bounce reverted (it made Android scrolling feel buffered).
+      expect(scroll.position.physics, isNot(isA<BouncingScrollPhysics>()));
       await pinch(tester, const Offset(200, 300), 100, 300);
       expect(key.currentState!.view.scale, greaterThan(2.5));
       expect(scroll.offset, 0);
       await pinch(tester, const Offset(200, 300), 300, 80);
       await tester.pumpAndSettle();
       expect(key.currentState!.view.scale, 1);
-      // Pulled past the top it bounces back to 0.
+      // Pulled past the top it stays at 0 (Android stretch, like round 3).
       final g = await tester.startGesture(const Offset(200, 700));
       for (var i = 0; i < 10; i++) {
         await g.moveBy(const Offset(0, 15));
         await tester.pump(const Duration(milliseconds: 16));
       }
-      expect(scroll.offset, lessThan(0), reason: 'over-scroll is allowed (bounce)');
+      expect(scroll.offset, 0);
       await g.up();
       await tester.pumpAndSettle();
       expect(scroll.offset, 0);
     });
 
-    testWidgets('home screen bounces, scrolls with one finger and still pinch-zooms as a whole', (tester) async {
+    testWidgets('home screen scrolls (round-3 physics) with one finger and still pinch-zooms as a whole', (tester) async {
       AppZoom.current.value = ZoomView.identity;
       await tester.binding.setSurfaceSize(const Size(412, 915));
       await tester.pumpWidget(const GranthApp(splash: false, links: false));
@@ -261,7 +262,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
       }
       final list = tester.widget<CustomScrollView>(find.byType(CustomScrollView).first);
-      expect(list.physics, isA<BouncingScrollPhysics>());
+      expect(list.physics, isA<ClampingScrollPhysics>());
       final pos = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
       await tester.dragFrom(const Offset(206, 700), const Offset(0, -300));
       for (var i = 0; i < 20; i++) {
@@ -277,7 +278,7 @@ void main() {
     });
   });
 
-  testWidgets('strip, pill and sync card all show the same live number', (tester) async {
+  testWidgets('strip and sync card show the same live number (no pill)', (tester) async {
     final s = CatalogStore.I..debugSetCatalog(pictureCatalog());
     final net = FakeNet(s);
     net.gate = Completer<void>();
@@ -292,9 +293,9 @@ void main() {
     for (final p in ['granths/g10.jpg', 'granths/e10.jpg', 'granths/g11.jpg']) {
       s.pageSaved(p, true);
     }
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 350));
     expect(find.text('11 में से 3 पेज सेव'), findsOneWidget);
-    expect(find.text('सिंक हो रहा है… 3 / 11 पेज'), findsOneWidget);
+    expect(find.byKey(const ValueKey('sync-pill')), findsNothing);
     expect(find.textContaining('पेज सेव हो रहे हैं 3/11'), findsOneWidget);
     net.gate!.complete();
     for (var i = 0; i < 20; i++) {

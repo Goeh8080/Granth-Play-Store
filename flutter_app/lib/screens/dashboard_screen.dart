@@ -83,10 +83,12 @@ class _DashCard extends StatelessWidget {
 class _NoteCard extends StatelessWidget {
   const _NoteCard();
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => LookBuilder(builder: (context, _) => _box());
+
+  Widget _box() => Container(
         margin: const EdgeInsets.only(top: 18),
         padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(color: GColors.paper, border: Border.all(color: GColors.creamDark), borderRadius: BorderRadius.circular(14)),
+        decoration: themedSurface(BoxDecoration(color: GColors.paper, border: Border.all(color: GColors.creamDark), borderRadius: BorderRadius.circular(14))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('सत साहेब जी', style: GText.display(size: 22, color: GColors.maroon)),
           const SizedBox(height: 8),

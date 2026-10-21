@@ -8,6 +8,9 @@ import '../models/models.dart';
 const kOrigin = 'https://granth.wnmsolutions.com';
 const kShareBase = 'https://granth.grok.me/open';
 
+/// Store page of this app (Settings → ऐप शेयर करें).
+const kPlayStoreUrl = 'https://play.google.com/store/apps/details?id=com.wnm.granthprabandhan';
+
 final RegExp _mediaPath = RegExp(r'^(granths|uploads)/[A-Za-z0-9_.-]+$');
 
 /// Same rules as `Kt()` in the web bundle: only `granths/…` and `uploads/…` are images.
@@ -49,7 +52,7 @@ class Api {
   /// Upper bound for one whole catalog fetch, so a stalled network can never hang a sync.
   final Duration timeout;
 
-  Future<List<Map<String, dynamic>>> _list(String request) async {
+  Future<Object?> _body(String request) async {
     // The server answers JSON with `Content-Type: text/html`, so Dio would hand back a raw
     // String for ResponseType.json. Always read plain text and decode it ourselves.
     final r = await dio.get<dynamic>(
@@ -57,18 +60,42 @@ class Api {
       queryParameters: {'request': request},
       options: Options(responseType: ResponseType.plain),
     );
-    return decodeApiList(r.data, request);
+    return r.data;
   }
 
   Future<Catalog> fetchCatalog() async {
-    final res = await Future.wait([_list('getTopics'), _list('getGranths'), _list('getPramans')]).timeout(timeout);
-    return applyCatalogRules(Catalog(
-      topics: res[0].map(Topic.new).toList(),
-      granths: res[1].map(Granth.new).toList(),
-      pramans: res[2].map(Praman.new).toList(),
-      syncedAt: DateTime.now().millisecondsSinceEpoch,
-    ));
+    final res = await Future.wait([_body('getTopics'), _body('getGranths'), _body('getPramans')]).timeout(timeout);
+    final args = <Object?>[...res, DateTime.now().millisecondsSinceEpoch];
+    // ~1.5 MB of JSON: decoding it (and the compare key / file text) took a few hundred ms
+    // of the UI thread on a phone, a visible stall on every 2-minute sync. Done off-thread.
+    final size = res.fold<int>(0, (n, b) => n + (b is String ? b.length : 0));
+    return size > 200000 ? compute(parseCatalog, args) : parseCatalog(args);
   }
+}
+
+/// The three API bodies → the catalog, with its compare key and file text worked out too.
+Catalog parseCatalog(List<Object?> a) {
+  final c = applyCatalogRules(Catalog(
+    topics: decodeApiList(a[0], 'getTopics').map(Topic.new).toList(),
+    granths: decodeApiList(a[1], 'getGranths').map(Granth.new).toList(),
+    pramans: decodeApiList(a[2], 'getPramans').map(Praman.new).toList(),
+    syncedAt: a[3] as int?,
+  ));
+  return Catalog(
+    topics: c.topics,
+    granths: c.granths,
+    pramans: c.pramans,
+    syncedAt: c.syncedAt,
+    contentKey: catalogContentKey(c),
+    fileText: jsonEncode(c.toJson()),
+  );
+}
+
+/// `catalog.json` → the catalog and its compare key (off the UI thread for big files).
+Catalog? loadCatalogText(String text) {
+  final c = Catalog.fromJson(jsonDecode(text));
+  if (c == null) return null;
+  return Catalog(topics: c.topics, granths: c.granths, pramans: c.pramans, syncedAt: c.syncedAt, contentKey: catalogContentKey(c));
 }
 
 /// Accepts the API body as a decoded Map or as raw JSON text (any content type, optional BOM)

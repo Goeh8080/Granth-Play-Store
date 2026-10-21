@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -82,14 +81,13 @@ class StickyHeader extends StatelessWidget {
   final Widget child;
   @override
   Widget build(BuildContext context) => PinnedHeaderSliver(
-        child: ClipRect(
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Container(
-              color: GColors.stickyBar.withValues(alpha: 0.96),
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: child,
-            ),
+        // The bar is 96 % opaque, so the old backdrop blur behind it was invisible but was
+        // re-rendered on every scroll frame (a full-width blur pass): dropped for smoothness.
+        child: RepaintBoundary(
+          child: Container(
+            color: GColors.stickyBar.withValues(alpha: 0.96),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: child,
           ),
         ),
       );

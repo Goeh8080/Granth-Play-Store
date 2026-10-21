@@ -12,7 +12,13 @@ class Store {
   static final Store I = Store._();
 
   SharedPreferences? _prefs;
+  Future<SharedPreferences>? _prefsLoad;
   Directory? _root;
+
+  /// Values written in this session. Reads see them at once, so a setting changes on
+  /// screen the moment it is tapped even while the preferences file is still opening (a
+  /// slow cold start) or cannot be opened at all; they are written through when it is ready.
+  final Map<String, Object> _mem = {};
 
   static const kTopicCols = 'topic-cols';
   static const kGranthCols = 'granth-cols';
@@ -21,6 +27,12 @@ class Store {
   static const kUiCols = 'ui-cols';
   static const kPdfStyle = 'pdf-style';
   static const kLook = 'granth-look';
+
+  // Extra settings (not in the web app). Stored as text like the others.
+  static const kTextSize = 'granth-text-size';
+  static const kWifiOnly = 'granth-wifi-only';
+  static const kAutoSync = 'granth-auto-sync';
+  static const kKeepAwake = 'granth-keep-awake';
   static const kHash = 'granth-hash';
   static const kOfflineIds = 'granth-offline-ids';
   static const kDevice = 'granth-device';
@@ -37,10 +49,16 @@ class Store {
   /// Never throws and never hangs: each step has a timeout, and if the app documents
   /// directory is unavailable the cache falls back to a temp directory so the app still opens.
   Future<void> init() async {
-    try {
-      _prefs ??= await SharedPreferences.getInstance().timeout(const Duration(seconds: 4));
-    } catch (e, st) {
-      debugPrint('Store: prefs unavailable: $e\n$st');
+    if (_prefs == null) {
+      final load = _prefsLoad ??= SharedPreferences.getInstance();
+      try {
+        _adopt(await load.timeout(const Duration(seconds: 4)));
+      } catch (e) {
+        // Too slow (or failed) at start-up: the app opens anyway, settings live in memory,
+        // and the preferences are picked up (and written) as soon as they do arrive.
+        debugPrint('Store: prefs not ready yet: $e');
+        load.then(_adopt).catchError((Object e) => debugPrint('Store: prefs unavailable: $e'));
+      }
     }
     if (_root == null) {
       try {
@@ -58,8 +76,20 @@ class Store {
     }
   }
 
+  void _adopt(SharedPreferences p) {
+    if (_prefs != null) return;
+    _prefs = p;
+    for (final e in _mem.entries) {
+      final v = e.value;
+      if (v is String) p.setString(e.key, v);
+      if (v is int) p.setInt(e.key, v);
+    }
+  }
+
   /// For tests: use an in-memory prefs instance and a temp directory.
-  Future<void> initForTest(SharedPreferences prefs, Directory root) async {
+  Future<void> initForTest(SharedPreferences? prefs, Directory root) async {
+    _mem.clear();
+    _prefsLoad = null;
     _prefs = prefs;
     _root = root;
     for (final d in ['images', 'gallery', 'pdfs', 'Granth']) {
@@ -67,42 +97,99 @@ class Store {
     }
   }
 
-  bool get ready => _prefs != null && _root != null;
-  SharedPreferences get prefs => _prefs!;
+  /// Folders are there. Settings work even without the preferences file (memory first).
+  bool get ready => _root != null;
+
+  /// The preferences file is open (settings survive a restart).
+  bool get persistent => _prefs != null;
   Directory get root => _root!;
   String get imagesDir => '${root.path}/images';
   String get galleryDir => '${root.path}/gallery';
   String get pdfDir => '${root.path}/Granth';
 
-  String? getString(String k) => _prefs?.getString(k);
-  Future<void> setString(String k, String v) async => _prefs?.setString(k, v);
+  /// For tests: preferences that arrive late (slow phone start-up).
+  @visibleForTesting
+  void debugAdoptPrefs(SharedPreferences p) => _adopt(p);
+
+  String? getString(String k) {
+    final m = _mem[k];
+    if (m != null) return m is String ? m : '$m';
+    return _prefs?.getString(k);
+  }
+
+  Future<void> setString(String k, String v) async {
+    _mem[k] = v;
+    await _prefs?.setString(k, v);
+  }
+
+  /// Forget a setting (back to its default).
+  Future<void> remove(String k) async {
+    _mem.remove(k);
+    await _prefs?.remove(k);
+  }
+
   int? getInt(String k) {
-    final v = _prefs?.get(k);
+    final v = _mem[k] ?? _prefs?.get(k);
     if (v is int) return v;
     if (v is String) return int.tryParse(v);
     return null;
   }
 
-  Future<void> setInt(String k, int v) async => _prefs?.setInt(k, v);
+  Future<void> setInt(String k, int v) async {
+    _mem[k] = v;
+    await _prefs?.setInt(k, v);
+  }
 
   /// Reads a JSON file; a missing or damaged file gives null (never throws).
-  /// [background] decodes on another isolate (the catalog is ~1 MB).
-  Future<Object?> readJson(String name, {bool background = false}) async {
+  Future<Object?> readJson(String name) async {
     if (_root == null) return null;
     final f = File('${root.path}/$name');
     try {
       if (!await f.exists()) return null;
       final text = await f.readAsString();
-      return background && text.length > 100000 ? await compute(jsonDecode, text) : jsonDecode(text);
+      return jsonDecode(text);
     } catch (_) {
       return null;
     }
   }
 
-  Future<void> writeJson(String name, Object? value) async {
+  Future<String?> readText(String name) async {
+    if (_root == null) return null;
+    try {
+      final f = File('${root.path}/$name');
+      return await f.exists() ? await f.readAsString() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Bytes used by the saved pages (images folder), counted off the UI thread.
+  Future<int> imagesBytes() async {
+    if (_root == null) return 0;
+    return compute(_dirBytes, imagesDir);
+  }
+
+  Future<void> writeJson(String name, Object? value) => writeText(name, jsonEncode(value));
+
+  /// Atomic write of already-encoded text (the catalog is encoded off the UI thread).
+  Future<void> writeText(String name, String text) async {
     final f = File('${root.path}/$name');
     final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(jsonEncode(value), flush: true);
+    await tmp.writeAsString(text, flush: true);
     await tmp.rename(f.path);
   }
+}
+
+int _dirBytes(String path) {
+  var n = 0;
+  try {
+    for (final e in Directory(path).listSync(recursive: true, followLinks: false)) {
+      if (e is File) {
+        try {
+          n += e.lengthSync();
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return n;
 }

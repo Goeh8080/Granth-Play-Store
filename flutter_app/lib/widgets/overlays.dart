@@ -51,14 +51,19 @@ class SheetCard extends StatelessWidget {
     final body = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: (h * 0.86).clamp(0, 720)),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: GColors.paper,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [BoxShadow(color: GColors.shadow(0.28), blurRadius: 40, offset: const Offset(0, 16))],
+      child: LookBuilder(
+        builder: (context, look) => Container(
+          padding: const EdgeInsets.all(16),
+          decoration: themedSurface(
+            BoxDecoration(
+              color: GColors.paper,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [BoxShadow(color: GColors.shadow(0.28), blurRadius: 40, offset: const Offset(0, 16))],
+            ),
+            look: look,
+          ),
+          child: scroll ? SingleChildScrollView(child: body) : body,
         ),
-        child: scroll ? SingleChildScrollView(child: body) : body,
       ),
     );
   }
@@ -66,9 +71,12 @@ class SheetCard extends StatelessWidget {
 
 /// `.pdf-sheet-head` — h3 + "✕ पीछे" pill.
 class SheetHead extends StatelessWidget {
-  const SheetHead({super.key, required this.title, required this.onBack});
+  const SheetHead({super.key, required this.title, required this.onBack, this.direct = false});
   final String title;
   final VoidCallback onBack;
+
+  /// "पीछे" taps via [TapTarget] (see [Pressable.direct]).
+  final bool direct;
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 12),
@@ -76,7 +84,7 @@ class SheetHead extends StatelessWidget {
           children: [
             Expanded(child: Text(title, style: GText.display(size: 26, color: GColors.maroon, height: 1.3))),
             const SizedBox(width: 12),
-            Pill(icon: 'x', label: 'पीछे', onTap: onBack),
+            Pill(icon: 'x', label: 'पीछे', onTap: onBack, direct: direct),
           ],
         ),
       );
@@ -95,21 +103,25 @@ class FrostCard extends StatelessWidget {
     final h = MediaQuery.sizeOf(context).height;
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: (h * 0.86).clamp(0, 720)),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: GColors.paper.withValues(alpha: alpha),
-              borderRadius: BorderRadius.circular(radius),
-              border: Border.all(color: border ?? Color.lerp(Colors.white, GColors.gold, 0.3)!),
-            ),
-            child: SingleChildScrollView(child: child),
+      child: LookBuilder(builder: (context, look) {
+        final frosted = look == 'classic' || look == 'glass';
+        final deco = themedSurface(
+          BoxDecoration(
+            color: GColors.paper.withValues(alpha: alpha),
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(color: border ?? Color.lerp(Colors.white, GColors.gold, 0.3)!),
           ),
-        ),
-      ),
+          look: look,
+          keepColor: border != null,
+        );
+        final box = Container(padding: const EdgeInsets.all(18), decoration: deco, child: SingleChildScrollView(child: child));
+        // Solid styles need no backdrop blur (cheaper to draw); the shadows stay outside.
+        if (!frosted) return box;
+        return ClipRRect(
+          borderRadius: deco.borderRadius?.resolve(TextDirection.ltr) ?? BorderRadius.zero,
+          child: BackdropFilter(filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16), child: box),
+        );
+      }),
     );
   }
 }

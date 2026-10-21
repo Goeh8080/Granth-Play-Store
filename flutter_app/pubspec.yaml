@@ -33,7 +33,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icons/
-    - assets/images/
     - assets/fonts/NotoSansDevanagari-Full.ttf
   fonts:
     - family: NotoDeva
@@ -58,6 +57,11 @@ flutter:
     - family: YatraOneLatin
       fonts:
         - asset: assets/fonts/YatraOne-Latin.ttf
+    # Full Devanagari font: the fallback named by every text style (it was bundled but never
+    # registered, so the fallback did nothing).
+    - family: NotoDevaFull
+      fonts:
+        - asset: assets/fonts/NotoSansDevanagari-Full.ttf
     - family: TiroDevanagari
       fonts:
         - asset: assets/fonts/TiroDevanagariSanskrit-Regular.ttf

@@ -41,6 +41,13 @@ class NativeBridge {
     }
   }
 
+  /// Keeps the screen awake while the app is on screen (window flag; off-device: no-op).
+  static Future<void> keepScreenOn(bool on) async {
+    try {
+      await _ch.invokeMethod<void>('keepScreenOn', {'on': on}).timeout(const Duration(seconds: 3));
+    } catch (_) {}
+  }
+
   /// SDK level, low-RAM flag and memory class from `ActivityManager` (null off-device).
   static Future<Map<String, Object?>?> deviceInfo() async {
     try {

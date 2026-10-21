@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/models.dart';
+import '../services/api.dart' show kPlayStoreUrl;
 import '../services/catalog_store.dart';
 import '../services/file_actions.dart';
 import '../services/gallery_service.dart';
 import '../services/pdf_builder.dart';
 import '../services/pdf_notify.dart';
 import '../services/pdf_queue.dart';
+import '../services/storage.dart';
 import '../state/toast.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
@@ -224,7 +226,7 @@ class _PdfDropdownState extends State<PdfDropdown> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: PdfQueue.I,
+        listenable: Listenable.merge([PdfQueue.I, UiPrefs.I]),
         builder: (context, _) {
           final jobs = PdfQueue.I.jobs;
           final now = DateTime.now().millisecondsSinceEpoch;
@@ -234,12 +236,12 @@ class _PdfDropdownState extends State<PdfDropdown> {
             key: const ValueKey('pdf-dropdown'),
             constraints: BoxConstraints(maxHeight: (MediaQuery.sizeOf(context).height * 0.6).clamp(220.0, 560.0)),
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-            decoration: BoxDecoration(
+            decoration: themedSurface(BoxDecoration(
               color: GColors.paper.withValues(alpha: 0.97),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: Color.lerp(Colors.white, GColors.gold, 0.3)!),
               boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.22), blurRadius: 40, offset: const Offset(0, 16))],
-            ),
+            )),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
               Row(children: [
                 Expanded(child: Text(active > 0 ? '$active PDF बन रही हैं' : 'PDF', style: GText.sans(size: 15, weight: FontWeight.w700))),
@@ -467,21 +469,57 @@ class _SettingsState extends State<_Settings> {
         ]),
       );
 
+  /// Two pills "चालू" / "बंद" under a heading (same look as the layout picks).
+  Widget _toggle(String id, String title, bool on, ValueChanged<bool> set) => _block(title, [
+        Pill(key: ValueKey('set-$id-on'), direct: true, label: 'चालू', tone: on ? PillTone.maroon : PillTone.plain, onTap: () => set(true)),
+        Pill(key: ValueKey('set-$id-off'), direct: true, label: 'बंद', tone: on ? PillTone.plain : PillTone.maroon, onTap: () => set(false)),
+      ]);
+
+  Future<void> _reset(BuildContext context) async {
+    final ok = await confirmPop(context, 'सारी सेटिंग पहले जैसी (डिफ़ॉल्ट) हो जाएँगी। डाउनलोड किए ग्रंथ, पेज और PDF नहीं हटेंगे।');
+    if (!ok) return;
+    await UiPrefs.I.resetAll();
+    Toast.show('सेटिंग रीसेट हो गई');
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: UiPrefs.I,
         builder: (context, _) => SheetCard(children: [
-          SheetHead(title: 'सेटिंग', onBack: () => Navigator.pop(context)),
+          // Every control here taps directly (TapTarget): a finger that wobbles a little, the
+          // sheet's scroll view or the app-wide pinch layer can no longer swallow the tap.
+          SheetHead(title: 'सेटिंग', onBack: () => Navigator.pop(context), direct: true),
           _block('PDF सेटिंग', [
-            for (final o in pdfStyleOptions) Pill(label: o.title, tone: UiPrefs.I.pdfStyle == o.style ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.pdfStyle = o.style),
+            for (final o in pdfStyleOptions)
+              Pill(key: ValueKey('set-pdf-${pdfStyleId(o.style)}'), direct: true, label: o.title, tone: UiPrefs.I.pdfStyle == o.style ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.pdfStyle = o.style),
           ]),
           _block('लेआउट', [
-            for (final n in [1, 2]) Pill(label: '$n×$n', tone: UiPrefs.I.uiCols == n ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.setLayout(n)),
+            for (final n in [1, 2])
+              Pill(key: ValueKey('set-layout-$n'), direct: true, label: '$n×$n', tone: UiPrefs.I.uiCols == n ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.setLayout(n)),
+          ]),
+          // ---- Extra settings (not in the web app), same pills and headings ----
+          _block('अक्षर का आकार', [
+            for (final (id, title) in const [('small', 'छोटा'), ('normal', 'सामान्य'), ('large', 'बड़ा')])
+              Pill(key: ValueKey('set-text-$id'), direct: true, label: title, tone: UiPrefs.I.textSize == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.textSize = id),
+          ]),
+          _toggle('auto-sync', 'अपने-आप सिंक (हर 2 मिनट)', UiPrefs.I.autoSync, (v) => UiPrefs.I.autoSync = v),
+          _toggle('wifi-only', 'पेज डाउनलोड सिर्फ़ WiFi पर', UiPrefs.I.wifiOnly, (v) => UiPrefs.I.wifiOnly = v),
+          _toggle('keep-awake', 'पढ़ते समय स्क्रीन चालू रखें', UiPrefs.I.keepAwake, (v) => UiPrefs.I.keepAwake = v),
+          const _StorageBlock(),
+          _block('ऐप के बारे में', [
+            Pill(
+              key: const ValueKey('set-share-app'),
+              direct: true,
+              icon: 'share-2',
+              label: 'ऐप शेयर करें',
+              onTap: () => FileActions.shareText('ग्रंथ प्रबंधन — सत ग्रंथों के प्रमाण', kPlayStoreUrl),
+            ),
+            Pill(key: const ValueKey('set-reset'), direct: true, label: 'सेटिंग रीसेट करें', onTap: () => _reset(context)),
           ]),
           Align(
             alignment: Alignment.centerLeft,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
+            child: TapTarget(
+              key: const ValueKey('set-version'),
               onTap: () => setState(() {
                 _taps++;
                 if (_taps >= 5) _looks = true;
@@ -497,11 +535,78 @@ class _SettingsState extends State<_Settings> {
             curve: kRise,
             child: _looks
                 ? _block('कार्ड स्टाइल', [
-                    for (final (id, title) in cardLooks) Pill(label: title, tone: UiPrefs.I.look == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.look = id),
+                    for (final (id, title) in cardLooks)
+                      Pill(key: ValueKey('set-look-$id'), direct: true, label: title, tone: UiPrefs.I.look == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.look = id),
                   ])
                 : const SizedBox(width: double.infinity),
           ),
         ]),
+      );
+}
+
+/// Settings → स्टोरेज: saved pages n / total, space used, and the सिंक button's check +
+/// repair (every saved picture is checked; damaged or missing ones download again).
+class _StorageBlock extends StatefulWidget {
+  const _StorageBlock();
+  @override
+  State<_StorageBlock> createState() => _StorageBlockState();
+}
+
+class _StorageBlockState extends State<_StorageBlock> {
+  int? _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _measure();
+  }
+
+  Future<void> _measure() async {
+    try {
+      final b = await Store.I.imagesBytes();
+      if (mounted) setState(() => _bytes = b);
+    } catch (_) {}
+  }
+
+  static String mb(int b) => b >= 1 << 30 ? '${(b / (1 << 30)).toStringAsFixed(1)} GB' : '${(b / (1 << 20)).toStringAsFixed(b < 10 << 20 ? 1 : 0)} MB';
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<ImageProgress>(
+        valueListenable: CatalogStore.I.progress,
+        builder: (context, p, _) {
+          final s = CatalogStore.I;
+          final total = s.allPages;
+          final done = s.savedPages;
+          final busy = p.running && p.manual;
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('स्टोरेज', style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.maroon)),
+              const SizedBox(height: 6),
+              Text(
+                key: const ValueKey('set-storage-text'),
+                total > 0 ? 'सेव पेज $done / $total · ${_bytes == null ? '…' : mb(_bytes!)}' : 'पेज की सूची अभी नहीं आई',
+                style: GText.sans(size: 14, color: GColors.brown),
+              ),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                Pill(
+                  key: const ValueKey('set-repair'),
+                  direct: true,
+                  icon: 'refresh-cw',
+                  label: busy ? (p.checking ? 'जाँच हो रही है… ${p.checked}/${p.total}' : 'ठीक हो रहा है… ${p.done}/${p.total}') : 'डेटा जाँचें और ठीक करें',
+                  tone: busy ? PillTone.maroon : PillTone.plain,
+                  onTap: busy
+                      ? null
+                      : () async {
+                          await s.manualSync();
+                          _measure();
+                        },
+                ),
+              ]),
+            ]),
+          );
+        },
       );
 }
 

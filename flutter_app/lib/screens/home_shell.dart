@@ -255,7 +255,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                   final total = s.topics.length + s.granths.length + s.pramans.length;
                   return CustomScrollView(
                     controller: _scroll,
-                    physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                    physics: const ClampingScrollPhysics(),
                     slivers: [
                       SliverToBoxAdapter(
                         child: _Mast(deckOpen: _deckOpen, onDeck: () => _openDeck(0), link: _deckLink),
@@ -316,7 +316,6 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                   ),
                 ),
               ),
-              const SyncProgressPill(),
               // PDF list dropdown under the header arrow.
               if (_deckOpen) Positioned.fill(child: GestureDetector(key: const ValueKey('pdf-shade'), behavior: HitTestBehavior.opaque, onTap: _closeDeck)),
               Positioned(
@@ -741,24 +740,30 @@ class SyncStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([CatalogStore.I, open]),
+        listenable: Listenable.merge([CatalogStore.I, CatalogStore.I.progress, CatalogStore.I.lastSync, open, UiPrefs.I]),
         builder: (context, _) {
           final s = CatalogStore.I;
-          final u = s.images;
+          final u = s.progress.value;
           final syncing = s.status == SyncStatus.syncing;
           final busy = syncing || (u.manual && u.running);
-          final ce = u.total > 0
-              ? (u.running && !(u.checking && !u.manual)
-                  ? 'पेज सेव हो रहे हैं ${u.done}/${u.total}'
-                  : (u.done >= u.total ? 'सभी पेज इस डिवाइस पर सेव हैं' : 'सेव पेज ${u.done}/${u.total}'))
-              : (syncing ? 'सूची सेव हो रही है…' : '');
+          final phase = u.total > 0 ? (u.running && !(u.checking && !u.manual) ? 1 : (u.done >= u.total ? 2 : 3)) : (syncing ? 4 : 0);
+          final ce = switch (phase) {
+            1 => 'पेज सेव हो रहे हैं ${u.done}/${u.total}',
+            2 => 'सभी पेज इस डिवाइस पर सेव हैं',
+            3 => 'सेव पेज ${u.done}/${u.total}',
+            4 => 'सूची सेव हो रही है…',
+            _ => '',
+          };
           final main = syncing
               ? 'ऑनलाइन सिंक हो रहा है — सूची डिवाइस पर लिखी जा रही है'
               : (s.error ?? (s.online ? 'ऑफलाइन तैयार${s.syncedAt != null ? ' · ${hiDate(s.syncedAt)}' : ''}' : 'इंटरनेट नहीं · सेव किया डेटा चल रहा है'));
+          final t = themedSurface(const BoxDecoration(color: GColors.syncStrip));
           return Container(
-            decoration: const BoxDecoration(
-              color: GColors.syncStrip,
-              border: Border(bottom: BorderSide(color: GColors.creamDark)),
+            // The strip takes the style's colour only (it is a full-width bar).
+            decoration: BoxDecoration(
+              color: t.gradient == null ? t.color : null,
+              gradient: t.gradient,
+              border: const Border(bottom: BorderSide(color: GColors.creamDark)),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Padding(
@@ -782,7 +787,8 @@ class SyncStrip extends StatelessWidget {
                         layoutBuilder: (cur, prev) => Stack(alignment: Alignment.topLeft, children: [...prev, ?cur]),
                         child: Text(
                           '$main${ce.isNotEmpty ? ' · $ce' : ''}',
-                          key: ValueKey(main + ce),
+                          // Cross-fades when the message changes, not on every page count.
+                          key: ValueKey('$main|$phase'),
                           style: GText.sans(size: 13, color: GColors.brown, height: 1.4),
                         ),
                       ),
@@ -825,7 +831,7 @@ class _SyncCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final u = s.images;
+    final u = s.progress.value;
     final total = u.total;
     final done = u.done.clamp(0, total == 0 ? 0 : total);
     final syncing = s.status == SyncStatus.syncing;
@@ -835,12 +841,12 @@ class _SyncCard extends StatelessWidget {
       key: const ValueKey('sync-card'),
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
+      decoration: themedSurface(BoxDecoration(
         color: GColors.paper,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: GColors.gold.withValues(alpha: 0.6)),
         boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.10), blurRadius: 10, offset: const Offset(0, 3))],
-      ),
+      )),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text(head, style: GText.sans(size: 14, weight: FontWeight.w700, color: GColors.maroon)),
         const SizedBox(height: 6),
@@ -918,76 +924,6 @@ class _SyncButtonState extends State<_SyncButton> with SingleTickerProviderState
                 style: GText.sans(size: 13, weight: FontWeight.w600, color: GColors.maroon),
               ),
             ],
-          ),
-        ),
-      );
-}
-
-/// Floating, non-blocking progress of the background sync / offline download:
-/// "सिंक हो रहा है… 245 / 985 पेज" with a bar. Visible on every screen, gone when done.
-class SyncProgressPill extends StatelessWidget {
-  const SyncProgressPill({super.key});
-
-  @override
-  Widget build(BuildContext context) => Positioned(
-        left: 16,
-        bottom: 24 + MediaQuery.paddingOf(context).bottom,
-        child: IgnorePointer(
-          child: ListenableBuilder(
-            listenable: Listenable.merge([CatalogStore.I, Toast.message]),
-            builder: (context, _) {
-              final s = CatalogStore.I;
-              final u = s.images;
-              final syncing = s.status == SyncStatus.syncing;
-              final pages = u.running && u.total > 0 && (!u.checking || u.manual);
-              final show = syncing || pages;
-              final label = pages ? 'सिंक हो रहा है… ${u.done} / ${u.total} पेज' : 'सिंक हो रहा है… सूची';
-              final value = pages ? ((u.checking && u.manual ? u.checked : u.done) / u.total).clamp(0.0, 1.0) : null;
-              final w = MediaQuery.sizeOf(context).width;
-              return AnimatedSlide(
-                // Steps above a toast so both stay readable.
-                offset: show ? (Toast.message.value != null ? const Offset(0, -1.15) : Offset.zero) : const Offset(0, 1.4),
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutCubic,
-                child: AnimatedOpacity(
-                  key: const ValueKey('sync-pill'),
-                  opacity: show ? 1 : 0,
-                  duration: const Duration(milliseconds: 220),
-                  child: Container(
-                    constraints: BoxConstraints(maxWidth: math.max(200, math.min(w - 140, 320))),
-                    padding: const EdgeInsets.fromLTRB(12, 8, 14, 9),
-                    decoration: BoxDecoration(
-                      color: GColors.paper.withValues(alpha: 0.96),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: GColors.gold),
-                      boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.18), blurRadius: 12, offset: const Offset(0, 4))],
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      const GIcon('refresh-cw', size: 14, color: GColors.maroon),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: GText.sans(size: 13, weight: FontWeight.w600, color: GColors.maroon, height: 1.3)),
-                          const SizedBox(height: 5),
-                          SizedBox(
-                            width: 180,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(99),
-                              child: LinearProgressIndicator(
-                                value: value,
-                                minHeight: 4,
-                                backgroundColor: GColors.creamDark,
-                                valueColor: const AlwaysStoppedAnimation(GColors.saffron),
-                              ),
-                            ),
-                          ),
-                        ]),
-                      ),
-                    ]),
-                  ),
-                ),
-              );
-            },
           ),
         ),
       );

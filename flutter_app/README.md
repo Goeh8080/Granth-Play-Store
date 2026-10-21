@@ -23,7 +23,7 @@ See [docs/PARITY.md](docs/PARITY.md) for the full feature-parity checklist again
 | Gallery | PDF / चित्र tabs, folders (create, rename, delete), move items to a folder, open, save to the phone, share, delete with confirmation. |
 | PDF engine | A port of the original `buildBookPdf`. It has both styles: “PDF विषय के साथ” and “केवल चित्र”. It draws the decorated topic cover page, shapes Devanagari text with Flutter’s text engine, adds page numbers and a gallery preview. Pages stream to disk from a background isolate (flat memory). Saved JPEGs are embedded as-is; others are scaled natively. Up to 3 PDFs build at once (1–2 on low-RAM phones). Each has its own progress, ETA, रोकें, one automatic retry and a “फिर कोशिश करें” button. Free space is checked first, and partial files are always cleaned up. Finished PDFs are copied to **Downloads** and also saved in the app gallery. |
 | Android | Deep links `granth://open?...` and `https://granth.grok.me/open?...`. Back button: closes the open overlay, then walks the history, then a double back on the Dashboard asks before exiting. The last screen is restored when the app starts again. Pictures are saved to *Pictures/ग्रंथ प्रबंधन*. |
-| Settings | PDF style, global layout, hidden **कार्ड स्टाइल** setting (tap *Version* 5 times) with all 8 looks: Bento + Clay, सादा, Glass, Neu, Clay, Material, Flat, Bento. |
+| Settings | PDF style, global layout, hidden **कार्ड स्टाइल** setting (tap *Version* 5 times) with all 8 looks: Bento + Clay, सादा, Glass, Neu, Clay, Material, Flat, Bento (applies to the whole app). Also: text size, auto sync on/off, download only on WiFi, keep screen on, storage (saved pages, space, check + repair), share app, reset settings. |
 
 ## Animations added
 
