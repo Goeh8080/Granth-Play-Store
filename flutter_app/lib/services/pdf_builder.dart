@@ -53,10 +53,22 @@ class PdfSpec {
 }
 
 class PreparedImage {
-  PreparedImage(this.bytes, this.w, this.h);
-  final Uint8List bytes; // always JPEG
+  PreparedImage(this.bytes, this.w, this.h) : png = null, rgba = false;
+
+  /// A PNG's own compressed pixel data, embedded losslessly as it is.
+  PreparedImage.png(this.bytes, this.w, this.h, PngLayout this.png) : rgba = false;
+
+  /// Decoded pixels (RGBA, flattened on white), stored losslessly.
+  PreparedImage.rgba(this.bytes, this.w, this.h) : png = null, rgba = true;
+
+  /// JPEG bytes, unless [png] / [rgba] says otherwise.
+  final Uint8List bytes;
   final int w;
   final int h;
+  final PngLayout? png;
+  final bool rgba;
+
+  PdfPicture get picture => rgba ? PdfPicture.rgba(bytes, w, h) : (png != null ? PdfPicture.png(bytes, w, h, png!) : PdfPicture.jpeg(bytes, w, h));
 }
 
 const double _a4w = 595.28;
@@ -111,48 +123,68 @@ Future<T> _guardRender<T>(Future<T> f) => f.timeout(_renderTimeout, onTimeout: (
   return null;
 }
 
-/// JPEGs up to this size are embedded exactly as saved (no decode / re-encode): this is
-/// what makes an offline granth PDF fast. Larger pictures are scaled to [kPdfImageSide].
-const kPassSide = 2600;
-const kPassBytes = 1500000;
-const kPdfImageSide = 1800;
+/// Round 6 — original quality: page pictures go into the PDF exactly as saved, at their
+/// own resolution. Every normal JPEG (any size) is embedded byte for byte (DCTDecode); a
+/// PNG without transparency keeps its own compressed pixels (lossless). Only what a PDF
+/// reader cannot take directly is converted: transparent PNGs are flattened on white and
+/// stored losslessly; other formats (WebP…) become a full-resolution JPEG q95.
+/// (Before: anything over 2600 px / 1.5 MB was scaled to 1800 px and re-encoded at q85.)
+const kPassBytes = 1500000; // kept for callers; no longer limits pass-through pictures
+/// Largest side a converted (non pass-through) picture keeps; bounds decode memory.
+const kPdfImageSide = 4096;
+const kConvertQuality = 95;
 
-/// True when the picture can go into the PDF unchanged.
-bool jpegFits(({int w, int h, String kind})? head, int length, [int maxBytes = kPassBytes]) =>
-    head != null && head.kind == 'jpg' && head.w <= kPassSide && head.h <= kPassSide && length <= math.min(kPassBytes, math.max(60000, maxBytes));
+/// Pictures above this many pixels are not decoded in Dart (memory); on Android the
+/// native codec converts them.
+const kDartDecodeMaxPixels = 24000000;
 
-/// `Hm`/`Um` — keep JPEGs that fit untouched, otherwise flatten on white, cap at 1800 px, JPEG q90.
-///
-/// [maxBytes]: when a re-encoded picture is still bigger than this, it is scaled down /
-/// compressed a little more (never below ~900 px).
+/// True when a JPEG can go into the PDF unchanged: baseline / extended / progressive,
+/// 8-bit, grey / RGB / CMYK.
+bool jpegPassthrough(Uint8List bytes) {
+  final i = jpegInfo(bytes);
+  return i != null && i.w > 0 && i.h > 0 && (i.sof == 0xC0 || i.sof == 0xC1 || i.sof == 0xC2) && i.precision == 8 && (i.components == 1 || i.components == 3 || i.components == 4);
+}
+
+/// The picture as it can be embedded without any decoding, or null.
+PreparedImage? passthrough(Uint8List bytes) {
+  if (bytes.length < 32) return null;
+  if (jpegPassthrough(bytes)) {
+    final i = jpegInfo(bytes)!;
+    return PreparedImage(bytes, i.w, i.h);
+  }
+  final p = pngPassthrough(bytes);
+  if (p != null) return PreparedImage.png(p.idat, p.w, p.h, p.layout);
+  return null;
+}
+
+/// `Hm`/`Um` — what goes into the PDF for one page picture (see [kConvertQuality]).
+/// [maxBytes] is kept for callers and ignored.
 PreparedImage? prepareImageSync(Uint8List bytes, [int maxBytes = kPassBytes]) {
   if (bytes.length < 32) return null;
+  final pass = passthrough(bytes);
+  if (pass != null) return pass;
   final head = imageHeader(bytes);
-  const cap = kPdfImageSide;
-  // A huge photo (e.g. 4616×12984) would need hundreds of MB to decode in Dart: skip it
-  // here (it becomes a placeholder); on Android the native path decodes it scaled down.
-  if (head != null && head.w * head.h > 24000000) return null;
-  final limit = math.min(kPassBytes, math.max(60000, maxBytes));
-  if (jpegFits(head, bytes.length, maxBytes)) return PreparedImage(bytes, head!.w, head.h);
+  // A huge picture would need hundreds of MB to decode in Dart: skip it here (it becomes
+  // a placeholder); on Android the native path converts it.
+  if (head != null && head.w * head.h > kDartDecodeMaxPixels) return null;
   try {
     var src = img.decodeImage(bytes);
-    if (src == null) return null;
+    if (src == null || src.width * src.height > kDartDecodeMaxPixels) return null;
+    final png = head?.kind == 'png';
     if (src.hasAlpha) {
       final bg = img.Image(width: src.width, height: src.height);
       img.fill(bg, color: img.ColorRgb8(255, 255, 255));
       img.compositeImage(bg, src);
       src = bg;
     }
-    var side = cap.toDouble();
-    var quality = 90;
-    while (true) {
-      final scale = math.min(1.0, side / math.max(src.width, src.height));
-      final im = scale < 1 ? img.copyResize(src, width: math.max(1, (src.width * scale).round()), height: math.max(1, (src.height * scale).round()), interpolation: img.Interpolation.average) : src;
-      final out = Uint8List.fromList(img.encodeJpg(im, quality: quality));
-      if (out.length <= limit || (side <= 900 && quality <= 62)) return PreparedImage(out, im.width, im.height);
-      side = math.max(900, side * 0.8);
-      quality = math.max(62, quality - 7);
+    if (png) {
+      // Lossless (text scans stay sharp): raw pixels, compressed by the PDF writer.
+      final rgba = src.convert(format: img.Format.uint8, numChannels: 4, alpha: 255);
+      return PreparedImage.rgba(rgba.getBytes(order: img.ChannelOrder.rgba), rgba.width, rgba.height);
     }
+    final scale = math.min(1.0, kPdfImageSide / math.max(src.width, src.height));
+    final im = scale < 1 ? img.copyResize(src, width: math.max(1, (src.width * scale).round()), height: math.max(1, (src.height * scale).round()), interpolation: img.Interpolation.average) : src;
+    return PreparedImage(Uint8List.fromList(img.encodeJpg(im, quality: kConvertQuality)), im.width, im.height);
   } catch (_) {
     return null;
   }
@@ -162,11 +194,13 @@ PreparedImage? prepareImageSync(Uint8List bytes, [int maxBytes = kPassBytes]) {
 /// and big photos are decoded at reduced size). Null = use the Dart path.
 Future<PreparedImage?> _prepareNative(File f, Uint8List raw, int maxBytes) async {
   if (!NativeBridge.nativeImages) return null;
+  if (passthrough(raw) != null) return null; // embedded as-is
   final head = imageHeader(raw);
-  if (jpegFits(head, raw.length, maxBytes)) return null; // embedded as-is
+  // Transparent PNGs of normal size: the lossless Dart path (keeps text scans sharp).
+  if (head?.kind == 'png' && head!.w * head.h <= 12000000) return null;
   final out = '${Directory.systemTemp.path}/granth-prep-${f.hashCode}-${DateTime.now().microsecondsSinceEpoch}.jpg';
   try {
-    final r = await NativeBridge.prepareImage(f.path, out);
+    final r = await NativeBridge.prepareImage(f.path, out, maxSide: kPdfImageSide, quality: kConvertQuality);
     if (r == null) return null;
     return PreparedImage(await File(out).readAsBytes(), r.w, r.h);
   } catch (_) {
@@ -183,10 +217,9 @@ PreparedImage? _prepareEntry((Uint8List, int) a) => prepareImageSync(a.$1, a.$2)
 
 Future<PreparedImage?> prepareImage(Uint8List? bytes, {int maxBytes = kPassBytes}) async {
   if (bytes == null || bytes.length < 32) return null;
-  // Fast path (most saved pages): a JPEG that already fits is embedded as-is, with no
-  // decode and no isolate hop.
-  final head = imageHeader(bytes);
-  if (jpegFits(head, bytes.length, maxBytes)) return PreparedImage(bytes, head!.w, head.h);
+  // Fast path (almost every saved page): embedded as-is, with no decode and no isolate hop.
+  final pass = passthrough(bytes);
+  if (pass != null) return pass;
   return compute(_prepareEntry, (bytes, maxBytes));
 }
 
@@ -335,7 +368,10 @@ List<List<String>> _pagesOf(List<String> lines, double size, double maxH) {
 }
 
 class BookPdfBuilder {
-  BookPdfBuilder({this.isCancelled, this.onPage, this.onPreview, this.lookAhead = 8, this.maxImageBytes = kPassBytes});
+  BookPdfBuilder({this.isCancelled, this.onPage, this.onPreview, this.lookAhead = 8, this.maxImageBytes = kPassBytes, this.maxHeldBytes = 64 << 20});
+
+  /// Prepared pictures waiting for their page stay under about this many bytes.
+  final int maxHeldBytes;
 
   /// How many pictures may be prepared ahead of the page being assembled.
   final int lookAhead;
@@ -403,7 +439,7 @@ class BookPdfBuilder {
       final x = s0 + (s - f.w) / 2;
       final y = n + (area - f.h) / 2;
       _rect(page, x - 1, y - 1, f.w + 2, f.h + 2, const Color(0xFF000000));
-      _img(page, PdfPicture.jpeg(picture.bytes, picture.w, picture.h), x, y, f.w, f.h);
+      _img(page, picture.picture, x, y, f.w, f.h);
     } else if (placeholder) {
       final t = c + 8;
       final n = l + 20 + 4;
@@ -579,7 +615,7 @@ class BookPdfBuilder {
       final a = land ? _a4w : _a4h;
       final f = _fit(r - 20, a - 20, n.w, n.h);
       final page = _page(r, a, const Color(0xFFFFFFFF));
-      _img(page, PdfPicture.jpeg(n.bytes, n.w, n.h), (r - f.w) / 2, (a - f.h) / 2, f.w, f.h);
+      _img(page, n.picture, (r - f.w) / 2, (a - f.h) / 2, f.w, f.h);
       await _preview(n, first);
       return;
     }
@@ -624,6 +660,8 @@ class BookPdfBuilder {
     try {
       final o = specs.isNotEmpty ? specs : [PdfSpec(title: 'कोई प्रमाण नहीं')];
       final prepared = List<Future<PreparedImage?>?>.filled(o.length, null);
+      final held = List<int>.filled(o.length, 0);
+      var heldBytes = 0;
       var next = 0;
       var assembled = 0;
       Future<PreparedImage?> prep(PdfSpec spec) async {
@@ -651,13 +689,18 @@ class BookPdfBuilder {
         while (next < o.length) {
           if (isCancelled?.call() ?? false) return;
           // Stay at most [lookAhead] pages ahead of assembly so big granths never hold every picture at once.
-          if (next - assembled > lookAhead) {
+          // …and within a memory budget: original-size pictures can be several MB each.
+          if (next - assembled > lookAhead || (heldBytes > maxHeldBytes && next > assembled)) {
             await Future<void>.delayed(const Duration(milliseconds: 8));
             continue;
           }
           final i = next++;
           prepared[i] = prep(o[i]);
-          await prepared[i];
+          final r = await prepared[i];
+          if (i >= assembled && r != null) {
+            held[i] = r.bytes.length;
+            heldBytes += held[i];
+          }
         }
       }
 
@@ -685,7 +728,9 @@ class BookPdfBuilder {
           }
         }
         await flush();
-        prepared[e] = Future.value(null); // drop the prepared JPEG reference (it now lives in the PDF)
+        prepared[e] = Future.value(null); // drop the prepared picture (it now lives in the PDF)
+        heldBytes -= held[e];
+        held[e] = 0;
         assembled = e + 1;
         onPage?.call(e + 1, o.length);
       }

@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+import 'package:flutter/foundation.dart';
 
 import 'api.dart';
 import 'storage.dart';
@@ -13,7 +14,18 @@ class ImageStore {
   ImageStore._();
   static final ImageStore I = ImageStore._();
 
-  final Dio _dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 20), receiveTimeout: const Duration(seconds: 90)));
+  /// Where a picture is fetched from (tests point it at a local server).
+  @visibleForTesting
+  String Function(String path) urlFor = mediaUrl;
+
+  // One keep-alive connection pool for the whole download (8 at a time to one host): no
+  // new TLS handshake per page.
+  final Dio _dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 20), receiveTimeout: const Duration(seconds: 90)))
+    ..httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () => HttpClient()
+        ..maxConnectionsPerHost = 8
+        ..idleTimeout = const Duration(seconds: 30),
+    );
   final Map<String, Future<File?>> _inflight = {};
 
   File fileFor(String path) => File('${Store.I.imagesDir}/${keyFor(path)}');
@@ -142,12 +154,16 @@ class ImageStore {
   Future<File?> get(String path) {
     final hit = cachedSync(path);
     if (hit != null) return Future.value(hit);
-    return _inflight.putIfAbsent(path, () => _download(path).whenComplete(() => _inflight.remove(path)));
+    // The cleanup must not hand back the removed entry: whenComplete waits for a
+    // returned Future, and that entry is this very future, so get() would never finish.
+    return _inflight.putIfAbsent(path, () => _download(path).whenComplete(() {
+          _inflight.remove(path);
+        }));
   }
 
   Future<File?> _download(String path) async {
     try {
-      final r = await _dio.get<List<int>>(mediaUrl(path), options: Options(responseType: ResponseType.bytes));
+      final r = await _dio.get<List<int>>(urlFor(path), options: Options(responseType: ResponseType.bytes));
       final type = r.headers.value('content-type') ?? '';
       final bytes = r.data;
       if (bytes == null || bytes.length < 32) return null;
@@ -156,11 +172,46 @@ class ImageStore {
       final part = File('${f.path}.part');
       await part.writeAsBytes(bytes, flush: true);
       await part.rename(f.path);
+      _stampServerTime(f, r.headers.value('last-modified'));
       _changes.add((path, true));
       return f;
     } catch (_) {
       return null;
     }
+  }
+
+  /// The file's time becomes the server's Last-Modified, so a later re-upload under the
+  /// same name is noticed by [changedOnServer] (whatever the phone's clock says).
+  static void _stampServerTime(File f, String? lastModified) {
+    if (lastModified == null) return;
+    try {
+      f.setLastModifiedSync(HttpDate.parse(lastModified));
+    } catch (_) {}
+  }
+
+  /// True when the server has a newer copy of a saved picture (HEAD, Last-Modified newer
+  /// than our file). Unknown / offline / not saved → false.
+  Future<bool> changedOnServer(String path) async {
+    final f = cachedSync(path);
+    if (f == null) return false;
+    try {
+      final r = await _dio.head<void>(urlFor(path));
+      final lm = r.headers.value('last-modified');
+      if (lm == null) return false;
+      final server = HttpDate.parse(lm);
+      return server.difference(f.lastModifiedSync()) > const Duration(seconds: 2);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Removes a saved picture (it is downloaded again by the next pass).
+  Future<void> drop(String path) async {
+    try {
+      final f = fileFor(path);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+    _changes.add((path, false));
   }
 
   Future<Uint8List?> bytes(String path) async {

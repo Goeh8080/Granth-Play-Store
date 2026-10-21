@@ -24,6 +24,9 @@ class DeviceProfile {
   /// Pictures prepared ahead of the page being drawn.
   int get pdfLookAhead => small ? 3 : (medium ? 5 : 8);
 
+  /// Memory for original-size page pictures waiting to be written into the PDF.
+  int get pdfHeldBytes => (small ? 20 : (medium ? 40 : 64)) << 20;
+
   /// Parallel picture downloads per PDF.
   int get imageWorkers => small ? 3 : (medium ? 5 : 8);
 

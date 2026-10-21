@@ -57,7 +57,17 @@ void main() {
       final s = CatalogStore(api: api, connectivity: const Stream.empty());
       CatalogStore.I = s;
       final net = FakeNet(s);
-      s.verifyPages = (paths, progress) async => paths.where(net.saved.contains).toSet();
+      s.verifyPages = (paths, progress) async {
+        await api.gate!.future;
+        return paths.where(net.saved.contains).toSet();
+      };
+      // Round 6: the download starts at once from the saved lists; hold the pages back
+      // until the sync answers so the instant (folder-listing) count can be seen.
+      final fetch0 = s.fetchPage;
+      s.fetchPage = (p) async {
+        await api.gate!.future;
+        return fetch0(p);
+      };
       final booting = s.boot();
       await until(() => s.images.total > 0);
       expect(s.images.total, 11);
@@ -80,8 +90,10 @@ void main() {
       final s = CatalogStore.I..debugSetCatalog(pictureCatalog());
       final net = FakeNet(s);
       final fetch = s.fetchPage;
+      var k = 0;
       s.fetchPage = (p) async {
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+        // Pages land one after another (8 run at once since round 6).
+        await Future<void>.delayed(Duration(milliseconds: 120 * ++k));
         return fetch(p);
       };
       final seen = <int>[];

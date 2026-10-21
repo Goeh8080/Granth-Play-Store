@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../highlighter/highlighter_screen.dart';
 import '../services/catalog_store.dart';
 import '../services/file_actions.dart';
 import '../services/native_bridge.dart';
@@ -650,6 +651,8 @@ class _NavMenu extends StatelessWidget {
     ('clipboard-list', 'Topics', '#/topics', Panel.topics),
     ('library', 'Granths', '#/granths', Panel.granths),
     ('image', 'प्रमाण', '#/pramans', Panel.pramans),
+    // Round 6: opens the Photo Highlighter (its own full-screen page, lib/highlighter/).
+    ('highlighter', 'Photo Highlighter', '', null),
   ];
 
   @override
@@ -673,11 +676,19 @@ class _NavMenu extends StatelessWidget {
               ),
       );
 
-  Widget _navBtn((String, String, String, Panel) it) {
-    final active = AppNav.I.route.panel == it.$4;
+  Widget _navBtn((String, String, String, Panel?) it) {
+    final active = it.$4 != null && AppNav.I.route.panel == it.$4;
     final color = active ? GColors.goldLight : GColors.cream.withValues(alpha: 0.68);
-    return Pressable(
-      onTap: () => AppNav.I.go(it.$3),
+    return Builder(builder: (context) => Pressable(
+      key: ValueKey('nav-${it.$1}'),
+      onTap: () {
+        if (it.$4 != null) {
+          AppNav.I.go(it.$3);
+          return;
+        }
+        if (AppNav.I.menuOpen) AppNav.I.toggleMenu();
+        HighlighterScreen.open(context);
+      },
       scale: 0.98,
       child: Stack(
         clipBehavior: Clip.none,
@@ -708,7 +719,7 @@ class _NavMenu extends StatelessWidget {
             ),
         ],
       ),
-    );
+    ));
   }
 }
 

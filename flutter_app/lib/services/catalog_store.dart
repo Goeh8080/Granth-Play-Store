@@ -87,7 +87,9 @@ const kStaleError = 'नया डेटा नहीं मिला। से�
 class CatalogStore extends ChangeNotifier {
   CatalogStore({Api? api, Stream<List<ConnectivityResult>>? connectivity})
       : _api = api ?? Api(),
-        _connectivity = connectivity;
+        _connectivity = connectivity {
+    progress.addListener(_onProgressForKeepAlive);
+  }
   static CatalogStore? _instance;
   static CatalogStore get I => _instance ??= CatalogStore();
   static set I(CatalogStore v) => _instance = v;
@@ -238,8 +240,18 @@ class CatalogStore extends ChangeNotifier {
     _listen();
     _watchSaves();
     if (online) {
-      await sync();
-      if (hasData) savePages(verify: true);
+      // Saved lists on the phone: the full download (with its silent repair check) starts
+      // at once, while the lists are fetched again; new pages from the sync follow.
+      final early = hasData;
+      if (early) savePages(verify: true);
+      final changed = await sync();
+      if (hasData) {
+        if (!early) {
+          savePages(verify: true);
+        } else if (changed) {
+          savePages();
+        }
+      }
     } else if (hasData) {
       status = SyncStatus.offline;
       error = null;
@@ -251,14 +263,20 @@ class CatalogStore extends ChangeNotifier {
     }
   }
 
+  /// For tests: start the network listener without booting.
+  @visibleForTesting
+  void debugListen() => _listen();
+
   void _listen() {
     try {
       _sub ??= (_connectivity ?? Connectivity().onConnectivityChanged).listen((r) {
         final now = !r.contains(ConnectivityResult.none);
         final wasWifi = onWifi;
         _net = r;
-        // "Download only on WiFi": the waiting download starts when WiFi comes back.
+        // "Download only on WiFi": the waiting download starts when WiFi comes back, and a
+        // running background download stops when the phone leaves WiFi.
         if (now && online && !wasWifi && onWifi && _wifiOnly() && hasData) savePages();
+        if (wasWifi && !onWifi && _wifiOnly() && _saveActive && !images.manual) stopSave();
         if (now && !online) {
           online = true;
           notifyListeners();
@@ -544,6 +562,9 @@ class CatalogStore extends ChangeNotifier {
     savePages(verify: true, manual: true);
   }
 
+  /// Pages downloaded at the same time (the original: 6).
+  static const saveWorkers = 8;
+
   /// Wait between retries of one picture (1×, 3×) and before the second pass.
   @visibleForTesting
   Duration retryBase = const Duration(seconds: 1);
@@ -684,7 +705,7 @@ class CatalogStore extends ChangeNotifier {
         }
       }
 
-      final n = list.length < 6 ? list.length : 6;
+      final n = list.length < saveWorkers ? list.length : saveWorkers;
       await Future.wait(List.generate(n, (_) => worker()));
     }
 
@@ -717,7 +738,106 @@ class CatalogStore extends ChangeNotifier {
     // A granth is offline when all of its pictures are saved.
     markOffline(granths.where((e) => _granthPaths(e).every(_saved.contains)).map((e) => e.id));
     notifyListeners();
-    if (done >= all.length) _celebrate(all);
+    if (done >= all.length) {
+      _celebrate(all);
+      if (!manual) unawaited(revalidate());
+    }
+  }
+
+  // ---------- pictures changed on the server ----------
+
+  /// A saved picture whose server copy is newer (same name re-uploaded). Replaceable in tests.
+  @visibleForTesting
+  Future<bool> Function(String path) changedOnServer = (p) => ImageStore.I.changedOnServer(p);
+
+  /// Removes a saved picture so it is downloaded again. Replaceable in tests.
+  @visibleForTesting
+  Future<void> Function(String path) dropPage = (p) => ImageStore.I.drop(p);
+
+  /// How often saved pictures are compared with the server.
+  @visibleForTesting
+  Duration revalidateEvery = const Duration(hours: 24);
+
+  static const kRevalidatedAt = 'granth-revalidated-at';
+  bool _revalidating = false;
+
+  /// Once a day, after the library is complete: asks the server (HEAD, 4 at a time) whether
+  /// any saved picture changed, and downloads the changed ones again. New pictures need no
+  /// check — they have new names in the lists. Quiet: nothing shows unless pages re-download.
+  Future<int> revalidate({bool force = false}) async {
+    if (_revalidating || !online || !hasData || _saveActive) return 0;
+    if (_wifiOnly() && !onWifi) return 0;
+    final last = int.tryParse(Store.I.getString(kRevalidatedAt) ?? '');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!force && last != null && now - last < revalidateEvery.inMilliseconds) return 0;
+    _revalidating = true;
+    final changed = <String>[];
+    try {
+      final list = _saved.where(_all.contains).toList();
+      var next = 0;
+      Future<void> worker() async {
+        while (online && !_saveActive) {
+          final i = next++;
+          if (i >= list.length) return;
+          try {
+            if (await changedOnServer(list[i])) changed.add(list[i]);
+          } catch (_) {}
+        }
+      }
+
+      await Future.wait(List.generate(list.length < 4 ? list.length : 4, (_) => worker()));
+      if (next >= list.length) Store.I.setString(kRevalidatedAt, '$now');
+      for (final p in changed) {
+        await dropPage(p);
+        pageSaved(p, false);
+      }
+    } finally {
+      _revalidating = false;
+    }
+    if (changed.isNotEmpty) savePages();
+    return changed.length;
+  }
+
+  // ---------- keep downloading when the app is closed ----------
+
+  /// Starts / updates / stops the quiet "पेज सेव हो रहे हैं" foreground service on Android
+  /// (`PageSyncService.kt`); it keeps this download running after the app is swiped away.
+  @visibleForTesting
+  Future<void> Function(String method, Map<String, Object?> args) pageNotice = NativeBridge.pagesNotice;
+
+  bool _keepAlive = false;
+  DateTime _keepAliveAt = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _keepAliveTimer;
+
+  void _onProgressForKeepAlive() {
+    final p = progress.value;
+    final need = p.running && p.total > 0 && p.done < p.total;
+    if (!need) {
+      _keepAliveTimer?.cancel();
+      _keepAliveTimer = null;
+      if (_keepAlive) {
+        _keepAlive = false;
+        pageNotice('pagesStop', const {});
+      }
+      return;
+    }
+    void send() {
+      _keepAliveTimer = null;
+      _keepAliveAt = DateTime.now();
+      final q = progress.value;
+      if (!(q.running && q.done < q.total)) return;
+      _keepAlive = true;
+      pageNotice('pagesProgress', {'done': q.done, 'total': q.total});
+    }
+
+    // The notification moves about once a second (Android drops faster updates).
+    final wait = const Duration(seconds: 1) - DateTime.now().difference(_keepAliveAt);
+    if (!_keepAlive || wait <= Duration.zero) {
+      _keepAliveTimer?.cancel();
+      send();
+    } else {
+      _keepAliveTimer ??= Timer(wait, send);
+    }
   }
 
   Iterable<String> _granthPaths(Granth g) sync* {
@@ -800,6 +920,8 @@ class CatalogStore extends ChangeNotifier {
     _timer?.cancel();
     _saveSub?.cancel();
     _countTimer?.cancel();
+    _keepAliveTimer?.cancel();
+    progress.removeListener(_onProgressForKeepAlive);
     progress.dispose();
     lastSync.dispose();
     super.dispose();

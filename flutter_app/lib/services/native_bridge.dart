@@ -30,7 +30,7 @@ class NativeBridge {
 
   /// Scales [src] to at most [maxSide] px and writes a JPEG to [out] on a native worker
   /// thread. Returns (w, h) or null on failure.
-  static Future<({int w, int h})?> prepareImage(String src, String out, {int maxSide = 1800, int quality = 85}) async {
+  static Future<({int w, int h})?> prepareImage(String src, String out, {int maxSide = 4096, int quality = 95}) async {
     if (!nativeImages) return null;
     try {
       final r = await _ch.invokeMethod<Map<Object?, Object?>>('prepareImage', {'src': src, 'out': out, 'maxSide': maxSide, 'quality': quality}).timeout(const Duration(seconds: 60));
@@ -77,6 +77,26 @@ class NativeBridge {
     try {
       await _ch.invokeMethod<void>(method, args).timeout(const Duration(seconds: 3));
     } catch (_) {}
+  }
+
+  /// Page-download keep-alive service (`pagesProgress` {done,total}, `pagesStop`): keeps
+  /// the full download running after the app is closed or swiped away. Never throws.
+  static Future<void> pagesNotice(String method, Map<String, Object?> args) async {
+    if (!Platform.isAndroid) return; // the service exists only on Android (and not in tests)
+    try {
+      await _ch.invokeMethod<void>(method, args).timeout(const Duration(seconds: 3));
+    } catch (_) {}
+  }
+
+  /// Photo Highlighter `<input type=file>`: the system picker (or the camera when the
+  /// input asks for capture). Returns content:// URIs for the WebView; [] on cancel.
+  static Future<List<String>> pickFiles({required List<String> accept, bool multiple = false, bool capture = false}) async {
+    try {
+      final r = await _ch.invokeMethod<List<Object?>>('pickFiles', {'accept': accept, 'multiple': multiple, 'capture': capture});
+      return [for (final u in r ?? const []) if (u is String && u.isNotEmpty) u];
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// Free bytes on the volume holding the app's files (null when unknown).

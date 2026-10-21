@@ -479,6 +479,7 @@ class PdfQueue extends ChangeNotifier {
     job.missingImages = missing;
     final builder = BookPdfBuilder(
       lookAhead: p.pdfLookAhead,
+      maxHeldBytes: p.pdfHeldBytes,
       isCancelled: () => job.cancelled,
       onPage: (d, t) => report(PdfPhase.pages, d, t),
       onPreview: (b) => job.preview = b,

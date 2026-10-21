@@ -235,10 +235,18 @@ void main() {
       expect((i.w, i.h, i.components), (30, 20, 3));
     });
 
-    test('a huge photo is not decoded in Dart (would run out of memory)', () {
+    test('a huge JPEG goes into the PDF as it is: original size, never decoded (round 6)', () {
       // JPEG header claiming 6000×6000 (36 MP).
       final jpg = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xC0, 0, 17, 8, 0x17, 0x70, 0x17, 0x70, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, ...List.filled(40, 0), 0xFF, 0xD9]);
-      expect(prepareImageSync(jpg), isNull);
+      final p = prepareImageSync(jpg)!;
+      expect(identical(p.bytes, jpg), isTrue, reason: 'no re-encoding');
+      expect((p.w, p.h), (6000, 6000));
+    });
+
+    test('a huge picture that would need decoding is not decoded in Dart (memory)', () {
+      // PNG header claiming 6000×6000 RGBA (needs decoding to flatten transparency).
+      final png = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x17, 0x70, 0, 0, 0x17, 0x70, 8, 6, 0, 0, 0, 0, 0, 0, 0, ...List.filled(40, 0)]);
+      expect(prepareImageSync(png), isNull);
     });
   });
 }

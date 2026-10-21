@@ -38,6 +38,8 @@ class MainActivity : FlutterActivity() {
     private val album = "ग्रंथ प्रबंधन"
     private var pending: Pair<MethodCall, MethodChannel.Result>? = null
     private var pendingNotif: MethodChannel.Result? = null
+    private var pendingPick: MethodChannel.Result? = null
+    private var cameraUri: android.net.Uri? = null
 
     // PDF page pictures are scaled / re-encoded here, off the UI thread, with the platform's
     // JPEG codec (much faster than pure Dart, and big photos are decoded at reduced size).
@@ -57,18 +59,52 @@ class MainActivity : FlutterActivity() {
         return engine
     }
 
-    override fun shouldDestroyEngineWithHost(): Boolean = !PdfService.running
+    // The page download (PageSyncService) keeps the engine too, so it carries on after a swipe.
+    private fun keepEngine() = PdfService.running || PageSyncService.running
+
+    override fun shouldDestroyEngineWithHost(): Boolean = !keepEngine()
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        PageSyncService.activityAlive = true
+        super.onCreate(savedInstanceState)
+    }
 
     override fun onDestroy() {
-        val destroyEngine = !PdfService.running
+        val destroyEngine = !keepEngine()
+        PageSyncService.activityAlive = false
         super.onDestroy()
         if (destroyEngine) FlutterEngineCache.getInstance().remove(engineId)
+    }
+
+    companion object {
+        /**
+         * Channel for an engine started headless by [PageSyncService] (no activity): only
+         * what the page download needs. MainActivity replaces it with the full one on open.
+         */
+        fun attachChannels(ctx: Context, engine: FlutterEngine) {
+            val app = ctx.applicationContext
+            MethodChannel(engine.dartExecutor.binaryMessenger, "com.wnm.granthprabandhan/downloads").setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "pagesProgress" -> {
+                        PageSyncService.update(app, call.argument<Int>("done") ?: 0, call.argument<Int>("total") ?: 0)
+                        result.success(null)
+                    }
+                    "pagesStop" -> {
+                        PageSyncService.stop(app)
+                        result.success(null)
+                    }
+                    "freeBytes" -> result.success(try { StatFs(app.filesDir.absolutePath).availableBytes } catch (e: Exception) { -1L })
+                    else -> result.notImplemented()
+                }
+            }
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         // Channels must exist before anything is posted.
         PdfService.ensureChannels(applicationContext)
+        PageSyncService.ensureChannel(applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "copyToDownloads", "saveImage" -> withLegacyPermission(call, result)
@@ -86,6 +122,14 @@ class MainActivity : FlutterActivity() {
                 "freeBytes" -> result.success(freeBytes())
                 "pdfProgress" -> {
                     PdfService.update(applicationContext, call.argument<String>("title") ?: "PDF", call.argument<String>("text") ?: "", call.argument<Int>("percent") ?: 0)
+                    result.success(null)
+                }
+                "pagesProgress" -> {
+                    PageSyncService.update(applicationContext, call.argument<Int>("done") ?: 0, call.argument<Int>("total") ?: 0)
+                    result.success(null)
+                }
+                "pagesStop" -> {
+                    PageSyncService.stop(applicationContext)
                     result.success(null)
                 }
                 "pdfStop" -> {
@@ -115,6 +159,7 @@ class MainActivity : FlutterActivity() {
                 "openNotificationSettings" -> {
                     result.success(openNotificationSettings())
                 }
+                "pickFiles" -> pickFiles(call, result)
                 "exitApp" -> {
                     result.success(null)
                     finishAffinity()
@@ -122,6 +167,73 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /**
+     * Photo Highlighter `<input type=file>`: camera (capture inputs) or the system picker,
+     * like Chrome does. Results are content:// URIs the WebView reads.
+     */
+    private fun pickFiles(call: MethodCall, result: MethodChannel.Result) {
+        pendingPick?.success(emptyList<String>())
+        pendingPick = null
+        val accept = (call.argument<List<String>>("accept") ?: emptyList()).flatMap { it.split(',') }.map { it.trim() }.filter { it.isNotEmpty() }
+        val multiple = call.argument<Boolean>("multiple") == true
+        val capture = call.argument<Boolean>("capture") == true
+        val images = accept.isEmpty() || accept.all { it.startsWith("image/") || it == "image/*" }
+        try {
+            if (capture && images) {
+                HlFileProvider.cleanup(this)
+                val f = java.io.File(HlFileProvider.dir(this), "IMG_${System.currentTimeMillis()}.jpg")
+                val uri = HlFileProvider.uriFor(this, f)
+                cameraUri = uri
+                val i = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                    .putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                    .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                i.clipData = android.content.ClipData.newRawUri("", uri)
+                pendingPick = result
+                startActivityForResult(i, 4721)
+                return
+            }
+            val types = accept.map { if (it.startsWith(".")) android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(it.substring(1)) ?: "*/*" else it }.distinct()
+            val i = Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType(if (types.size == 1) types[0] else "*/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
+            if (types.size > 1) i.putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
+            pendingPick = result
+            startActivityForResult(Intent.createChooser(i, null), 4722)
+        } catch (e: Exception) {
+            Log.w("GranthHL", "picker: $e")
+            pendingPick = null
+            result.success(emptyList<String>())
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != 4721 && requestCode != 4722) {
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val r = pendingPick ?: return
+        pendingPick = null
+        val out = mutableListOf<String>()
+        if (resultCode == RESULT_OK) {
+            if (requestCode == 4721) {
+                cameraUri?.let { u ->
+                    val f = java.io.File(HlFileProvider.dir(this), u.lastPathSegment ?: "")
+                    if (f.length() > 0) out += u.toString()
+                }
+            } else {
+                val clip = data?.clipData
+                if (clip != null) {
+                    for (k in 0 until clip.itemCount) clip.getItemAt(k).uri?.let { out += it.toString() }
+                } else {
+                    data?.data?.let { out += it.toString() }
+                }
+            }
+        }
+        cameraUri = null
+        r.success(out)
     }
 
     // A shared link opened while the app is already running arrives here (singleTask).
@@ -155,8 +267,8 @@ class MainActivity : FlutterActivity() {
     private fun prepareImage(call: MethodCall, result: MethodChannel.Result) {
         val src = call.argument<String>("src")
         val out = call.argument<String>("out")
-        val maxSide = call.argument<Int>("maxSide") ?: 1800
-        val quality = call.argument<Int>("quality") ?: 85
+        val maxSide = call.argument<Int>("maxSide") ?: 4096
+        val quality = call.argument<Int>("quality") ?: 95
         if (src == null || out == null) {
             result.error("args", "src/out missing", null)
             return

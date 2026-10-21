@@ -44,14 +44,77 @@ class PdfOp {
   final String text;
 }
 
-/// A picture placed on a page: an existing JPEG (embedded as-is, no re-encoding) or raw
-/// RGBA pixels (text rendered with HarfBuzz; stored losslessly with Flate).
+/// A picture placed on a page: an existing JPEG (embedded as-is, no re-encoding), an
+/// existing PNG's compressed pixel data (embedded as-is, lossless) or raw RGBA pixels
+/// (text rendered with HarfBuzz, flattened PNGs; stored losslessly with Flate).
 class PdfPicture {
-  const PdfPicture.jpeg(this.bytes, this.w, this.h) : rgba = false;
-  const PdfPicture.rgba(this.bytes, this.w, this.h) : rgba = true;
+  const PdfPicture.jpeg(this.bytes, this.w, this.h)
+      : rgba = false,
+        png = null;
+  const PdfPicture.rgba(this.bytes, this.w, this.h)
+      : rgba = true,
+        png = null;
+
+  /// [bytes] = the PNG's joined IDAT data (zlib, PNG row filters).
+  const PdfPicture.png(this.bytes, this.w, this.h, PngLayout this.png) : rgba = false;
   final Uint8List bytes;
   final int w, h;
   final bool rgba;
+  final PngLayout? png;
+}
+
+/// How a PNG's pixel data is laid out (what the PDF reader needs to undo the row filters).
+class PngLayout {
+  const PngLayout({required this.colors, required this.bits, this.palette});
+
+  /// 1 = grey or palette index, 3 = RGB.
+  final int colors;
+  final int bits;
+
+  /// RGB triples for a palette PNG.
+  final Uint8List? palette;
+}
+
+/// PNG → [PdfPicture.png] data without decoding: works for non-interlaced grey (1–8 bit),
+/// RGB (8 bit) and palette PNGs with no transparency. Null otherwise (alpha, 16 bit,
+/// interlaced, damaged): those are decoded and flattened instead.
+({int w, int h, Uint8List idat, PngLayout layout})? pngPassthrough(Uint8List b) {
+  if (b.length < 45 || b[0] != 0x89 || b[1] != 0x50 || b[2] != 0x4E || b[3] != 0x47) return null;
+  int u32(int i) => (b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3];
+  final w = u32(16), h = u32(20);
+  final bits = b[24], type = b[25], interlace = b[28];
+  if (w <= 0 || h <= 0 || interlace != 0 || b[26] != 0 || b[27] != 0) return null;
+  final okBits = switch (type) {
+    0 => bits == 1 || bits == 2 || bits == 4 || bits == 8,
+    2 => bits == 8,
+    3 => bits == 1 || bits == 2 || bits == 4 || bits == 8,
+    _ => false,
+  };
+  if (!okBits) return null;
+  final idat = BytesBuilder(copy: false);
+  Uint8List? palette;
+  var i = 8;
+  var ended = false;
+  while (i + 8 <= b.length) {
+    final len = u32(i);
+    final t = String.fromCharCodes(b, i + 4, i + 8);
+    if (len < 0 || i + 12 + len > b.length) return null;
+    final data = Uint8List.sublistView(b, i + 8, i + 8 + len);
+    if (t == 'IDAT') {
+      idat.add(data);
+    } else if (t == 'PLTE') {
+      palette = Uint8List.fromList(data);
+    } else if (t == 'tRNS') {
+      return null; // transparency: flatten on white instead
+    } else if (t == 'IEND') {
+      ended = true;
+      break;
+    }
+    i += 12 + len;
+  }
+  if (!ended || idat.isEmpty) return null;
+  if (type == 3 && (palette == null || palette.isEmpty || palette.length % 3 != 0)) return null;
+  return (w: w, h: h, idat: idat.takeBytes(), layout: PngLayout(colors: type == 2 ? 3 : 1, bits: bits, palette: type == 3 ? palette : null));
 }
 
 class PdfPageData {
@@ -136,6 +199,19 @@ class PdfStreamWriter {
           rgb[k + 2] = src[j + 2];
         }
         _stream(id, '/Type /XObject /Subtype /Image /Width ${pic.w} /Height ${pic.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode', _deflate.convert(rgb));
+      } else if (pic.png != null) {
+        final l = pic.png!;
+        final String cs;
+        if (l.palette != null) {
+          final hex = StringBuffer();
+          for (final v in l.palette!) {
+            hex.write(v.toRadixString(16).padLeft(2, '0'));
+          }
+          cs = '[/Indexed /DeviceRGB ${l.palette!.length ~/ 3 - 1} <$hex>]';
+        } else {
+          cs = l.colors == 3 ? '/DeviceRGB' : '/DeviceGray';
+        }
+        _stream(id, '/Type /XObject /Subtype /Image /Width ${pic.w} /Height ${pic.h} /ColorSpace $cs /BitsPerComponent ${l.bits} /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors ${l.colors} /BitsPerComponent ${l.bits} /Columns ${pic.w} >>', pic.bytes);
       } else {
         final info = jpegInfo(pic.bytes);
         final comps = info?.components ?? 3;
@@ -198,7 +274,7 @@ class PdfStreamWriter {
 }
 
 /// Width, height and colour components from a JPEG's SOF marker (null if not a JPEG).
-({int w, int h, int components})? jpegInfo(Uint8List b) {
+({int w, int h, int components, int sof, int precision})? jpegInfo(Uint8List b) {
   if (b.length < 4 || b[0] != 0xFF || b[1] != 0xD8) return null;
   var i = 2;
   while (i + 9 < b.length) {
@@ -215,7 +291,7 @@ class PdfStreamWriter {
     if ((m >= 0xC0 && m <= 0xC3) || (m >= 0xC5 && m <= 0xC7) || (m >= 0xC9 && m <= 0xCB) || (m >= 0xCD && m <= 0xCF)) {
       final h = (b[i + 5] << 8) | b[i + 6];
       final w = (b[i + 7] << 8) | b[i + 8];
-      return (w: w, h: h, components: b[i + 9]);
+      return (w: w, h: h, components: b[i + 9], sof: m, precision: b[i + 4]);
     }
     i += 2 + len;
   }

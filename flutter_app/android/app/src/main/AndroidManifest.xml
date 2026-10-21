@@ -17,7 +17,8 @@
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:hasFragileUserData="true"
-        android:requestLegacyExternalStorage="true">
+        android:requestLegacyExternalStorage="true"
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -55,6 +56,18 @@
             android:name=".PdfService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <!-- Full offline download keeps going after the app is closed (quiet notification). -->
+        <service
+            android:name=".PageSyncService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="dataSync" />
+        <!-- Photo Highlighter: camera photos are handed to the page through this (not exported). -->
+        <provider
+            android:name=".HlFileProvider"
+            android:authorities="${applicationId}.hlfiles"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
@@ -79,6 +92,13 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="application/pdf" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+            <data android:mimeType="*/*" />
         </intent>
         <package android:name="com.google.android.gm" />
         <package android:name="com.google.android.apps.docs" />
