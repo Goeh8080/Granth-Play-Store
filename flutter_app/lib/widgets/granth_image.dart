@@ -118,7 +118,7 @@ class _GranthImageState extends State<GranthImage> {
         cacheWidth: thumb ? 156 : (widget.kind == ShotKind.lightbox ? null : 1080),
         frameBuilder: (context, child, frame, sync) => sync
             ? child
-            : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 320), curve: Curves.easeOut, child: child),
+            : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic, child: child),
         errorBuilder: (context, error, stack) => Skeleton(height: thumb ? 52 : 120, width: thumb ? 52 : null, radius: radius),
       );
       if (widget.heroTag != null) img = Hero(tag: widget.heroTag!, child: img);

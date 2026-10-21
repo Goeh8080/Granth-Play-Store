@@ -8,6 +8,7 @@ import '../services/catalog_store.dart';
 import '../services/file_actions.dart';
 import '../services/gallery_service.dart';
 import '../services/pdf_builder.dart';
+import '../services/pdf_notify.dart';
 import '../services/pdf_queue.dart';
 import '../state/toast.dart';
 import '../state/ui_prefs.dart';
@@ -398,6 +399,43 @@ class OfflineReadyCard extends StatelessWidget {
       );
 }
 
+/// One-time hint when PDF notifications can't be seen (permission refused or switched off).
+Future<void> openNotifHint(BuildContext context) => showPop(context, (ctx) => const NotifHintCard());
+
+class NotifHintCard extends StatelessWidget {
+  const NotifHintCard({super.key});
+
+  @override
+  Widget build(BuildContext context) => FrostCard(
+        key: const ValueKey('notif-hint'),
+        maxWidth: 480,
+        alpha: 0.92,
+        radius: 18,
+        border: GColors.gold,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Text('PDF की सूचना बंद है', style: GText.display(size: 22, color: GColors.maroon, height: 1.25)),
+          const SizedBox(height: 8),
+          Text('PDF बनने की प्रगति और “PDF तैयार” की सूचना देखने के लिए इस ऐप की सूचनाएँ (Notifications) चालू करें। PDF फिर भी बनती रहेगी।',
+              style: GText.sans(size: 15, color: GColors.brown, height: 1.5)),
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(
+              child: SheetButton(
+                label: 'सेटिंग खोलें',
+                primary: true,
+                onTap: () {
+                  Navigator.pop(context);
+                  PdfNotify.I.openSettings();
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: SheetButton(label: 'अभी नहीं', onTap: () => Navigator.pop(context))),
+          ]),
+        ]),
+      );
+}
+
 /// `ng` — सेटिंग sheet (PDF style, layout, hidden card style after 5 taps on Version).
 Future<void> openSettings(BuildContext context) => showPop(context, (ctx) => const _Settings());
 
@@ -410,7 +448,7 @@ class _Settings extends StatefulWidget {
 class _SettingsState extends State<_Settings> {
   int _taps = 0;
   bool _looks = false;
-  String _version = '1.0.1';
+  String _version = '1.0.0';
 
   @override
   void initState() {

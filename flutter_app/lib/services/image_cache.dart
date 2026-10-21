@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -15,7 +16,46 @@ class ImageStore {
   final Dio _dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 20), receiveTimeout: const Duration(seconds: 90)));
   final Map<String, Future<File?>> _inflight = {};
 
-  File fileFor(String path) => File('${Store.I.imagesDir}/${path.replaceAll('/', '__')}');
+  File fileFor(String path) => File('${Store.I.imagesDir}/${keyFor(path)}');
+
+  /// File name of a picture inside the images folder.
+  static String keyFor(String path) => path.replaceAll('/', '__');
+
+  final StreamController<(String, bool)> _changes = StreamController.broadcast();
+
+  /// Every picture saved (true) or removed as damaged (false), from any part of the app:
+  /// the background download, a page opened on screen, the repair check.
+  Stream<(String, bool)> get changes => _changes.stream;
+
+  /// Names of the saved picture files, from one folder listing (no image is opened).
+  /// Unfinished `.part` downloads don't count.
+  Set<String> savedNamesSync() {
+    try {
+      final out = <String>{};
+      for (final e in Directory(Store.I.imagesDir).listSync(followLinks: false)) {
+        final n = e.path.substring(e.path.lastIndexOf('/') + 1);
+        if (!n.endsWith('.part')) out.add(n);
+      }
+      return out;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Same, off the UI thread's critical path, and only files with real content (> 32 bytes).
+  Future<Set<String>> savedNames() async {
+    final out = <String>{};
+    try {
+      await for (final e in Directory(Store.I.imagesDir).list(followLinks: false)) {
+        final n = e.path.substring(e.path.lastIndexOf('/') + 1);
+        if (n.endsWith('.part') || e is! File) continue;
+        try {
+          if ((await e.stat()).size > 32) out.add(n);
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return out;
+  }
 
   Future<File?> cached(String path) async {
     final f = fileFor(path);
@@ -33,17 +73,16 @@ class ImageStore {
     return null;
   }
 
+  /// Which of [paths] are saved (one folder listing, not one disk check per picture).
   Future<Set<String>> which(Iterable<String> paths) async {
-    final out = <String>{};
-    for (final p in paths) {
-      if (cachedSync(p) != null) out.add(p);
-    }
-    return out;
+    final names = await savedNames();
+    return {for (final p in paths) if (names.contains(keyFor(p))) p};
   }
 
   /// Repair check: a saved picture is good when it exists, is not tiny and starts with a
   /// JPEG / PNG / GIF / WEBP header (a JPEG must also end with its end marker, which a cut-off
   /// download does not). Bad files are deleted so the download fetches them again.
+  /// [onProgress] gets how many pictures were checked so far.
   Future<Set<String>> verify(List<String> paths, {void Function(int checked)? onProgress}) async {
     final good = <String>{};
     var n = 0;
@@ -53,11 +92,14 @@ class ImageStore {
         good.add(p);
       } else {
         try {
-          if (await f.exists()) await f.delete();
+          if (await f.exists()) {
+            await f.delete();
+            _changes.add((p, false));
+          }
         } catch (_) {}
       }
       n++;
-      if (onProgress != null && (n % 25 == 0 || n == paths.length)) onProgress(good.length);
+      if (onProgress != null && (n % 25 == 0 || n == paths.length)) onProgress(n);
     }
     return good;
   }
@@ -114,6 +156,7 @@ class ImageStore {
       final part = File('${f.path}.part');
       await part.writeAsBytes(bytes, flush: true);
       await part.rename(f.path);
+      _changes.add((path, true));
       return f;
     } catch (_) {
       return null;

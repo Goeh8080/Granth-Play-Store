@@ -6,6 +6,8 @@ shell around a React WebView (`index.html`). This port draws every screen native
 same layout, colours, fonts (Noto Sans Devanagari, Yatra One, Tiro Devanagari Sanskrit), icons and Hindi text.
 The only intended change is smoother animations.
 
+This build is versioned **1.0.0 (versionCode 1)** for external testing; split APKs report the same versionCode.
+
 See [docs/PARITY.md](docs/PARITY.md) for the full feature-parity checklist against the original app, and the original bugs that were not copied.
 
 ## Features (ported from the web bundle)

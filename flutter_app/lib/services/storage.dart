@@ -31,6 +31,9 @@ class Store {
   /// Notification permission asked once (first PDF).
   static const kNotifAsked = 'granth-notif-asked';
 
+  /// The "notifications are off" hint was shown once.
+  static const kNotifHint = 'granth-notif-hint';
+
   /// Never throws and never hangs: each step has a timeout, and if the app documents
   /// directory is unavailable the cache falls back to a temp directory so the app still opens.
   Future<void> init() async {

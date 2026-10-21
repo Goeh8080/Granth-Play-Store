@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 
 /**
  * Keeps PDF making alive while the app is in the background: a foreground service
@@ -22,27 +23,65 @@ import android.os.IBinder
  */
 class PdfService : Service() {
     companion object {
-        private const val CH_PROGRESS = "pdf_progress"
-        private const val CH_DONE = "pdf_done"
-        private const val NOTE_ID = 4100
+        // v2: the first channels were IMPORTANCE_LOW, which some phones (Vivo/OPPO-style
+        // "silent notifications" folds) hide completely. A channel's importance can't be
+        // raised after it is created, so new ids are used and the old ones are deleted.
+        const val CH_PROGRESS = "pdf_progress_v2"
+        const val CH_DONE = "pdf_done_v2"
+        private val OLD_CHANNELS = listOf("pdf_progress", "pdf_done")
+        const val NOTE_ID = 4100
         private const val EXTRA_TEXT = "text"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_PERCENT = "percent"
+        const val TAG = "GranthPdf"
 
         /** True while the service is in the foreground (MainActivity keeps the engine then). */
         @Volatile
         var running = false
             private set
 
+        /** A stop that arrived before the service reached onStartCommand (very short PDFs). */
+        @Volatile
+        private var stopRequested = false
+
         private var instance: PdfService? = null
 
-        private fun channels(ctx: Context) {
+        /** Creates the channels (idempotent). Called at app start and before every notify. */
+        fun ensureChannels(ctx: Context) {
             if (Build.VERSION.SDK_INT < 26) return
-            val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
-            nm.createNotificationChannel(NotificationChannel(CH_PROGRESS, "PDF बन रही है", NotificationManager.IMPORTANCE_LOW).apply {
-                setShowBadge(false)
-            })
-            nm.createNotificationChannel(NotificationChannel(CH_DONE, "PDF तैयार", NotificationManager.IMPORTANCE_DEFAULT))
+            try {
+                val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+                for (old in OLD_CHANNELS) {
+                    if (nm.getNotificationChannel(old) != null) nm.deleteNotificationChannel(old)
+                }
+                nm.createNotificationChannel(NotificationChannel(CH_PROGRESS, "PDF बन रही है", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "PDF बनते समय प्रगति"
+                    setSound(null, null)
+                    enableVibration(false)
+                    setShowBadge(false)
+                })
+                nm.createNotificationChannel(NotificationChannel(CH_DONE, "PDF तैयार", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "PDF बनने पर सूचना"
+                })
+            } catch (e: Exception) {
+                Log.w(TAG, "channels: $e")
+            }
+        }
+
+        /** Whether anything we post can be seen: app notifications on, and both channels on. */
+        fun notificationsVisible(ctx: Context): Boolean {
+            return try {
+                val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                if (!nm.areNotificationsEnabled()) return false
+                if (Build.VERSION.SDK_INT >= 26) {
+                    ensureChannels(ctx)
+                    listOf(CH_PROGRESS, CH_DONE).all { (nm.getNotificationChannel(it)?.importance ?: 1) != NotificationManager.IMPORTANCE_NONE }
+                } else {
+                    true
+                }
+            } catch (e: Exception) {
+                true
+            }
         }
 
         private fun openApp(ctx: Context): PendingIntent {
@@ -57,7 +96,7 @@ class PdfService : Service() {
             if (Build.VERSION.SDK_INT >= 26) Notification.Builder(ctx, channel) else Notification.Builder(ctx)
 
         private fun progressNote(ctx: Context, title: String, text: String, percent: Int): Notification {
-            channels(ctx)
+            ensureChannels(ctx)
             return builder(ctx, CH_PROGRESS)
                 .setSmallIcon(R.drawable.ic_stat_pdf)
                 .setContentTitle(title)
@@ -65,7 +104,8 @@ class PdfService : Service() {
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
-                .setProgress(100, percent.coerceIn(0, 100), percent <= 0)
+                .setProgress(100, PdfNotes.clampPercent(percent), percent <= 0)
+                .setCategory(Notification.CATEGORY_PROGRESS)
                 .setContentIntent(openApp(ctx))
                 .apply { if (Build.VERSION.SDK_INT >= 31) setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE) }
                 .build()
@@ -74,35 +114,46 @@ class PdfService : Service() {
         /** Start (first call) or update the ongoing notification. Never throws. */
         fun update(ctx: Context, title: String, text: String, percent: Int) {
             val app = ctx.applicationContext
+            stopRequested = false
             val svc = instance
             if (svc != null && running) {
                 try {
                     val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     nm.notify(NOTE_ID, progressNote(app, title, text, percent))
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    Log.w(TAG, "update notify: $e")
+                }
                 return
             }
+            Log.i(TAG, "start service ($percent%), notifications visible=${notificationsVisible(app)}")
             val i = Intent(app, PdfService::class.java)
                 .putExtra(EXTRA_TITLE, title)
                 .putExtra(EXTRA_TEXT, text)
                 .putExtra(EXTRA_PERCENT, percent)
             try {
                 if (Build.VERSION.SDK_INT >= 26) app.startForegroundService(i) else app.startService(i)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // Android 12+ refuses to start a foreground service from the background:
                 // just show the progress as a normal notification.
+                Log.w(TAG, "startForegroundService refused: $e")
                 try {
                     val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     nm.notify(NOTE_ID, progressNote(app, title, text, percent))
-                } catch (_: Exception) {}
+                } catch (e2: Exception) {
+                    Log.w(TAG, "fallback notify: $e2")
+                }
             }
         }
 
         fun stop(ctx: Context) {
             val svc = instance
-            if (svc != null) {
+            Log.i(TAG, "stop (service ${if (svc == null) "not started yet" else "running"})")
+            if (svc != null && running) {
                 svc.finish()
             } else {
+                // The start may still be on its way: onStartCommand must still call
+                // startForeground (or Android kills the app), then it stops at once.
+                stopRequested = true
                 try {
                     val nm = ctx.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     nm.cancel(NOTE_ID)
@@ -114,7 +165,7 @@ class PdfService : Service() {
         fun done(ctx: Context, id: Int, name: String, uri: String?) {
             val app = ctx.applicationContext
             try {
-                channels(app)
+                ensureChannels(app)
                 var tap = openApp(app)
                 if (uri != null && uri.startsWith("content://")) {
                     val view = Intent(Intent.ACTION_VIEW).apply {
@@ -128,13 +179,17 @@ class PdfService : Service() {
                 val n = builder(app, CH_DONE)
                     .setSmallIcon(R.drawable.ic_stat_pdf)
                     .setContentTitle("PDF तैयार")
+                    .setCategory(Notification.CATEGORY_STATUS)
                     .setContentText(name)
                     .setAutoCancel(true)
                     .setContentIntent(tap)
                     .build()
                 val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                nm.notify(NOTE_ID + 1 + (id and 0xFFFF), n)
-            } catch (_: Exception) {}
+                nm.notify(PdfNotes.doneId(id), n)
+                Log.i(TAG, "done notification posted (visible=${notificationsVisible(app)})")
+            } catch (e: Exception) {
+                Log.w(TAG, "done notify: $e")
+            }
         }
     }
 
@@ -157,13 +212,20 @@ class PdfService : Service() {
                 startForeground(NOTE_ID, n)
             }
             running = true
-        } catch (_: Exception) {
+            Log.i(TAG, "startForeground ok")
+        } catch (e: Exception) {
             // Not allowed right now (e.g. started too late from the background): plain notification.
+            Log.w(TAG, "startForeground failed: $e")
             running = false
             try {
                 (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTE_ID, n)
             } catch (_: Exception) {}
             stopSelf()
+        }
+        if (PdfNotes.stopRightAway(stopRequested, running)) {
+            // Every PDF already ended while the service was starting.
+            stopRequested = false
+            finish()
         }
         // Not restarted by the system: PDFs are made by the app process, not by the service.
         return START_NOT_STICKY
@@ -171,6 +233,7 @@ class PdfService : Service() {
 
     /** Android 15: dataSync services have a daily time limit. Stop cleanly when it is hit. */
     override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "onTimeout (Android 15 dataSync limit) — stopping")
         finish()
     }
 
@@ -188,4 +251,15 @@ class PdfService : Service() {
         if (instance === this) instance = null
         super.onDestroy()
     }
+}
+
+/** Small pure helpers, unit-tested on the JVM (test/.../PdfNotesTest.kt). */
+object PdfNotes {
+    fun clampPercent(p: Int): Int = p.coerceIn(0, 100)
+
+    /** Each finished PDF gets its own "PDF तैयार" notification, never the progress one. */
+    fun doneId(id: Int): Int = PdfService.NOTE_ID + 1 + (id and 0xFFFF)
+
+    /** onStartCommand: stop straight after startForeground when the stop came first. */
+    fun stopRightAway(stopRequested: Boolean, inForeground: Boolean): Boolean = stopRequested && inForeground
 }

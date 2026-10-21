@@ -178,7 +178,7 @@ Future<void> openLightbox(BuildContext context, List<String> paths, {Object? her
     transitionDuration: const Duration(milliseconds: 360),
     reverseTransitionDuration: const Duration(milliseconds: 260),
     pageBuilder: (ctx, a, b) => _Lightbox(paths: paths, heroTag: heroTag, footer: footer, closeIcon: closeIcon),
-    transitionsBuilder: (ctx, a, b, child) => FadeTransition(opacity: CurvedAnimation(parent: a, curve: Curves.easeOut), child: child),
+    transitionsBuilder: (ctx, a, b, child) => FadeTransition(opacity: CurvedAnimation(parent: a, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic), child: child),
   ));
 }
 

@@ -86,7 +86,7 @@ class _GalleryPanelState extends State<GalleryPanel> with LivePanel {
       opaque: false,
       transitionDuration: const Duration(milliseconds: 320),
       pageBuilder: (ctx, a, b) => _GalleryViewer(item: d),
-      transitionsBuilder: (ctx, a, b, child) => FadeTransition(opacity: a, child: child),
+      transitionsBuilder: (ctx, a, b, child) => FadeTransition(opacity: CurvedAnimation(parent: a, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic), child: child),
     ));
   }
 

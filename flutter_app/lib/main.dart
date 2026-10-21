@@ -159,6 +159,7 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
         title: 'ग्रंथ प्रबंधन',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
+        scrollBehavior: const GranthScrollBehavior(),
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3)),
           // Whole-app pinch zoom like the original WebView (viewport maximum-scale=5).
@@ -166,4 +167,15 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
         ),
         home: widget.splash ? AnimatedSplash(ready: widget.ready, child: const HomeShell()) : const HomeShell(),
       );
+}
+
+/// iOS-like scrolling everywhere: lists bounce at the ends (no Android glow / stretch).
+class GranthScrollBehavior extends MaterialScrollBehavior {
+  const GranthScrollBehavior();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) => const BouncingScrollPhysics(parent: RangeMaintainingScrollPhysics());
+
+  @override
+  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) => child;
 }

@@ -50,6 +50,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     PdfQueue.I.addListener(_onQueue);
     PdfQueue.I.finished.addListener(_onFinished);
     PdfNotify.I.attach();
+    PdfNotify.I.hint.addListener(_onNotifHint);
     CatalogStore.I.offlineReady.addListener(_onOfflineReady);
     _scroll.addListener(() => _showTop.value = _scroll.hasClients && _scroll.offset > 480);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -63,6 +64,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     nav.removeListener(_onNav);
     PdfQueue.I.removeListener(_onQueue);
     PdfQueue.I.finished.removeListener(_onFinished);
+    PdfNotify.I.hint.removeListener(_onNotifHint);
     CatalogStore.I.offlineReady.removeListener(_onOfflineReady);
     _scroll.dispose();
     _panelIn.dispose();
@@ -166,6 +168,11 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     });
   }
 
+  void _onNotifHint() {
+    if (!mounted || PdfNotify.I.hint.value == 0) return;
+    openNotifHint(context);
+  }
+
   void _onFinished() {
     final j = PdfQueue.I.finished.value;
     if (j == null || j.filePath == null || !mounted) return;
@@ -248,7 +255,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                   final total = s.topics.length + s.granths.length + s.pramans.length;
                   return CustomScrollView(
                     controller: _scroll,
-                    physics: const ClampingScrollPhysics(),
+                    physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                     slivers: [
                       SliverToBoxAdapter(
                         child: _Mast(deckOpen: _deckOpen, onDeck: () => _openDeck(0), link: _deckLink),
@@ -268,7 +275,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                               ),
                             SliverFadeTransition(
                               key: const ValueKey('panel'),
-                              opacity: CurvedAnimation(parent: _panelIn, curve: Curves.easeOut),
+                              opacity: CurvedAnimation(parent: _panelIn, curve: Curves.easeOutCubic),
                               sliver: KeyedSubtree(key: ValueKey(r.key), child: _panel(r)),
                             ),
                           ],
@@ -842,7 +849,9 @@ class _SyncCard extends StatelessWidget {
         ClipRRect(
           borderRadius: BorderRadius.circular(99),
           child: LinearProgressIndicator(
-            value: syncing && total == 0 ? null : (total == 0 ? 0 : done / total),
+            // The number is always the real saved count; while the सिंक button's check runs,
+            // the bar shows how far the check has got.
+            value: syncing && total == 0 ? null : (total == 0 ? 0 : ((u.checking && u.manual ? u.checked : done) / total).clamp(0.0, 1.0)),
             minHeight: 6,
             backgroundColor: GColors.creamDark,
             valueColor: const AlwaysStoppedAnimation(GColors.saffron),
@@ -933,7 +942,7 @@ class SyncProgressPill extends StatelessWidget {
               final pages = u.running && u.total > 0 && (!u.checking || u.manual);
               final show = syncing || pages;
               final label = pages ? 'सिंक हो रहा है… ${u.done} / ${u.total} पेज' : 'सिंक हो रहा है… सूची';
-              final value = pages ? (u.done / u.total).clamp(0.0, 1.0) : null;
+              final value = pages ? ((u.checking && u.manual ? u.checked : u.done) / u.total).clamp(0.0, 1.0) : null;
               final w = MediaQuery.sizeOf(context).width;
               return AnimatedSlide(
                 // Steps above a toast so both stay readable.

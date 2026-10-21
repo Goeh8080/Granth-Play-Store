@@ -15,7 +15,9 @@ import 'storage.dart';
 enum SyncStatus { booting, ready, offline, syncing, error }
 
 class ImageProgress {
-  const ImageProgress(this.done, this.total, this.running, {this.failed = 0, this.lowSpace = false, this.checking = false, this.manual = false});
+  const ImageProgress(this.done, this.total, this.running, {this.failed = 0, this.lowSpace = false, this.checking = false, this.manual = false, this.checked = 0});
+
+  /// Pages saved on this phone right now (live: every saved file counts the moment it lands).
   final int done;
   final int total;
   final bool running;
@@ -32,7 +34,39 @@ class ImageProgress {
   /// Stopped because the phone is almost full.
   final bool lowSpace;
 
+  /// How many saved pages the सिंक button's check has gone through (its progress bar).
+  final int checked;
+
   bool get complete => total > 0 && done >= total;
+
+  ImageProgress copyWith({int? done, int? total, bool? running, int? failed, bool? lowSpace, bool? checking, bool? manual, int? checked}) => ImageProgress(
+        done ?? this.done,
+        total ?? this.total,
+        running ?? this.running,
+        failed: failed ?? this.failed,
+        lowSpace: lowSpace ?? this.lowSpace,
+        checking: checking ?? this.checking,
+        manual: manual ?? this.manual,
+        checked: checked ?? this.checked,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ImageProgress &&
+      other.done == done &&
+      other.total == total &&
+      other.running == running &&
+      other.failed == failed &&
+      other.lowSpace == lowSpace &&
+      other.checking == checking &&
+      other.manual == manual &&
+      other.checked == checked;
+
+  @override
+  int get hashCode => Object.hash(done, total, running, failed, lowSpace, checking, manual, checked);
+
+  @override
+  String toString() => 'ImageProgress($done/$total running=$running checking=$checking manual=$manual)';
 }
 
 /// Shown once each time the whole library finishes downloading.
@@ -96,6 +130,7 @@ class CatalogStore extends ChangeNotifier {
 
   void _catalogChanged({bool warm = true}) {
     catalogVersion++;
+    _allSet = null;
     _pDocs.clear();
     _tDocs.clear();
     _gDocs.clear();
@@ -174,11 +209,15 @@ class CatalogStore extends ChangeNotifier {
         } catch (_) {}
         _catalogChanged();
         status = online ? SyncStatus.ready : SyncStatus.offline;
-        images = ImageProgress(_haveCount(), _allImagePaths().length, false);
+        // Real count at once, from one folder listing (no picture is opened).
+        _seedSaved(indexPagesSync(_all));
+        _indexed = true;
+        images = ImageProgress(savedPages, _all.length, false);
         notifyListeners();
       }
     } catch (_) {}
     _listen();
+    _watchSaves();
     if (online) {
       await sync();
       if (hasData) savePages(verify: true);
@@ -208,10 +247,23 @@ class CatalogStore extends ChangeNotifier {
         }
       });
     } catch (_) {}
-    // Every 3 minutes while online, like the web app.
-    _timer ??= Timer.periodic(const Duration(minutes: 3), (_) {
-      if (online) sync().then((_) => savePages());
-    });
+    // Every 2 minutes while the app is on screen (the web app: every 3 minutes).
+    _timer ??= Timer.periodic(autoSyncEvery, (_) => autoSync());
+  }
+
+  /// How often the lists are fetched again while the app is open.
+  static const autoSyncEvery = Duration(minutes: 2);
+
+  bool _foreground = true;
+
+  /// Light background sync: fetch the lists quietly (no "सिंक हो रहा है" flash), then
+  /// download only what is new or still missing. Skipped while another sync is running,
+  /// while the app is in the background, or offline.
+  Future<void> autoSync() async {
+    if (!online || !_foreground || _syncing != null) return;
+    final changed = await sync(silent: true);
+    if (!hasData) return;
+    if (changed || (!_saveActive && savedPages < _all.length)) savePages();
   }
 
   /// Retry button on the home screen.
@@ -226,19 +278,23 @@ class CatalogStore extends ChangeNotifier {
   DateTime? _lastSyncAt;
 
   /// App went to the background.
-  void onPause() => _pausedAt = DateTime.now();
+  void onPause() {
+    _pausedAt = DateTime.now();
+    _foreground = false;
+  }
 
   /// Back from the background: sync silently when the app was away for a while (≥ 30 s)
   /// or the last sync is older than 2 minutes. The saved data stays on screen meanwhile.
   void onResume() {
     final now = DateTime.now();
+    _foreground = true;
     if (now.difference(_lastResume).inMilliseconds < 3000) return;
     _lastResume = now;
     final away = _pausedAt == null ? Duration.zero : now.difference(_pausedAt!);
     _pausedAt = null;
     final stale = _lastSyncAt == null || now.difference(_lastSyncAt!) > const Duration(minutes: 2);
     if (away < const Duration(seconds: 30) && !stale) return;
-    sync().then((_) => savePages());
+    autoSync();
   }
 
   /// JSON of the catalog on screen; an identical download changes nothing (no rebuild,
@@ -250,18 +306,36 @@ class CatalogStore extends ChangeNotifier {
     return jsonEncode(j);
   }
 
-  Future<void> sync() async {
-    if (status == SyncStatus.syncing) return;
+  Future<bool>? _syncing;
+
+  /// Fetch the three lists. Returns true when the data changed. A second call while one is
+  /// running waits for that one (never two at once). [silent]: background sync — the strip
+  /// does not switch to "सिंक हो रहा है" and a failed fetch keeps the screen as it is.
+  Future<bool> sync({bool silent = false}) {
+    final running = _syncing;
+    if (running != null) return running;
+    final f = _doSync(silent);
+    _syncing = f;
+    f.whenComplete(() {
+      if (identical(_syncing, f)) _syncing = null;
+    });
+    return f;
+  }
+
+  Future<bool> _doSync(bool silent) async {
     if (!online) {
       final had = hasData || syncedAt != null;
       status = had ? SyncStatus.offline : SyncStatus.error;
       error = had ? null : kNoDataError;
       notifyListeners();
-      return;
+      return false;
     }
-    status = SyncStatus.syncing;
-    error = null;
-    notifyListeners();
+    if (!silent) {
+      status = SyncStatus.syncing;
+      error = null;
+      notifyListeners();
+    }
+    var changed = false;
     try {
       final c = await _api.fetchCatalog();
       _lastSyncAt = DateTime.now();
@@ -271,21 +345,35 @@ class CatalogStore extends ChangeNotifier {
         _lastJson = enc;
         _catalog = c;
         _catalogChanged();
+        changed = true;
       } else {
         // Same data: keep the lists (and every screen) as they are, just refresh the time.
         _catalog = _catalog.withSyncedAt(c.syncedAt);
       }
       status = SyncStatus.ready;
       error = null;
-      images = ImageProgress(_haveCount(), _allImagePaths().length, images.running);
+      if (changed) {
+        if (!_indexed) {
+          // First lists on this phone (or the saved copy was unreadable): count what is
+          // already in the images folder.
+          _indexed = true;
+          _seedSaved(indexPagesSync(_all));
+        }
+        images = images.copyWith(done: savedPages, total: _all.length);
+      }
       EventLog.I.log('sync', 'catalog');
     } catch (e) {
       debugPrint('sync failed: $e');
+      if (silent && hasData) {
+        // Quiet retry in 2 minutes; nothing on screen changes.
+        return false;
+      }
       final had = syncedAt != null;
       status = had ? SyncStatus.ready : SyncStatus.error;
       error = had ? kStaleError : kNoDataError;
     }
     notifyListeners();
+    return changed;
   }
 
   ({List<String> first, List<String> rest}) _imageGroups() {
@@ -314,12 +402,58 @@ class CatalogStore extends ChangeNotifier {
     return [...g.first, ...g.rest];
   }
 
-  int _haveCount() {
+  // ---------- live page count (one source of truth) ----------
+
+  /// Pictures known to be saved on this phone. Fed by the start-up folder listing, the
+  /// background download, pictures opened on screen and the repair check, so every screen
+  /// (strip, pill, sync card) shows the same live number without pressing सिंक.
+  final Set<String> _saved = {};
+  Set<String>? _allSet;
+  Set<String> get _all => _allSet ??= _allImagePaths().toSet();
+  StreamSubscription<(String, bool)>? _saveSub;
+  Timer? _countTimer;
+
+  /// Saved pages of the current lists.
+  int get savedPages {
+    final all = _all;
     var n = 0;
-    for (final p in _allImagePaths()) {
-      if (ImageStore.I.cachedSync(p) != null) n++;
+    for (final p in _saved) {
+      if (all.contains(p)) n++;
     }
     return n;
+  }
+
+  bool _indexed = false;
+
+  void _seedSaved(Set<String> have) {
+    _saved
+      ..clear()
+      ..addAll(have);
+  }
+
+  void _watchSaves() {
+    try {
+      _saveSub ??= ImageStore.I.changes.listen((e) => pageSaved(e.$1, e.$2));
+    } catch (_) {}
+  }
+
+  /// One picture landed on (or was removed from) the phone: the count moves at once.
+  @visibleForTesting
+  void pageSaved(String path, bool saved) {
+    final changed = saved ? _saved.add(path) : _saved.remove(path);
+    if (!changed || !_all.contains(path)) return;
+    images = images.copyWith(done: savedPages, total: _all.length);
+    // Many pictures can land in one frame: one repaint for all of them (~8 a second).
+    _countTimer ??= Timer(const Duration(milliseconds: 120), () {
+      _countTimer = null;
+      notifyListeners();
+    });
+  }
+
+  void _setImages(ImageProgress next) {
+    if (next == images) return;
+    images = next;
+    notifyListeners();
   }
 
   // ---------- full offline download ----------
@@ -331,6 +465,13 @@ class CatalogStore extends ChangeNotifier {
   /// Pictures already on the device. Replaceable in tests.
   @visibleForTesting
   Future<Set<String>> Function(List<String> paths) havePages = (p) => ImageStore.I.which(p);
+
+  /// Instant start-up count: saved pictures from one folder listing. Replaceable in tests.
+  @visibleForTesting
+  Set<String> Function(Iterable<String> paths) indexPagesSync = (paths) {
+    final names = ImageStore.I.savedNamesSync();
+    return {for (final p in paths) if (names.contains(ImageStore.keyFor(p))) p};
+  };
 
   /// Free bytes on the app volume (null = unknown). Replaceable in tests.
   @visibleForTesting
@@ -347,10 +488,10 @@ class CatalogStore extends ChangeNotifier {
   /// सिंक button (`sync().then(savePages)` in the original): fetch the lists again, then
   /// check every saved picture and download anything missing or damaged.
   Future<void> manualSync() async {
-    images = ImageProgress(images.done, images.total, true, manual: true, checking: true);
+    images = images.copyWith(running: true, manual: true, checking: true, checked: 0);
     online = true; // like the original button: always try the network
     notifyListeners();
-    if (status != SyncStatus.syncing) await sync();
+    await sync();
     savePages(verify: true, manual: true);
   }
 
@@ -386,112 +527,143 @@ class CatalogStore extends ChangeNotifier {
     final g = _imageGroups();
     final all = [...g.first, ...g.rest];
     if (all.isEmpty) {
-      if (manual) {
-        images = const ImageProgress(0, 0, false, manual: true);
-        notifyListeners();
-      }
+      if (manual) _setImages(const ImageProgress(0, 0, false, manual: true));
+      return;
+    }
+    // A background pass is already running: it is incremental, so just run once more after it
+    // (never two downloads at once, and the running one is not thrown away).
+    if (_saveActive && !manual && !verify) {
+      _saveAgain = true;
       return;
     }
     final run = ++_saveRun;
+    _saveActive = true;
+    _saveAgain = false;
     final shownAt = DateTime.now();
-    images = ImageProgress(manual ? 0 : images.done, all.length, true, checking: verify, manual: manual);
-    notifyListeners();
+    if (manual) {
+      _setImages(images.copyWith(done: savedPages, total: all.length, running: true, checking: verify, manual: true, checked: 0, failed: 0, lowSpace: false));
+    }
     () async {
-      final Set<String> have;
-      if (verify) {
-        // Repair pass: every saved picture is checked; missing / empty / damaged files are
-        // deleted here and downloaded again below. Counts update live.
-        have = await verifyPages(all, (n) {
-          if (run != _saveRun) return;
-          images = ImageProgress(n, all.length, true, checking: true, manual: manual);
-          notifyListeners();
-        });
-      } else {
-        have = await havePages(all);
-      }
-      var done = 0;
-      final a = <String>[];
-      final b = <String>[];
-      for (final e in g.first) {
-        have.contains(e) ? done++ : a.add(e);
-      }
-      for (final e in g.rest) {
-        have.contains(e) ? done++ : b.add(e);
-      }
-      if (run != _saveRun) return;
-      if (!online || error == kStaleError) {
-        // No internet right now: only the check ran; missing pictures download on the next sync.
-        a.clear();
-        b.clear();
-      }
-      final missing = a.length + b.length;
-      images = ImageProgress(done, all.length, missing > 0 || manual, manual: manual);
-      notifyListeners();
-      var lowSpace = false;
-      if (missing > 0) {
-        final free = await freeBytes().catchError((Object _) => null);
-        if (free != null && free < lowSpaceBytes) lowSpace = true;
-      }
-      final failed = <String>[];
-      var sinceCheck = 0;
-      Future<void> pool(List<String> list) async {
-        var next = 0;
-        Future<void> worker() async {
-          while (run == _saveRun && !lowSpace) {
-            final i = next++;
-            if (i >= list.length) return;
-            if (++sinceCheck >= 25) {
-              sinceCheck = 0;
-              final free = await freeBytes().catchError((Object _) => null);
-              if (free != null && free < lowSpaceBytes) {
-                lowSpace = true;
-                return;
-              }
-            }
-            if (await _fetchWithRetry(list[i], run)) {
-              done++;
-            } else {
-              failed.add(list[i]);
-            }
-            if (run == _saveRun && (done % 3 == 0 || done == all.length)) {
-              images = ImageProgress(done, all.length, done < all.length, failed: failed.length, manual: manual);
-              notifyListeners();
-            }
+      try {
+        await _savePass(run, g.first, g.rest, all, verify: verify, manual: manual, shownAt: shownAt);
+      } catch (e) {
+        debugPrint('savePages: $e');
+      } finally {
+        if (run == _saveRun) {
+          _saveActive = false;
+          if (_saveAgain) {
+            _saveAgain = false;
+            savePages();
           }
         }
-
-        final n = list.length < 6 ? list.length : 6;
-        await Future.wait(List.generate(n, (_) => worker()));
       }
+    }();
+  }
 
-      await pool(a);
-      await pool(b);
-      if (failed.isNotEmpty && run == _saveRun && !lowSpace && online) {
-        // Second pass for flaky networks.
-        await Future<void>.delayed(retryBase * 5);
-        final again = [...failed];
-        failed.clear();
-        await pool(again);
-      }
-      if (run != _saveRun) return;
-      if (manual) {
-        // A tap on सिंक always shows its result (e.g. 985 / 985) for a moment.
-        final left = minManualShow - DateTime.now().difference(shownAt);
-        if (left > Duration.zero) {
-          images = ImageProgress(done, all.length, true, failed: failed.length, manual: true);
-          notifyListeners();
-          await Future<void>.delayed(left);
-          if (run != _saveRun) return;
+  bool _saveActive = false;
+  bool _saveAgain = false;
+
+  /// Pictures that failed recently: background passes leave them alone for a while (so the
+  /// 2-minute sync doesn't keep popping up the progress pill); the सिंक button tries them.
+  final Map<String, DateTime> _failedAt = {};
+  static const _failedPause = Duration(minutes: 15);
+
+  Future<void> _savePass(int run, List<String> first, List<String> rest, List<String> all,
+      {required bool verify, required bool manual, required DateTime shownAt}) async {
+    final Set<String> have;
+    if (verify) {
+      // Repair pass: every saved picture is checked; missing / empty / damaged files are
+      // deleted here and downloaded again below. The count shown stays the real one.
+      have = await verifyPages(all, (n) {
+        if (run != _saveRun || !manual) return;
+        _setImages(images.copyWith(checked: n));
+      });
+    } else {
+      have = await havePages(all);
+    }
+    if (run != _saveRun) return;
+    // The disk is the truth (keeps what landed meanwhile from pictures opened on screen).
+    _saved
+      ..removeWhere((p) => _all.contains(p) && !have.contains(p))
+      ..addAll(have);
+    final now = DateTime.now();
+    _failedAt.removeWhere((_, t) => now.difference(t) > _failedPause);
+    bool want(String p) => !_saved.contains(p) && (manual || !_failedAt.containsKey(p));
+    final a = first.where(want).toList();
+    final b = rest.where(want).toList();
+    if (!online || error == kStaleError) {
+      // No internet right now: only the check ran; missing pictures download on the next sync.
+      a.clear();
+      b.clear();
+    }
+    final missing = a.length + b.length;
+    _setImages(images.copyWith(done: savedPages, total: all.length, running: missing > 0 || manual, checking: false, manual: manual));
+    var lowSpace = false;
+    if (missing > 0) {
+      final free = await freeBytes().catchError((Object _) => null);
+      if (free != null && free < lowSpaceBytes) lowSpace = true;
+    }
+    final failed = <String>[];
+    var sinceCheck = 0;
+    Future<void> pool(List<String> list) async {
+      var next = 0;
+      Future<void> worker() async {
+        while (run == _saveRun && !lowSpace) {
+          final i = next++;
+          if (i >= list.length) return;
+          if (++sinceCheck >= 25) {
+            sinceCheck = 0;
+            final free = await freeBytes().catchError((Object _) => null);
+            if (free != null && free < lowSpaceBytes) {
+              lowSpace = true;
+              return;
+            }
+          }
+          if (await _fetchWithRetry(list[i], run)) {
+            _failedAt.remove(list[i]);
+            pageSaved(list[i], true);
+          } else {
+            failed.add(list[i]);
+          }
         }
       }
-      images = ImageProgress(done, all.length, false, failed: failed.length, lowSpace: lowSpace, manual: manual);
-      if (lowSpace) error = kLowSpaceStop;
-      // A granth is offline when all of its pictures are saved.
-      final missingNow = {...failed, if (lowSpace) ...all.where((p) => ImageStore.I.cachedSync(p) == null)};
-      markOffline(granths.where((e) => _granthPaths(e).every((p) => !missingNow.contains(p))).map((e) => e.id));
-      notifyListeners();
-      if (done >= all.length) _celebrate(all);
-    }();
+
+      final n = list.length < 6 ? list.length : 6;
+      await Future.wait(List.generate(n, (_) => worker()));
+    }
+
+    await pool(a);
+    await pool(b);
+    if (failed.isNotEmpty && run == _saveRun && !lowSpace && online) {
+      // Second pass for flaky networks.
+      await Future<void>.delayed(retryBase * 5);
+      final again = [...failed];
+      failed.clear();
+      await pool(again);
+    }
+    if (run != _saveRun) return;
+    final at = DateTime.now();
+    for (final p in failed) {
+      _failedAt[p] = at;
+    }
+    _countTimer?.cancel();
+    _countTimer = null;
+    if (manual) {
+      // A tap on सिंक always shows its result (e.g. 985 / 985) for a moment.
+      final left = minManualShow - DateTime.now().difference(shownAt);
+      if (left > Duration.zero) {
+        _setImages(images.copyWith(done: savedPages, total: all.length, running: true, failed: failed.length, manual: true, checking: false));
+        await Future<void>.delayed(left);
+        if (run != _saveRun) return;
+      }
+    }
+    final done = savedPages;
+    images = images.copyWith(done: done, total: all.length, running: false, failed: failed.length, lowSpace: lowSpace, manual: manual, checking: false);
+    if (lowSpace) error = kLowSpaceStop;
+    // A granth is offline when all of its pictures are saved.
+    markOffline(granths.where((e) => _granthPaths(e).every(_saved.contains)).map((e) => e.id));
+    notifyListeners();
+    if (done >= all.length) _celebrate(all);
   }
 
   Iterable<String> _granthPaths(Granth g) sync* {
@@ -540,7 +712,9 @@ class CatalogStore extends ChangeNotifier {
 
   void stopSave() {
     _saveRun++;
-    images = ImageProgress(images.done, images.total, false);
+    _saveActive = false;
+    _saveAgain = false;
+    images = images.copyWith(running: false, checking: false);
     notifyListeners();
   }
 
@@ -570,6 +744,8 @@ class CatalogStore extends ChangeNotifier {
   void dispose() {
     _sub?.cancel();
     _timer?.cancel();
+    _saveSub?.cancel();
+    _countTimer?.cancel();
     super.dispose();
   }
 }

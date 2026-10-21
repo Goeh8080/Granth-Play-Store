@@ -50,6 +50,7 @@ void main() {
     PdfQueue.I.debugReset();
     PdfNotify.I.debugReset();
     PdfNotify.I.call = (m, a) async {};
+    PdfNotify.I.query = (m, a) async => null;
     CountUp.debugClear();
     SyncStrip.open.value = false;
     AppZoom.current.value = ZoomView.identity;
@@ -136,7 +137,7 @@ void main() {
       final seen = <int>[];
       final ok = await st.verify(paths, onProgress: seen.add);
       expect(ok, {'uploads/good.jpg', 'uploads/good.png'});
-      expect(seen.last, 2);
+      expect(seen.last, 6, reason: 'progress = pictures checked');
       expect(st.fileFor('uploads/cut.jpg').existsSync(), isFalse);
       expect(st.fileFor('uploads/html.jpg').existsSync(), isFalse);
       expect(st.fileFor('uploads/good.jpg').existsSync(), isTrue);
@@ -358,9 +359,16 @@ void main() {
   test('status-bar notification follows the PDFs and stops when they end', () async {
     final calls = <String, Map<String, Object?>>{};
     final order = <String>[];
+    final asked = <String>[];
     PdfNotify.I.call = (m, a) async {
       calls[m] = a;
       order.add(m);
+    };
+    PdfNotify.I.query = (m, a) async {
+      asked.add(m);
+      if (m == 'notifState') return {'sdk': 34, 'granted': false, 'enabled': false};
+      if (m == 'askNotifications') return false; // refused
+      return null;
     };
     PdfNotify.I.attach();
     final q = PdfQueue.I;
@@ -369,18 +377,64 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 10));
     q.start(pjob('b'), (j, r) => g2.future);
     await Future<void>.delayed(const Duration(milliseconds: 600));
-    expect(order.first, 'askNotifications');
+    expect(asked, ['notifState', 'askNotifications'], reason: 'the real Android 13+ dialog, when the first PDF starts');
+    expect(PdfNotify.I.hint.value, 1, reason: 'refused → the one-time hint');
+    expect(order.first, 'pdfProgress');
     expect(calls['pdfProgress']!['text'], startsWith('2 PDF बन रही हैं — '));
     q.cancel(q.jobs.first.id);
     q.cancel(q.jobs.last.id);
     await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(order.last, 'pdfStop');
-    // Asked only once.
+    // Asked once and hinted once — never nagging.
+    asked.clear();
     order.clear();
     q.start(pjob('c'), (j, r) => Completer<String>().future);
     await Future<void>.delayed(const Duration(milliseconds: 20));
-    expect(order, isNot(contains('askNotifications')));
+    expect(asked, ['notifState']);
+    expect(PdfNotify.I.hint.value, 1);
     q.cancel(q.jobs.first.id);
+  });
+
+  test('notifications on → no question, no hint; old Android with them switched off → hint only', () async {
+    PdfNotify.I.call = (m, a) async {};
+    final asked = <String>[];
+    PdfNotify.I.query = (m, a) async {
+      asked.add(m);
+      return m == 'notifState' ? {'sdk': 34, 'granted': true, 'enabled': true} : null;
+    };
+    await PdfNotify.I.ensurePermission();
+    expect(asked, ['notifState']);
+    expect(PdfNotify.I.lastCheck, 'enabled');
+    expect(PdfNotify.I.hint.value, 0);
+
+    asked.clear();
+    PdfNotify.I.query = (m, a) async {
+      asked.add(m);
+      return m == 'notifState' ? {'sdk': 30, 'granted': true, 'enabled': false} : null;
+    };
+    await PdfNotify.I.ensurePermission();
+    expect(asked, ['notifState'], reason: 'Android 12 and older have no permission dialog');
+    expect(PdfNotify.I.lastCheck, 'off-hint');
+    expect(PdfNotify.I.hint.value, 1);
+  });
+
+  testWidgets('the notification hint is themed and its button opens the app notification settings', (tester) async {
+    final asked = <String>[];
+    PdfNotify.I.query = (m, a) async {
+      asked.add(m);
+      return true;
+    };
+    await tester.pumpWidget(const GranthApp(splash: false, links: false));
+    await frames(tester, 6);
+    PdfNotify.I.hint.value++;
+    await frames(tester, 6);
+    expect(find.byKey(const ValueKey('notif-hint')), findsOneWidget);
+    expect(find.text('PDF की सूचना बंद है'), findsOneWidget);
+    await tester.tap(find.text('सेटिंग खोलें'));
+    await frames(tester, 6);
+    expect(asked, contains('openNotificationSettings'));
+    expect(find.byKey(const ValueKey('notif-hint')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
   });
 
   // ---------------- 5. Granths header ----------------

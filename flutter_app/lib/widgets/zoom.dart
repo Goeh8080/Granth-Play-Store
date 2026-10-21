@@ -176,7 +176,7 @@ class ZoomStageState extends State<ZoomStage> with SingleTickerProviderStateMixi
                   ..onEnd = _onEnd,
               ),
             },
-            child: ClipRect(child: Transform(transform: _v.matrix, child: widget.child)),
+            child: ClipRect(child: Transform(transform: _v.matrix, child: RepaintBoundary(child: widget.child))),
           ),
         );
       });
@@ -287,7 +287,7 @@ class _AppZoomState extends State<AppZoom> with SingleTickerProviderStateMixin {
                 },
             ),
           },
-          child: ClipRect(child: Transform(transform: _v.matrix, child: widget.child)),
+          child: ClipRect(child: Transform(transform: _v.matrix, child: RepaintBoundary(child: widget.child))),
         );
       });
 }

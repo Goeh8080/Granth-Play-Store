@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 /// Exact palette from the original web app (`@layer theme` in index.html).
@@ -85,8 +86,10 @@ ThemeData buildTheme() {
   return base.copyWith(
     textTheme: base.textTheme.apply(bodyColor: GColors.text, displayColor: GColors.text, fontFamily: GFonts.sans),
     textSelectionTheme: const TextSelectionThemeData(cursorColor: GColors.saffron, selectionHandleColor: GColors.saffron),
+    // iOS-style slide (with edge swipe-back) for any pushed full page.
     pageTransitionsTheme: const PageTransitionsTheme(builders: {
-      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
     }),
   );
 }

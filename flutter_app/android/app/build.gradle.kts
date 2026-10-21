@@ -34,6 +34,8 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // Added to Flutter's own R8 rules: keep the PDF notification service by name.
+            proguardFiles("proguard-rules.pro")
         }
     }
 }
@@ -46,4 +48,9 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // JVM unit tests of the native PDF notification helpers (android/app/src/test).
+    testImplementation("junit:junit:4.13.2")
 }

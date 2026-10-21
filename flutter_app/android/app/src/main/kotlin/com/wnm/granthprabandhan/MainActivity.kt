@@ -15,6 +15,8 @@ import android.os.Build
 import android.os.Environment
 import android.os.StatFs
 import android.provider.MediaStore
+import android.provider.Settings
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -35,6 +37,7 @@ class MainActivity : FlutterActivity() {
     private val channelName = "com.wnm.granthprabandhan/downloads"
     private val album = "ग्रंथ प्रबंधन"
     private var pending: Pair<MethodCall, MethodChannel.Result>? = null
+    private var pendingNotif: MethodChannel.Result? = null
 
     // PDF page pictures are scaled / re-encoded here, off the UI thread, with the platform's
     // JPEG codec (much faster than pure Dart, and big photos are decoded at reduced size).
@@ -64,6 +67,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // Channels must exist before anything is posted.
+        PdfService.ensureChannels(applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "copyToDownloads", "saveImage" -> withLegacyPermission(call, result)
@@ -82,13 +87,24 @@ class MainActivity : FlutterActivity() {
                     PdfService.done(applicationContext, call.argument<Int>("id") ?: 0, call.argument<String>("name") ?: "PDF", call.argument<String>("uri"))
                     result.success(null)
                 }
+                "notifState" -> result.success(notifState())
                 "askNotifications" -> {
+                    // Real runtime request (Android 13+); the answer comes back in
+                    // onRequestPermissionsResult. Older Android has no prompt: the switch
+                    // lives in the app's notification settings (Vivo-style phones ship it off).
                     if (Build.VERSION.SDK_INT >= 33 &&
                         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                     ) {
+                        pendingNotif?.success(false)
+                        pendingNotif = result
+                        Log.i(PdfService.TAG, "requesting POST_NOTIFICATIONS")
                         requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4712)
+                    } else {
+                        result.success(PdfService.notificationsVisible(this))
                     }
-                    result.success(null)
+                }
+                "openNotificationSettings" -> {
+                    result.success(openNotificationSettings())
                 }
                 "exitApp" -> {
                     result.success(null)
@@ -201,6 +217,32 @@ class MainActivity : FlutterActivity() {
         return mapOf("w" to w, "h" to h)
     }
 
+    private fun notifState(): Map<String, Any> {
+        val granted = Build.VERSION.SDK_INT < 33 ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        val visible = PdfService.notificationsVisible(this)
+        Log.i(PdfService.TAG, "notifState sdk=${Build.VERSION.SDK_INT} granted=$granted visible=$visible")
+        return mapOf("sdk" to Build.VERSION.SDK_INT, "granted" to granted, "enabled" to visible)
+    }
+
+    /** The app's notification settings page (falls back to the app info page). */
+    private fun openNotificationSettings(): Boolean {
+        val tries = mutableListOf<Intent>()
+        if (Build.VERSION.SDK_INT >= 26) {
+            tries += Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        }
+        tries += Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", packageName, null))
+        for (i in tries) {
+            try {
+                startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return true
+            } catch (e: Exception) {
+                Log.w(PdfService.TAG, "settings intent failed: $e")
+            }
+        }
+        return false
+    }
+
     /** Free space (bytes) where the app keeps its PDFs. */
     private fun freeBytes(): Long = try {
         StatFs(filesDir.absolutePath).availableBytes
@@ -221,6 +263,13 @@ class MainActivity : FlutterActivity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 4712) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            Log.i(PdfService.TAG, "POST_NOTIFICATIONS ${if (granted) "granted" else "denied"}")
+            pendingNotif?.success(granted && PdfService.notificationsVisible(this))
+            pendingNotif = null
+            return
+        }
         if (requestCode != 4711) return
         val p = pending ?: return
         pending = null

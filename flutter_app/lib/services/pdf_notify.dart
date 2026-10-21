@@ -19,6 +19,16 @@ class PdfNotify {
   @visibleForTesting
   Future<void> Function(String method, Map<String, Object?> args) call = NativeBridge.pdfNotice;
 
+  /// Native questions with an answer (`notifState`, `askNotifications`); replaceable in tests.
+  @visibleForTesting
+  Future<Object?> Function(String method, Map<String, Object?> args) query = NativeBridge.pdfQuery;
+
+  /// Bumped when the one-time "notifications are off" hint should be shown (HomeShell shows it).
+  final ValueNotifier<int> hint = ValueNotifier(0);
+
+  /// Last check, for logs / tests.
+  String lastCheck = '';
+
   bool _attached = false;
   bool _running = false;
   int _lastPercent = -1;
@@ -41,7 +51,11 @@ class PdfNotify {
     _lastCount = -1;
     _lastAt = 0;
     _trail?.cancel();
+    hint.value = 0;
+    lastCheck = '';
   }
+
+  static void _log(String m) => debugPrint('[GranthPdf] $m');
 
   static String text(int count, int percent) => count == 1 ? '1 PDF बन रही है — $percent%' : '$count PDF बन रही हैं — $percent%';
 
@@ -54,13 +68,14 @@ class PdfNotify {
         _running = false;
         _lastPercent = -1;
         _lastCount = -1;
+        _log('all PDFs ended → stop service');
         call('pdfStop', const {});
       }
       return;
     }
     if (!_running) {
       _running = true;
-      _askOnce();
+      unawaited(ensurePermission());
     }
     final pct = q.overallPercent;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -74,6 +89,7 @@ class PdfNotify {
       return;
     }
     _lastAt = now;
+    if (count != _lastCount) _log('$count PDF active → progress notification');
     _lastCount = count;
     _lastPercent = pct;
     final first = q.jobs.where((j) => j.active).firstOrNull;
@@ -85,15 +101,48 @@ class PdfNotify {
     });
   }
 
-  /// Android 13+: ask for the notification permission the first time a PDF starts. PDFs are
-  /// made the same way if it is refused.
-  void _askOnce() {
+  /// The first time a PDF starts: make sure its notifications can be seen.
+  /// Android 13+: the real permission dialog (once). If notifications are still off (refused,
+  /// or switched off by the phone — Vivo-style phones ship new apps with them off), a themed
+  /// hint with a button to the app's notification settings is shown, once. PDFs are made the
+  /// same way either way.
+  Future<void> ensurePermission() async {
     try {
-      if (Store.I.getString(Store.kNotifAsked) == '1') return;
-      Store.I.setString(Store.kNotifAsked, '1');
-    } catch (_) {}
-    call('askNotifications', const {});
+      final st = await query('notifState', const {});
+      if (st is! Map) {
+        lastCheck = 'no-native';
+        return;
+      }
+      final sdk = st['sdk'] is int ? st['sdk'] as int : 0;
+      var enabled = st['enabled'] == true;
+      _log('notifState sdk=$sdk granted=${st['granted']} enabled=$enabled');
+      if (enabled) {
+        lastCheck = 'enabled';
+        return;
+      }
+      if (sdk >= 33 && st['granted'] != true && Store.I.getString(Store.kNotifAsked) != '1') {
+        Store.I.setString(Store.kNotifAsked, '1');
+        _log('asking POST_NOTIFICATIONS');
+        enabled = await query('askNotifications', const {}) == true;
+        _log('permission answer: $enabled');
+        if (enabled) {
+          lastCheck = 'granted';
+          return;
+        }
+      }
+      if (Store.I.getString(Store.kNotifHint) == '1') {
+        lastCheck = 'off-hint-already-shown';
+        return;
+      }
+      Store.I.setString(Store.kNotifHint, '1');
+      lastCheck = 'off-hint';
+      hint.value++;
+    } catch (e) {
+      _log('permission check failed: $e');
+    }
   }
+
+  Future<void> openSettings() => query('openNotificationSettings', const {});
 
   /// "PDF तैयार" notification; [uri] is the Downloads copy (opens the PDF when tapped).
   void done(PdfJob job, String? uri) => call('pdfDone', {'id': job.id.hashCode & 0x7fffffff, 'name': job.fileName, 'uri': uri});
