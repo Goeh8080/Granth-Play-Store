@@ -237,7 +237,12 @@ void main() {
 
     test('a huge JPEG goes into the PDF as it is: original size, never decoded (round 6)', () {
       // JPEG header claiming 6000×6000 (36 MP).
-      final jpg = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xC0, 0, 17, 8, 0x17, 0x70, 0x17, 0x70, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, ...List.filled(40, 0), 0xFF, 0xD9]);
+      final jpg = Uint8List.fromList([
+        0xFF, 0xD8, 0xFF, 0xC0, 0, 17, 8, 0x17, 0x70, 0x17, 0x70, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, //
+        0xFF, 0xC4, 0, 4, 0, 0, // Huffman table segment (contents not read)
+        0xFF, 0xDA, 0, 12, 3, 1, 0, 2, 0x11, 3, 0x11, 0, 0x3F, 0, // start of scan
+        ...List.filled(40, 0), 0xFF, 0xD9,
+      ]);
       final p = prepareImageSync(jpg)!;
       expect(identical(p.bytes, jpg), isTrue, reason: 'no re-encoding');
       expect((p.w, p.h), (6000, 6000));

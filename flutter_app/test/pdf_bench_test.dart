@@ -26,11 +26,14 @@ void main() {
       for (final id in ids) {
         final g = granths.firstWhere((e) => e.id == id);
         final proofs = orderPramans(pramans.where((p) => p.granthId == id).toList(), g.title);
-        final specs = [...PdfQueue.granthSpecs(g), ...proofs.map(PdfQueue.pramanSpec)];
-        for (final s in specs) {
-          final f = File('${dir.path}/img/${(s.path ?? '').replaceAll('/', '_')}');
-          if (f.existsSync()) s.file = f.path;
-        }
+        final specs = [
+          for (final s in [...PdfQueue.granthSpecs(g), ...proofs.map(PdfQueue.pramanSpec)])
+            if (File('${dir.path}/img/${(s.path ?? '').replaceAll('/', '_')}').existsSync())
+              s..file = '${dir.path}/img/${(s.path ?? '').replaceAll('/', '_')}'
+            else
+              // not in the bench set: a text-only page (a real job would download it first)
+              PdfSpec(title: s.title, subtitle: s.subtitle, body: s.body, meta: s.meta, cover: s.cover, topicCover: s.topicCover),
+        ];
         final out = '${dir.path}/out-$id-${style.name}.pdf';
         final sw = Stopwatch()..start();
         final size = await tester.runAsync(() => BookPdfBuilder().buildToFile(specs, style, out));

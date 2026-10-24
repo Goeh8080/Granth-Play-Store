@@ -93,7 +93,10 @@ Catalog parseCatalog(List<Object?> a) {
 
 /// `catalog.json` → the catalog and its compare key (off the UI thread for big files).
 Catalog? loadCatalogText(String text) {
-  final c = Catalog.fromJson(jsonDecode(text));
+  // Any saved file is read: with or without a BOM, and extra / missing fields (a file from
+  // another app version) are fine.
+  final t = text.startsWith('\uFEFF') ? text.substring(1) : text;
+  final c = Catalog.fromJson(jsonDecode(t));
   if (c == null) return null;
   return Catalog(topics: c.topics, granths: c.granths, pramans: c.pramans, syncedAt: c.syncedAt, contentKey: catalogContentKey(c));
 }

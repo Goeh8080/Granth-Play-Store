@@ -16,12 +16,19 @@ import 'image_cache.dart';
 import 'native_bridge.dart';
 import 'order.dart';
 import 'pdf_builder.dart';
+import 'pdf_notify.dart';
 import 'storage.dart';
 
 enum PdfPhase { waiting, images, pages, save, done, cancelled, error }
 
 /// Clear Hindi message shown on a failed PDF row (with a "फिर कोशिश करें" button).
 const kPdfFailed = 'PDF नहीं बन पाई। इंटरनेट और फ़ोन की जगह जाँचकर “फिर कोशिश करें” दबाएँ।';
+
+/// Round 7: some page pictures could not be downloaded (after real retries) — the PDF is not
+/// made with blank pages; it waits for the internet and retries by itself.
+const kPdfPagesMissing = 'कुछ पेज डाउनलोड नहीं हुए — इंटरनेट जोड़कर दोबारा करें';
+
+String pdfPagesMissingMessage(int count) => count <= 0 ? kPdfPagesMissing : '$kPdfPagesMissing ($count पेज बाकी)';
 
 /// Shown when the phone has too little free space for the PDF (no automatic retry).
 String pdfNoSpaceMessage(int? freeBytes) {
@@ -83,6 +90,9 @@ class PdfJob {
   Uint8List? preview;
   String? error;
   int missingImages = 0;
+
+  /// Failed because pages could not be downloaded: retried by itself when the internet is back.
+  bool waitsForNet = false;
   bool cancelled = false;
   int attempts = 0;
   PdfRun? run;
@@ -112,6 +122,10 @@ class PdfQueue extends ChangeNotifier {
     freeBytes = NativeBridge.freeBytes;
     retryDelay = const Duration(milliseconds: 800);
     finished.value = null;
+    _netTimer?.cancel();
+    _netTimer = null;
+    _wasOnline = true;
+    fetchBackoff = const [Duration(milliseconds: 500), Duration(seconds: 1), Duration(seconds: 2), Duration(seconds: 4), Duration(seconds: 6)];
   }
 
   /// PDFs built at the same time: 3 on ordinary phones, 1–2 on low-RAM phones.
@@ -204,6 +218,7 @@ class PdfQueue extends ChangeNotifier {
     j
       ..cancelled = false
       ..error = null
+      ..waitsForNet = false
       ..attempts = 0
       ..phase = PdfPhase.waiting
       ..percent = 0
@@ -330,6 +345,14 @@ class PdfQueue extends ChangeNotifier {
           _fail(job, pdfNoSpaceMessage(free));
           return;
         }
+        if (e is PdfPageFailed) {
+          // Pages that could not be fetched even after retries: never a PDF with blank pages.
+          job.waitsForNet = true;
+          _fail(job, pdfPagesMissingMessage(e.pages.length));
+          PdfNotify.I.failed(job);
+          _watchNet();
+          return;
+        }
         if (e is PdfRenderStalled && stalls < 3) {
           // Drawing stopped while the app was in the background: continue when it is back.
           stalls++;
@@ -372,6 +395,50 @@ class PdfQueue extends ChangeNotifier {
 
   @visibleForTesting
   Duration retryDelay = const Duration(milliseconds: 800);
+
+  // ---------- auto-retry when the internet is back ----------
+
+  Timer? _netTimer;
+  bool _wasOnline = true;
+
+  /// While a PDF waits for missing pages: check every few seconds; when the phone is online
+  /// again (it came back, or it never really was offline) the PDF is made again by itself.
+  void _watchNet() {
+    _wasOnline = CatalogStore.I.online;
+    CatalogStore.onReconnect = networkBack;
+    _netTimer ??= Timer.periodic(netCheckEvery, (_) => _netTick());
+  }
+
+  @visibleForTesting
+  Duration netCheckEvery = const Duration(seconds: 5);
+
+  /// Online but still waiting: tried again this often (pages may have been a server hiccup).
+  @visibleForTesting
+  Duration onlineRetryEvery = const Duration(seconds: 60);
+
+  void _netTick() {
+    final waiting = jobs.where((j) => j.waitsForNet && j.phase == PdfPhase.error).toList();
+    if (waiting.isEmpty) {
+      _netTimer?.cancel();
+      _netTimer = null;
+      return;
+    }
+    final online = CatalogStore.I.online;
+    final back = online && !_wasOnline;
+    _wasOnline = online;
+    if (!online) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final j in waiting) {
+      if (back || now - (j.finishedAt ?? 0) >= onlineRetryEvery.inMilliseconds) retry(j.id);
+    }
+  }
+
+  /// Called by the catalog when the connection comes back (instant retry, no wait for the tick).
+  void networkBack() {
+    if (_netTimer == null) return;
+    _wasOnline = false;
+    _netTick();
+  }
 
   /// Resolves when the app is in the foreground (or after 10 minutes at most).
   static Future<void> waitForeground() async {
@@ -432,31 +499,42 @@ class PdfQueue extends ChangeNotifier {
 
   static PdfStyle currentStyle() => pdfStyleFrom(Store.I.getString(Store.kPdfStyle));
 
-  /// Fetches one page picture: cached file, otherwise download with a timeout and
-  /// up to 3 attempts. Returns null instead of failing the PDF.
-  static Future<String?> fetchImage(String path, {int attempts = 3, Duration timeout = const Duration(seconds: 45)}) async {
-    for (var i = 0; i < attempts; i++) {
+  /// Waits between download attempts of one page (about 13 s in all before giving up).
+  @visibleForTesting
+  static List<Duration> fetchBackoff = const [Duration(milliseconds: 500), Duration(seconds: 1), Duration(seconds: 2), Duration(seconds: 4), Duration(seconds: 6)];
+
+  /// Fetches one page picture with priority over the background download: the saved file
+  /// when it is whole, otherwise a fresh download (retries with backoff). null = not possible now.
+  static Future<String?> fetchImage(String path, {int? attempts, Duration timeout = const Duration(seconds: 45), bool fresh = false}) async {
+    final n = attempts ?? fetchBackoff.length + 1;
+    if (fresh) await ImageStore.I.drop(path);
+    for (var i = 0; i < n; i++) {
       try {
-        final f = await ImageStore.I.get(path).timeout(timeout);
-        if (f != null) return f.path;
+        final f = await ImageStore.I.get(path, priority: true).timeout(timeout);
+        if (f != null) {
+          if (await ImageStore.fileLooksGood(f)) return f.path;
+          await ImageStore.I.drop(path); // cut off / damaged on the phone → download again
+        }
       } catch (_) {}
-      if (i < attempts - 1) await Future<void>.delayed(Duration(milliseconds: 600 * (i + 1)));
+      if (i < n - 1) await Future<void>.delayed(fetchBackoff[math.min(i, fetchBackoff.length - 1)]);
     }
     return null;
   }
 
-  /// `jh` — make sure page images are on the device (8 at a time) then assemble.
-  /// A picture that cannot be fetched becomes a placeholder; it never fails the PDF.
+  /// `jh` — make sure every page picture is on the device and whole (8 at a time, priority
+  /// downloads), then assemble. Round 7: a page that cannot be fetched fails the PDF with a
+  /// clear message (auto-retried when online) — the PDF never gets blank pages.
   static Future<String> _assemble(List<PdfSpec> specs, PdfStyle style, PdfJob job, void Function(PdfPhase, int, int) report) async {
     final a = math.max(1, specs.length);
     report(PdfPhase.images, 0, a);
     var loaded = 0;
     var next = 0;
-    var missing = 0;
+    final failed = <int>[];
     Future<void> worker() async {
       while (next < specs.length) {
         if (job.cancelled) return;
-        final s = specs[next++];
+        final k = next++;
+        final s = specs[k];
         s.missing = false;
         final p = mediaPath(s.path);
         if (p != null && s.image == null) {
@@ -465,7 +543,7 @@ class PdfQueue extends ChangeNotifier {
             s.file = f;
           } else {
             s.missing = true;
-            missing++;
+            failed.add(k + 1);
           }
         }
         loaded++;
@@ -476,13 +554,19 @@ class PdfQueue extends ChangeNotifier {
     final p = DeviceProfile.I;
     await Future.wait(List.generate(math.min(p.imageWorkers, specs.length), (_) => worker()));
     if (job.cancelled) throw PdfCancelled();
-    job.missingImages = missing;
+    job.missingImages = failed.length;
+    if (failed.isNotEmpty) throw PdfPageFailed(failed..sort(), offline: !CatalogStore.I.online);
     final builder = BookPdfBuilder(
       lookAhead: p.pdfLookAhead,
       maxHeldBytes: p.pdfHeldBytes,
       isCancelled: () => job.cancelled,
       onPage: (d, t) => report(PdfPhase.pages, d, t),
       onPreview: (b) => job.preview = b,
+      // A saved picture that fails the decode check: download it again once, then check again.
+      repair: (spec) async {
+        final m = mediaPath(spec.path);
+        return m == null ? null : fetchImage(m, fresh: true, attempts: 3);
+      },
     );
     final out = workPath(job);
     await builder.buildToFile(specs, style, out);

@@ -63,6 +63,19 @@ debug key. No signing keys are kept in this repository. Add your own `key.proper
 GitHub Actions (`.github/workflows/android-apk.yml`) builds the APK on every push and uploads it as the
 `granth-flutter-apk` (universal) and `granth-flutter-apk-arm64` artifacts.
 
+## Release signing
+
+Put `android/key.properties` (gitignored) next to `android/build.gradle.kts`:
+
+```
+storePassword=…
+keyPassword=…
+keyAlias=…
+storeFile=/path/to/keystore
+```
+
+`flutter build apk --release` / `flutter build appbundle --release` then sign with it. Without the file the release build uses the debug key (CI).
+
 ## Known gaps
 
 - The admin/editor screens of the web bundle (`granth-admin` IndexedDB drafts) are not ported. They were empty in the APK build.

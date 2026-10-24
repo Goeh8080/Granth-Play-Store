@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 
 import '../highlighter/highlighter_screen.dart';
@@ -11,7 +11,7 @@ import '../services/file_actions.dart';
 import '../services/native_bridge.dart';
 import '../services/pdf_notify.dart';
 import '../services/pdf_queue.dart';
-import '../services/storage.dart';
+import '../state/places.dart';
 import '../state/router.dart';
 import '../state/toast.dart';
 import '../state/ui_prefs.dart';
@@ -73,40 +73,41 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
   }
 
   // ---------- scroll places (`xh`) ----------
-  String? _placeKey(GRoute r) => switch (r.panel) {
-        Panel.topics => 'topic-list-place',
-        Panel.granths => 'granth-list-place',
-        Panel.pramans when r.pramanId == null => 'praman-list:${r.granthId ?? ''}:${r.topicId ?? ''}',
-        _ => null,
-      };
-
   void _savePlace() {
-    final k = _placeKey(nav.route);
+    final k = Places.keyFor(nav.route);
     if (k == null || !_scroll.hasClients) return;
-    Store.I.setString(k, jsonEncode({'y': _scroll.offset, 'count': 8, 'id': '', 'anchor': 0}));
+    Places.save(k, _scroll.offset);
   }
 
+  int _restoreRun = 0;
+
+  /// Puts the list back where it was left. The list is rebuilt from the top, so it is only
+  /// as tall as what has been laid out so far: keep setting the position every frame until
+  /// it holds (content settled), the person touches the list, or ~2 s have passed.
   void _restorePlace() {
-    final k = _placeKey(nav.route);
-    double y = 0;
-    if (k != null) {
-      try {
-        final raw = Store.I.getString(k);
-        final j = raw == null ? null : jsonDecode(raw);
-        if (j is Map && j['y'] is num) y = (j['y'] as num).toDouble();
-      } catch (_) {}
-    }
-    void jump() {
-      if (!mounted || !_scroll.hasClients) return;
-      _scroll.jumpTo(math.min(y, _scroll.position.maxScrollExtent));
+    final k = Places.keyFor(nav.route);
+    final y = k == null ? 0.0 : Places.y(k);
+    final run = ++_restoreRun;
+    var frames = 0;
+    var held = 0;
+    void step() {
+      if (!mounted || run != _restoreRun || !_scroll.hasClients) return;
+      final p = _scroll.position;
+      if (p.userScrollDirection != ScrollDirection.idle) return; // the person took over
+      final to = math.min(y, p.maxScrollExtent);
+      if ((p.pixels - to).abs() > 0.5) {
+        _scroll.jumpTo(to);
+        held = 0;
+      } else if ((y - to).abs() <= 0.5) {
+        held++; // exactly there; wait a few frames for late layout changes
+      }
+      frames++;
+      if (y <= 0 || held >= 4 || frames >= 120) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) => step());
+      WidgetsBinding.instance.scheduleFrame();
     }
 
-    jump();
-    if (y > 0) {
-      for (final ms in [40, 160, 400]) {
-        Timer(Duration(milliseconds: ms), jump);
-      }
-    }
+    step();
   }
 
   void _onNav() {

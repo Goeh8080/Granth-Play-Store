@@ -39,10 +39,22 @@ void main() {
     final bytes = await tester.runAsync(() => BookPdfBuilder().build([
           PdfSpec(title: 'गीता ज्ञान — श्रद्धा और क्षमा', subtitle: 'विषय', body: kConjuncts, meta: '3 प्रमाण', topicCover: true),
           PdfSpec(title: 'अध्याय 15 श्लोक 4', subtitle: 'मृत्यु के बाद क्या', body: kConjuncts, meta: 'श्रीमद्भगवद्गीता · वेद व्यास')..image = jpg,
-          PdfSpec(title: 'टूटा चित्र', body: 'चित्र नहीं मिला तब भी पेज बनता है — ${kConjuncts.substring(0, 40)}', meta: 'कबीर सागर')..image = Uint8List.fromList(List.filled(200, 7)),
         ], PdfStyle.fill90));
     expect(String.fromCharCodes(bytes!.sublist(0, 4)), '%PDF');
     Directory('build').createSync(recursive: true);
     File('build/pdf_sample.pdf').writeAsBytesSync(bytes);
+
+    // Round 7: a page whose picture is broken is never drawn blank — the PDF fails instead.
+    Object? err;
+    await tester.runAsync(() async {
+      try {
+        await BookPdfBuilder().build([
+          PdfSpec(title: 'टूटा चित्र', body: kConjuncts.substring(0, 40), meta: 'कबीर सागर')..image = Uint8List.fromList(List.filled(200, 7)),
+        ], PdfStyle.fill90);
+      } catch (e) {
+        err = e;
+      }
+    });
+    expect(err, isA<PdfPageFailed>());
   });
 }

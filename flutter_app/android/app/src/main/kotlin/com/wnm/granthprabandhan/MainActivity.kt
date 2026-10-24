@@ -136,6 +136,10 @@ class MainActivity : FlutterActivity() {
                     PdfService.stop(applicationContext)
                     result.success(null)
                 }
+                "pdfFailed" -> {
+                    PdfService.failedNote(applicationContext, call.argument<Int>("id") ?: 0, call.argument<String>("name") ?: "PDF", call.argument<String>("text") ?: "")
+                    result.success(null)
+                }
                 "pdfDone" -> {
                     PdfService.done(applicationContext, call.argument<Int>("id") ?: 0, call.argument<String>("name") ?: "PDF", call.argument<String>("uri"))
                     result.success(null)
@@ -284,6 +288,27 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** EXIF rotation / mirroring of a JPEG, as a matrix (null = upright). */
+    private fun exifMatrix(src: File): android.graphics.Matrix? {
+        val o = try {
+            android.media.ExifInterface(src.absolutePath).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)
+        } catch (e: Throwable) {
+            1
+        }
+        val m = android.graphics.Matrix()
+        when (o) {
+            2 -> m.setScale(-1f, 1f)
+            3 -> m.setRotate(180f)
+            4 -> m.setScale(1f, -1f)
+            5 -> { m.setRotate(90f); m.postScale(-1f, 1f) }
+            6 -> m.setRotate(90f)
+            7 -> { m.setRotate(-90f); m.postScale(-1f, 1f) }
+            8 -> m.setRotate(-90f)
+            else -> return null
+        }
+        return m
+    }
+
     private fun scaleToJpeg(src: File, out: File, maxSide: Int, quality: Int): Map<String, Int> {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(src.absolutePath, bounds)
@@ -306,6 +331,12 @@ class MainActivity : FlutterActivity() {
             }
         }
         var b: Bitmap = bmp
+        // Upright, as the app shows it (BitmapFactory ignores EXIF orientation).
+        exifMatrix(src)?.let { m ->
+            val r = Bitmap.createBitmap(b, 0, 0, b.width, b.height, m, true)
+            if (r != b) b.recycle()
+            b = r
+        }
         val side = maxOf(b.width, b.height)
         if (side > maxSide) {
             val k = maxSide.toFloat() / side

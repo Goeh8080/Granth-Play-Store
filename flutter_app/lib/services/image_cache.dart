@@ -6,6 +6,7 @@ import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 
 import 'api.dart';
+import 'pdf_stream.dart' show jpegComplete;
 import 'storage.dart';
 
 /// Offline image store (IndexedDB `images` store in the web app).
@@ -20,13 +21,50 @@ class ImageStore {
 
   // One keep-alive connection pool for the whole download (8 at a time to one host): no
   // new TLS handshake per page.
-  final Dio _dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 20), receiveTimeout: const Duration(seconds: 90)))
-    ..httpClientAdapter = IOHttpClientAdapter(
-      createHttpClient: () => HttpClient()
-        ..maxConnectionsPerHost = 8
-        ..idleTimeout = const Duration(seconds: 30),
-    );
+  final Dio _dio = _client();
+
+  // Round 7: pictures someone is waiting for (a PDF being made, a page on screen) use their
+  // own connections, so they never queue behind the background download of the library.
+  final Dio _fast = _client();
+
+  static Dio _client() => Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 20),
+        // Time without any data arriving (not the whole download): a slow but moving
+        // download of a big page is never cut off; a dead connection fails in 30 s.
+        receiveTimeout: const Duration(seconds: 30),
+      ))
+        ..httpClientAdapter = IOHttpClientAdapter(
+          createHttpClient: () => HttpClient()
+            ..maxConnectionsPerHost = 8
+            ..idleTimeout = const Duration(seconds: 30),
+        );
+
   final Map<String, Future<File?>> _inflight = {};
+
+  /// Priority fetches running now; the background download waits while any run.
+  int _priority = 0;
+  Completer<void>? _idle;
+
+  @visibleForTesting
+  int get priorityActive => _priority;
+
+  void _enterPriority() => _priority++;
+  void _leavePriority() {
+    _priority--;
+    if (_priority <= 0) {
+      _priority = 0;
+      _idle?.complete();
+      _idle = null;
+    }
+  }
+
+  /// The background download calls this before each picture: it waits while a PDF or the
+  /// screen needs pictures (at most [max], so a stuck foreground job never stops it).
+  Future<void> backgroundTurn({Duration max = const Duration(seconds: 20)}) async {
+    if (_priority == 0) return;
+    _idle ??= Completer<void>();
+    await _idle!.future.timeout(max, onTimeout: () {});
+  }
 
   File fileFor(String path) => File('${Store.I.imagesDir}/${keyFor(path)}');
 
@@ -151,23 +189,37 @@ class ImageStore {
   }
 
   /// `sn()` / `Oh()`: cached file, otherwise download once and keep.
-  Future<File?> get(String path) {
+  /// [priority]: someone is waiting for this picture (PDF, screen) — own connections, and
+  /// the background download pauses meanwhile.
+  Future<File?> get(String path, {bool priority = false}) {
     final hit = cachedSync(path);
     if (hit != null) return Future.value(hit);
-    // The cleanup must not hand back the removed entry: whenComplete waits for a
-    // returned Future, and that entry is this very future, so get() would never finish.
-    return _inflight.putIfAbsent(path, () => _download(path).whenComplete(() {
-          _inflight.remove(path);
-        }));
+    if (priority) {
+      _enterPriority();
+      // A background download of the same picture already running: wait for it (it is
+      // already on the wire); otherwise fetch on the priority connections.
+      final f = _inflight[path] ?? _start(path, _fast);
+      return f.whenComplete(_leavePriority);
+    }
+    return _start(path, _dio);
   }
 
-  Future<File?> _download(String path) async {
+  // The cleanup must not hand back the removed entry: whenComplete waits for a
+  // returned Future, and that entry is this very future, so get() would never finish.
+  Future<File?> _start(String path, Dio via) => _inflight.putIfAbsent(path, () => _download(path, via).whenComplete(() {
+        _inflight.remove(path);
+      }));
+
+  Future<File?> _download(String path, Dio via) async {
     try {
-      final r = await _dio.get<List<int>>(urlFor(path), options: Options(responseType: ResponseType.bytes));
+      final r = await via.get<List<int>>(urlFor(path), options: Options(responseType: ResponseType.bytes));
       final type = r.headers.value('content-type') ?? '';
-      final bytes = r.data;
-      if (bytes == null || bytes.length < 32) return null;
-      if (type.isNotEmpty && !type.startsWith('image/') && !_looksLikeImage(bytes)) return null;
+      final raw = r.data;
+      if (raw == null || raw.length < 32) return null;
+      if (type.isNotEmpty && !type.startsWith('image/') && !_looksLikeImage(raw)) return null;
+      final bytes = raw is Uint8List ? raw : Uint8List.fromList(raw);
+      // Round 7: a cut-off or damaged download is never saved (it would become a broken page).
+      if (!bytesLookComplete(bytes)) return null;
       final f = fileFor(path);
       final part = File('${f.path}.part');
       await part.writeAsBytes(bytes, flush: true);
@@ -217,6 +269,35 @@ class ImageStore {
   Future<Uint8List?> bytes(String path) async {
     final f = await get(path);
     return f?.readAsBytes();
+  }
+
+  /// Whole-file check of a downloaded / saved picture: JPEG marker structure through to its
+  /// end marker, PNG chunks through IEND, WEBP/GIF size and trailer. False = cut off or damaged.
+  static bool bytesLookComplete(Uint8List b) {
+    if (b.length < 32) return false;
+    if (b[0] == 0xFF && b[1] == 0xD8) return jpegComplete(b);
+    if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) return _pngComplete(b);
+    if (b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46) {
+      final size = b[4] | (b[5] << 8) | (b[6] << 16) | (b[7] << 24);
+      return b.length >= size + 8;
+    }
+    if (b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) return b.last == 0x3B;
+    // Another format (HEIC, AVIF, BMP…): no cheap check here — the decoders decide.
+    return true;
+  }
+
+  static bool _pngComplete(Uint8List b) {
+    var i = 8;
+    var idat = false;
+    while (i + 12 <= b.length) {
+      final len = (b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3];
+      final type = String.fromCharCodes(b.sublist(i + 4, i + 8));
+      if (len < 0 || i + 12 + len > b.length) return false;
+      if (type == 'IDAT') idat = true;
+      if (type == 'IEND') return idat;
+      i += 12 + len;
+    }
+    return false;
   }
 
   static bool _looksLikeImage(List<int> b) =>

@@ -191,6 +191,30 @@ class PdfService : Service() {
                 Log.w(TAG, "done notify: $e")
             }
         }
+
+        /**
+         * Round 7: a PDF could not be finished (pages not downloadable, e.g. no internet). Same id
+         * as its "PDF तैयार" note, so a later successful retry replaces it. Tap opens the app.
+         */
+        fun failedNote(ctx: Context, id: Int, name: String, text: String) {
+            val app = ctx.applicationContext
+            try {
+                ensureChannels(app)
+                val n = builder(app, CH_DONE)
+                    .setSmallIcon(R.drawable.ic_stat_pdf)
+                    .setContentTitle("PDF नहीं बनी — $name")
+                    .setCategory(Notification.CATEGORY_ERROR)
+                    .setContentText(text)
+                    .setStyle(Notification.BigTextStyle().bigText(text))
+                    .setAutoCancel(true)
+                    .setContentIntent(openApp(app))
+                    .build()
+                val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.notify(PdfNotes.doneId(id), n)
+            } catch (e: Exception) {
+                Log.w(TAG, "failed notify: $e")
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

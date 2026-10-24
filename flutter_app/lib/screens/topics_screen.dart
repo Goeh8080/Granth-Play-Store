@@ -8,6 +8,7 @@ import '../services/order.dart';
 import '../services/pdf_queue.dart';
 import '../services/search.dart';
 import '../services/storage.dart';
+import '../state/places.dart';
 import '../state/router.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
@@ -25,7 +26,7 @@ class TopicsPanel extends StatefulWidget {
 }
 
 class _TopicsPanelState extends State<TopicsPanel> with LivePanel {
-  String _q = '';
+  String _q = Places.query('topic-list-place');
   final _log = SearchLogger();
   List<Topic>? _src;
 
@@ -71,7 +72,7 @@ class _TopicsPanelState extends State<TopicsPanel> with LivePanel {
             ),
             tools: Tools(
               grid: GridSwitch(options: const [1, 2], value: cols, onChanged: (v) => UiPrefs.I.setCols(Store.kTopicCols, v)),
-              search: SearchField(placeholder: 'विषय खोजें — mans, गीता, मृत्यु', onChanged: (v) => setState(() => _q = v)),
+              search: SearchField(placeholder: 'विषय खोजें — mans, गीता, मृत्यु', initial: _q, onChanged: (v) { Places.setQuery('topic-list-place', v); setState(() => _q = v); }),
             ),
           ),
         ),

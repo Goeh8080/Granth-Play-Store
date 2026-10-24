@@ -7,6 +7,7 @@ import '../services/file_actions.dart';
 import '../services/order.dart';
 import '../services/search.dart';
 import '../services/storage.dart';
+import '../state/places.dart';
 import '../state/router.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
@@ -27,7 +28,8 @@ class PramansPanel extends StatefulWidget {
 }
 
 class _PramansPanelState extends State<PramansPanel> with LivePanel {
-  String _q = '';
+  late final String _key = Places.keyFor(widget.route) ?? 'praman-list::';
+  late String _q = Places.query(_key);
   final _log = SearchLogger();
   List<Praman>? _src;
   List<Praman>? _filteredSrc;
@@ -83,7 +85,7 @@ class _PramansPanelState extends State<PramansPanel> with LivePanel {
             subtitle: 'शास्त्र प्रमाण',
             tools: Tools(
               grid: GridSwitch(options: const [1, 2], value: cols, onChanged: (v) => UiPrefs.I.setCols(Store.kPramanCols, v)),
-              search: SearchField(placeholder: 'प्रमाण खोजें — mans, मृत्यु', onChanged: (v) => setState(() => _q = v)),
+              search: SearchField(placeholder: 'प्रमाण खोजें — mans, मृत्यु', initial: _q, onChanged: (v) { Places.setQuery(_key, v); setState(() => _q = v); }),
             ),
           ),
         ),

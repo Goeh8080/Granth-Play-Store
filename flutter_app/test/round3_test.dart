@@ -331,11 +331,27 @@ void main() {
       expect(find.byType(PdfDropdown), findsOneWidget);
       // Two separate PDFs of the same granth stay two entries.
       expect(q.jobs.length, 3);
-      expect(find.text('श्रीमद्भगवत गीता code 17'), findsAtLeastNWidgets(2));
+      // Round 7: one card at a time (the running one first), अगला / पिछला move between them.
+      expect(find.byKey(ValueKey('pdf-x-${running.id}')), findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-x-d1')), findsNothing);
+      expect(find.text('1/3'), findsOneWidget);
+      expect(find.text('अगला'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('pdf-next')));
+      await frames(tester, 4);
+      expect(find.text('2/3'), findsOneWidget);
+      expect(find.text('श्रीमद्भगवत गीता code 17'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('pdf-x-d1')));
       await frames(tester, 3);
       expect(q.jobs.map((e) => e.id), isNot(contains('d1')));
+      // The card falls back to a PDF that exists (the running one).
+      expect(find.text('1/2'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('pdf-next')));
+      await frames(tester, 4);
+      expect(find.text('2/2'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('pdf-prev')));
+      await frames(tester, 4);
+      expect(find.text('1/2'), findsOneWidget);
 
       await tester.tap(find.byKey(ValueKey('pdf-x-${running.id}')));
       await frames(tester, 4);

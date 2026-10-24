@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:granthprabandhan/models/models.dart';
 import 'package:granthprabandhan/services/catalog_store.dart';
 import 'package:granthprabandhan/services/storage.dart';
+import 'package:granthprabandhan/services/image_size.dart';
+import 'package:granthprabandhan/state/places.dart';
 import 'package:granthprabandhan/state/router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -29,6 +31,8 @@ Future<void> setUpApp() async {
   final dir = await Directory.systemTemp.createTemp('granth_test');
   await Store.I.initForTest(prefs, dir);
   AppNav.I = AppNav();
+  Places.forgetLive(); // the search text of a list is remembered in memory for the session
+  ImageSizes.I.clear();
   final store = CatalogStore(connectivity: const Stream.empty());
   CatalogStore.I = store;
   store.debugSetCatalog(sampleCatalog());

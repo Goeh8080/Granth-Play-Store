@@ -14,6 +14,30 @@ class GalleryService extends ChangeNotifier {
   List<GalleryItem>? _items;
   List<GalleryFolder>? _folders;
 
+  // Round 7 (version-tolerant kept data): the index is never "cleaned" behind the user's back.
+  // Rows that can't be shown now (the file is not there at the moment, or the row was written by
+  // another app version in a shape this one doesn't know) are kept in the index file as they
+  // are, and fields this version doesn't know are written back too. Only the user removing an
+  // item (or folder) takes it out.
+  final List<Map<String, dynamic>> _hiddenItems = [];
+  final Map<String, Map<String, dynamic>> _rawItems = {};
+  final List<Map<String, dynamic>> _hiddenFolders = [];
+  final Map<String, Map<String, dynamic>> _rawFolders = {};
+
+  /// The file of a row: where it says, else the same name in this install's gallery / PDF
+  /// folders (the app's data folder can have another path after a restore or a move).
+  static String? _resolve(String path) {
+    if (path.isEmpty) return null;
+    if (File(path).existsSync()) return path;
+    final name = path.substring(path.lastIndexOf('/') + 1);
+    if (name.isEmpty || !Store.I.ready) return null;
+    for (final d in [Store.I.galleryDir, Store.I.pdfDir]) {
+      final f = '$d/$name';
+      if (File(f).existsSync()) return f;
+    }
+    return null;
+  }
+
   String _fileKey(String id) => id.replaceAll(RegExp(r'[^A-Za-z0-9_.-]+'), '_');
 
   Future<List<GalleryItem>> items() async {
@@ -21,12 +45,23 @@ class GalleryService extends ChangeNotifier {
       final raw = await Store.I.readJson('gallery.json');
       // Tolerate a damaged or restored index: skip bad rows and rows whose file is gone.
       final out = <GalleryItem>[];
+      _hiddenItems.clear();
+      _rawItems.clear();
       if (raw is List) {
         for (final e in raw.whereType<Map>()) {
+          final m = Map<String, dynamic>.from(e);
           try {
-            final it = GalleryItem.fromJson(Map<String, dynamic>.from(e));
-            if (it.filePath.isNotEmpty && File(it.filePath).existsSync()) out.add(it);
-          } catch (_) {}
+            final it = GalleryItem.fromJson(m);
+            final at = it.id.isEmpty ? null : _resolve(it.filePath);
+            if (at != null) {
+              out.add(at == it.filePath ? it : it.withFile(at));
+              _rawItems[it.id] = m;
+            } else {
+              _hiddenItems.add(m);
+            }
+          } catch (_) {
+            _hiddenItems.add(m);
+          }
         }
       }
       _items = out;
@@ -39,11 +74,22 @@ class GalleryService extends ChangeNotifier {
     if (_folders == null) {
       final raw = await Store.I.readJson('folders.json');
       final out = <GalleryFolder>[];
+      _hiddenFolders.clear();
+      _rawFolders.clear();
       if (raw is List) {
         for (final e in raw.whereType<Map>()) {
+          final m = Map<String, dynamic>.from(e);
           try {
-            out.add(GalleryFolder.fromJson(Map<String, dynamic>.from(e)));
-          } catch (_) {}
+            final f = GalleryFolder.fromJson(m);
+            if (f.id.isEmpty) {
+              _hiddenFolders.add(m);
+            } else {
+              out.add(f);
+              _rawFolders[f.id] = m;
+            }
+          } catch (_) {
+            _hiddenFolders.add(m);
+          }
         }
       }
       _folders = out;
@@ -52,8 +98,16 @@ class GalleryService extends ChangeNotifier {
   }
 
   Future<void> _persist() async {
-    await Store.I.writeJson('gallery.json', _items!.map((e) => e.toJson()).toList());
-    await Store.I.writeJson('folders.json', (_folders ?? []).map((e) => e.toJson()).toList());
+    final shown = {for (final e in _items!) e.id};
+    await Store.I.writeJson('gallery.json', [
+      for (final e in _items!) {...?_rawItems[e.id], ...e.toJson()},
+      ..._hiddenItems.where((m) => !shown.contains('${m['id']}')),
+    ]);
+    final shownF = {for (final e in _folders ?? <GalleryFolder>[]) e.id};
+    await Store.I.writeJson('folders.json', [
+      for (final e in _folders ?? <GalleryFolder>[]) {...?_rawFolders[e.id], ...e.toJson()},
+      ..._hiddenFolders.where((m) => !shownF.contains('${m['id']}')),
+    ]);
     notifyListeners();
   }
 
@@ -197,5 +251,9 @@ class GalleryService extends ChangeNotifier {
   void debugReset() {
     _items = null;
     _folders = null;
+    _hiddenItems.clear();
+    _rawItems.clear();
+    _hiddenFolders.clear();
+    _rawFolders.clear();
   }
 }

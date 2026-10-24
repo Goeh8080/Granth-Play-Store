@@ -7,6 +7,8 @@ import 'package:flutter/painting.dart';
 import 'package:image/image.dart' as img;
 
 import '../theme/colors.dart';
+import 'api.dart' show mediaPath;
+import 'image_cache.dart';
 import 'native_bridge.dart';
 import 'pdf_stream.dart';
 
@@ -45,21 +47,23 @@ class PdfSpec {
   Uint8List? image;
   String? file;
 
-  /// The page should have had a picture but it could not be loaded or decoded:
-  /// the page is still produced, with a "चित्र उपलब्ध नहीं" placeholder.
+  /// The page should have had a picture but it could not be loaded or decoded. Round 7:
+  /// such a page is never drawn (no placeholder); the PDF fails with a clear message.
   bool missing = false;
 
-  bool get wantsPicture => image != null || file != null || missing;
+  /// This page shows a picture (it has a media path, or bytes / a file were given).
+  bool get wantsPicture => image != null || file != null || missing || mediaPath(path) != null;
 }
 
 class PreparedImage {
-  PreparedImage(this.bytes, this.w, this.h) : png = null, rgba = false;
+  /// [w]/[h] are the picture as shown (after [orientation]); the JPEG itself is untouched.
+  PreparedImage(this.bytes, this.w, this.h, {this.orientation = 1}) : png = null, rgba = false;
 
   /// A PNG's own compressed pixel data, embedded losslessly as it is.
-  PreparedImage.png(this.bytes, this.w, this.h, PngLayout this.png) : rgba = false;
+  PreparedImage.png(this.bytes, this.w, this.h, PngLayout this.png) : rgba = false, orientation = 1;
 
   /// Decoded pixels (RGBA, flattened on white), stored losslessly.
-  PreparedImage.rgba(this.bytes, this.w, this.h) : png = null, rgba = true;
+  PreparedImage.rgba(this.bytes, this.w, this.h) : png = null, rgba = true, orientation = 1;
 
   /// JPEG bytes, unless [png] / [rgba] says otherwise.
   final Uint8List bytes;
@@ -67,14 +71,28 @@ class PreparedImage {
   final int h;
   final PngLayout? png;
   final bool rgba;
+  final int orientation;
 
-  PdfPicture get picture => rgba ? PdfPicture.rgba(bytes, w, h) : (png != null ? PdfPicture.png(bytes, w, h, png!) : PdfPicture.jpeg(bytes, w, h));
+  PdfPicture get picture => rgba ? PdfPicture.rgba(bytes, w, h) : (png != null ? PdfPicture.png(bytes, w, h, png!) : PdfPicture.jpeg(bytes, w, h, orientation: orientation));
 }
 
 const double _a4w = 595.28;
 const double _a4h = 841.89;
 
 class PdfCancelled implements Exception {}
+
+/// Round 7: a page's picture could not be put into the PDF (not on the phone and not
+/// downloadable, or damaged beyond repair). The PDF is NOT finished with a blank page —
+/// the job fails with a clear message and can be retried.
+class PdfPageFailed implements Exception {
+  PdfPageFailed(this.pages, {this.offline = false});
+
+  /// Page numbers (1-based, in the PDF's page list) that are missing.
+  final List<int> pages;
+  final bool offline;
+  @override
+  String toString() => 'PdfPageFailed(${pages.length} pages${offline ? ', offline' : ''})';
+}
 
 /// Drawing a page did not finish in time (for example the phone stopped the GPU while
 /// the app was in the background). The job is retried as a whole once the app is back.
@@ -139,19 +157,30 @@ const kConvertQuality = 95;
 const kDartDecodeMaxPixels = 24000000;
 
 /// True when a JPEG can go into the PDF unchanged: baseline / extended / progressive,
-/// 8-bit, grey / RGB / CMYK.
-bool jpegPassthrough(Uint8List bytes) {
+/// 8-bit, grey / RGB, whole (every segment through the end marker), with its own Huffman
+/// tables. CMYK / YCCK (Adobe inverts the ink values — readers disagree), 12-bit,
+/// arithmetic-coded or cut-off files are converted (or re-fetched) instead.
+bool jpegPassthrough(Uint8List bytes) => _jpegPass(bytes) != null;
+
+/// One header read + one structure scan (the whole-file check) for a JPEG that can be
+/// embedded as it is; null when it must be converted (or is damaged).
+PreparedImage? _jpegPass(Uint8List bytes) {
   final i = jpegInfo(bytes);
-  return i != null && i.w > 0 && i.h > 0 && (i.sof == 0xC0 || i.sof == 0xC1 || i.sof == 0xC2) && i.precision == 8 && (i.components == 1 || i.components == 3 || i.components == 4);
+  if (i == null || i.w <= 0 || i.h <= 0 || !(i.sof == 0xC0 || i.sof == 0xC1 || i.sof == 0xC2) || i.precision != 8 || !(i.components == 1 || i.components == 3)) return null;
+  final scan = jpegScan(bytes);
+  if (scan == null || !scan.complete || !scan.hasHuffman) return null;
+  final o = scan.orientation;
+  final turned = o >= 5;
+  return PreparedImage(bytes, turned ? i.h : i.w, turned ? i.w : i.h, orientation: o);
 }
 
-/// The picture as it can be embedded without any decoding, or null.
+/// The picture as it can be embedded without any decoding, or null. A JPEG with an EXIF
+/// rotation is still embedded untouched; it is turned upright by its placement on the page
+/// (the app shows it upright too).
 PreparedImage? passthrough(Uint8List bytes) {
   if (bytes.length < 32) return null;
-  if (jpegPassthrough(bytes)) {
-    final i = jpegInfo(bytes)!;
-    return PreparedImage(bytes, i.w, i.h);
-  }
+  final j = _jpegPass(bytes);
+  if (j != null) return j;
   final p = pngPassthrough(bytes);
   if (p != null) return PreparedImage.png(p.idat, p.w, p.h, p.layout);
   return null;
@@ -163,6 +192,8 @@ PreparedImage? prepareImageSync(Uint8List bytes, [int maxBytes = kPassBytes]) {
   if (bytes.length < 32) return null;
   final pass = passthrough(bytes);
   if (pass != null) return pass;
+  // A cut-off / damaged file must never be decoded into a half-grey page: null → re-fetch.
+  if (!ImageStore.bytesLookComplete(bytes)) return null;
   final head = imageHeader(bytes);
   // A huge picture would need hundreds of MB to decode in Dart: skip it here (it becomes
   // a placeholder); on Android the native path converts it.
@@ -170,6 +201,7 @@ PreparedImage? prepareImageSync(Uint8List bytes, [int maxBytes = kPassBytes]) {
   try {
     var src = img.decodeImage(bytes);
     if (src == null || src.width * src.height > kDartDecodeMaxPixels) return null;
+    src = img.bakeOrientation(src); // upright, as the app shows it
     final png = head?.kind == 'png';
     if (src.hasAlpha) {
       final bg = img.Image(width: src.width, height: src.height);
@@ -195,6 +227,7 @@ PreparedImage? prepareImageSync(Uint8List bytes, [int maxBytes = kPassBytes]) {
 Future<PreparedImage?> _prepareNative(File f, Uint8List raw, int maxBytes) async {
   if (!NativeBridge.nativeImages) return null;
   if (passthrough(raw) != null) return null; // embedded as-is
+  if (!ImageStore.bytesLookComplete(raw)) return null; // damaged: re-fetched instead
   final head = imageHeader(raw);
   // Transparent PNGs of normal size: the lossless Dart path (keeps text scans sharp).
   if (head?.kind == 'png' && head!.w * head.h <= 12000000) return null;
@@ -215,6 +248,57 @@ Future<PreparedImage?> _prepareNative(File f, Uint8List raw, int maxBytes) async
 
 PreparedImage? _prepareEntry((Uint8List, int) a) => prepareImageSync(a.$1, a.$2);
 
+/// Last resort: Flutter's own image decoder (the one that shows the page in the app, with
+/// EXIF rotation) → lossless pixels flattened on white. Null when even that can't read it.
+Future<PreparedImage?> prepareWithEngine(Uint8List bytes) async {
+  if (!ImageStore.bytesLookComplete(bytes)) return null;
+  ui.Codec? codec;
+  ui.Image? im;
+  try {
+    final head = imageHeader(bytes);
+    final big = head != null && math.max(head.w, head.h) > kPdfImageSide;
+    codec = await ui.instantiateImageCodec(bytes, targetWidth: big && head.w >= head.h ? kPdfImageSide : null, targetHeight: big && head.h > head.w ? kPdfImageSide : null);
+    im = (await codec.getNextFrame()).image;
+    final data = await im.toByteData(format: ui.ImageByteFormat.rawStraightRgba);
+    if (data == null) return null;
+    final px = data.buffer.asUint8List();
+    for (var i = 0; i < px.length; i += 4) {
+      final a = px[i + 3];
+      if (a == 255) continue;
+      px[i] = (px[i] * a + 255 * (255 - a)) ~/ 255;
+      px[i + 1] = (px[i + 1] * a + 255 * (255 - a)) ~/ 255;
+      px[i + 2] = (px[i + 2] * a + 255 * (255 - a)) ~/ 255;
+      px[i + 3] = 255;
+    }
+    return PreparedImage.rgba(px, im.width, im.height);
+  } catch (_) {
+    return null;
+  } finally {
+    im?.dispose();
+    codec?.dispose();
+  }
+}
+
+/// Round 7 — every page picture that goes into a PDF is checked first: the whole file
+/// (structure through the end marker), then on Android a quick reduced-size decode by the
+/// phone's own codec. Embedded untouched when possible; otherwise converted (native codec →
+/// Dart decoder → Flutter's engine). Null only when nothing can read it.
+Future<PreparedImage?> preparePagePicture(Uint8List raw, {String? file, int maxBytes = kPassBytes}) async {
+  if (raw.length < 32) return null;
+  // Fast path (saved pages): a JPEG/PNG that passes its whole-file structure check is
+  // embedded untouched — no decode, no extra work compared with before.
+  final pass = passthrough(raw);
+  if (pass != null) return pass;
+  if (!ImageStore.bytesLookComplete(raw)) return null; // cut off / damaged → re-fetch
+  if (file != null) {
+    final n = await _prepareNative(File(file), raw, maxBytes);
+    if (n != null) return n;
+  }
+  final r = await compute(_prepareEntry, (raw, maxBytes)).timeout(const Duration(seconds: 60), onTimeout: () => null);
+  if (r != null) return r;
+  return prepareWithEngine(raw);
+}
+
 Future<PreparedImage?> prepareImage(Uint8List? bytes, {int maxBytes = kPassBytes}) async {
   if (bytes == null || bytes.length < 32) return null;
   // Fast path (almost every saved page): embedded as-is, with no decode and no isolate hop.
@@ -228,6 +312,7 @@ Uint8List? previewFromJpegSync(Uint8List bytes) {
   try {
     var im = img.decodeImage(bytes);
     if (im == null) return null;
+    im = img.bakeOrientation(im);
     final s = math.min(1.0, 720 / math.max(im.width, im.height));
     if (s < 1) im = img.copyResize(im, width: math.max(1, (im.width * s).round()), height: math.max(1, (im.height * s).round()));
     return Uint8List.fromList(img.encodeJpg(im, quality: 82));
@@ -368,7 +453,11 @@ List<List<String>> _pagesOf(List<String> lines, double size, double maxH) {
 }
 
 class BookPdfBuilder {
-  BookPdfBuilder({this.isCancelled, this.onPage, this.onPreview, this.lookAhead = 8, this.maxImageBytes = kPassBytes, this.maxHeldBytes = 64 << 20});
+  BookPdfBuilder({this.isCancelled, this.onPage, this.onPreview, this.repair, this.lookAhead = 8, this.maxImageBytes = kPassBytes, this.maxHeldBytes = 64 << 20});
+
+  /// Round 7: a page picture that fails its checks is handed here once (delete it, download
+  /// it again with priority); returns the fresh file, or null when that is impossible now.
+  final Future<String?> Function(PdfSpec spec)? repair;
 
   /// Prepared pictures waiting for their page stay under about this many bytes.
   final int maxHeldBytes;
@@ -391,7 +480,8 @@ class BookPdfBuilder {
 
   static PdfPicture _rgbaImage(_TextImage t) => PdfPicture.rgba(t.rgba, t.pxW, t.pxH);
 
-  static void _img(PdfPageData p, PdfPicture pic, double x, double y, double w, double h) => p.ops.add(PdfOp.image(p.addPicture(pic), x, y, w, h));
+  static void _img(PdfPageData p, PdfPicture pic, double x, double y, double w, double h) =>
+      p.ops.add(PdfOp.image(p.addPicture(pic), x, y, w, h, orient: pic.orientation.toDouble()));
 
   static void _rect(PdfPageData p, double x, double y, double w, double h, Color c, {double alpha = 1}) => p.ops.add(PdfOp.fill(x, y, w, h, c.r, c.g, c.b, alpha: alpha));
 
@@ -423,7 +513,7 @@ class BookPdfBuilder {
     return (header: header, footer: parts.where(seen.add).join('\n'));
   }
 
-  Future<void> _drawPage(double a, double o, _TextImage? head, _TextImage? foot, PreparedImage? picture, {bool placeholder = false}) async {
+  Future<void> _drawPage(double a, double o, _TextImage? head, _TextImage? foot, PreparedImage? picture) async {
     const s0 = 8.0;
     final s = a - 16;
     final page = _page(a, o, GColors.paper);
@@ -440,16 +530,6 @@ class BookPdfBuilder {
       final y = n + (area - f.h) / 2;
       _rect(page, x - 1, y - 1, f.w + 2, f.h + 2, const Color(0xFF000000));
       _img(page, picture.picture, x, y, f.w, f.h);
-    } else if (placeholder) {
-      final t = c + 8;
-      final n = l + 20 + 4;
-      final area = math.max(48.0, o - t - n);
-      final bh = math.min(area, 220.0);
-      final y = n + (area - bh) / 2;
-      _rect(page, s0 + 24, y, s - 48, bh, const Color(0xFFF6EFE2));
-      page.ops.add(PdfOp.stroke(s0 + 24, y, s - 48, bh, 0.788, 0.659, 0.298));
-      final label = await _textBlock('चित्र उपलब्ध नहीं — इंटरनेट से लोड नहीं हो पाया', s - 80, 14, GColors.muted, FontWeight.w600, bg: const Color(0xFFF6EFE2));
-      if (label != null) _img(page, _rgbaImage(label), s0 + 40, y + (bh - label.h) / 2, s - 80, label.h);
     }
   }
 
@@ -468,8 +548,8 @@ class BookPdfBuilder {
     final s = a - 16;
     var c = land ? 16.0 : 17.0;
     var l = land ? 14.0 : 15.0;
-    final ph = n == null && spec.missing;
-    final u = n != null ? (land ? 140.0 : 190.0) : (ph ? 120.0 : 0.0);
+    if (n == null && spec.wantsPicture) throw PdfPageFailed(const []);
+    final u = n != null ? (land ? 140.0 : 190.0) : 0.0;
     var d = await _textBlock(t.header, s, c, GColors.maroon, FontWeight.w700);
     var f = await _textBlock(t.footer, s, l, GColors.brown, FontWeight.w600);
     while (c > 13 && (d?.h ?? 0) + (f?.h ?? 0) + u + 20 + 12 > o) {
@@ -479,7 +559,7 @@ class BookPdfBuilder {
       f = await _textBlock(t.footer, s, l, GColors.brown, FontWeight.w600);
     }
     if ((d?.h ?? 0) + (f?.h ?? 0) + u + 20 + 12 <= o) {
-      await _drawPage(a, o, d, f, n, placeholder: ph);
+      await _drawPage(a, o, d, f, n);
       await _preview(n, first);
       return;
     }
@@ -490,7 +570,7 @@ class BookPdfBuilder {
     final v = firstHead.isNotEmpty ? await _renderLines(firstHead.map((e) => _Line(e, c, GColors.maroon, FontWeight.w700)).toList(), s, GColors.paper) : null;
     final y = math.max(70.0, o - (v?.h ?? 0) - (n != null ? u : 0) - 20 - 12);
     final firstFoot = _pagesOf(h, l, y).first;
-    await _drawPage(a, o, v, firstFoot.isNotEmpty ? await _renderLines(firstFoot.map((e) => _Line(e, l, GColors.brown, FontWeight.w600)).toList(), s, GColors.paper) : null, n, placeholder: ph);
+    await _drawPage(a, o, v, firstFoot.isNotEmpty ? await _renderLines(firstFoot.map((e) => _Line(e, l, GColors.brown, FontWeight.w600)).toList(), s, GColors.paper) : null, n);
     await _preview(n, first);
     final rest = [
       ...m.skip(firstHead.length).map((e) => _Line(e, c, GColors.maroon, FontWeight.w700)),
@@ -587,17 +667,11 @@ class BookPdfBuilder {
     final data = await _guardRender(image.toByteData(format: ui.ImageByteFormat.rawRgba));
     image.dispose();
     final page = _newPage(_a4w, _a4h);
-    if (data == null) {
-      _rect(page, 0, 0, _a4w, _a4h, const Color(0xFFF6EFE2));
-      return;
-    }
+    if (data == null) throw StateError('cover not drawn'); // retried; never a blank cover
     final rgba = data.buffer.asUint8List();
     final enc = await compute(_coverJpeg, (rgba: rgba, w: s.toInt(), h: c.toInt()));
-    if (enc.jpeg != null) {
-      _img(page, PdfPicture.jpeg(enc.jpeg!, s.toInt(), c.toInt()), 0, 0, _a4w, _a4h);
-    } else {
-      _rect(page, 0, 0, _a4w, _a4h, const Color(0xFFF6EFE2));
-    }
+    if (enc.jpeg == null) throw StateError('cover not encoded');
+    _img(page, PdfPicture.jpeg(enc.jpeg!, s.toInt(), c.toInt()), 0, 0, _a4w, _a4h);
     if (first && onPreview != null && enc.preview != null) onPreview!(enc.preview!);
   }
 
@@ -606,8 +680,8 @@ class BookPdfBuilder {
     if (spec.topicCover) return _topicCover(spec, first);
     if (style == PdfStyle.original) {
       if (n == null) {
-        // Never drop a page silently: a broken picture still gets a page with its text.
-        if (spec.missing) await _fill(spec, null, first);
+        // Only pages that never had a picture get here (a missing picture fails the PDF).
+        if (spec.wantsPicture) throw PdfPageFailed(const []);
         return;
       }
       final land = n.w > n.h * 1.05;
@@ -664,25 +738,36 @@ class BookPdfBuilder {
       var heldBytes = 0;
       var next = 0;
       var assembled = 0;
-      Future<PreparedImage?> prep(PdfSpec spec) async {
+      Future<PreparedImage?> once(PdfSpec spec) async {
         try {
           var raw = spec.image;
           if (raw == null && spec.file != null) {
             final f = File(spec.file!);
             if (await f.exists()) raw = await f.readAsBytes();
-            if (raw != null) {
-              final n = await _prepareNative(f, raw, maxImageBytes);
-              if (n != null) return n;
-            }
           }
-          spec.image = null; // release raw bytes as soon as they are converted
-          final r = await prepareImage(raw, maxBytes: maxImageBytes).timeout(const Duration(seconds: 60));
-          if (r == null && (raw != null || spec.file != null)) spec.missing = true;
-          return r;
+          if (raw == null) return null;
+          return await preparePagePicture(raw, file: spec.image == null ? spec.file : null, maxBytes: maxImageBytes);
         } catch (_) {
-          spec.missing = true;
           return null;
         }
+      }
+
+      Future<PreparedImage?> prep(PdfSpec spec) async {
+        if (!spec.wantsPicture) return null;
+        var r = await once(spec);
+        if (r == null && repair != null && spec.path != null) {
+          // Missing or damaged on the phone: fetch it again right now, then check again.
+          final fresh = await repair!(spec);
+          if (fresh != null) {
+            spec
+              ..image = null
+              ..file = fresh;
+            r = await once(spec);
+          }
+        }
+        spec.image = null; // release raw bytes as soon as they are converted
+        spec.missing = r == null;
+        return r;
       }
 
       Future<void> worker() async {
@@ -712,16 +797,13 @@ class BookPdfBuilder {
           _check();
         }
         _pending.clear();
-        try {
-          await _spec(o[e], await prepared[e], style, e == 0);
-        } on PdfCancelled {
-          rethrow;
-        } on PdfRenderStalled {
-          rethrow;
-        } catch (_) {
-          _pending.clear();
-          _page(_a4w, _a4h, const Color(0xFFFFFBF3));
+        final pic = await prepared[e];
+        if (o[e].wantsPicture && pic == null) {
+          // Never a blank / placeholder page: this PDF is not finished (the job shows why).
+          throw PdfPageFailed([e + 1]);
         }
+        // A drawing error fails the whole PDF (retried by the queue) — never a blank page.
+        await _spec(o[e], pic, style, e == 0);
         if (style != PdfStyle.original || o[e].topicCover) {
           for (var t = 0; t < _pending.length; t++) {
             _stamp(_pending[t], _pageCount + t + 1);

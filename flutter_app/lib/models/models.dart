@@ -86,7 +86,7 @@ class Catalog {
       topics: list(j['topics']).map(Topic.new).toList(),
       granths: list(j['granths']).map(Granth.new).toList(),
       pramans: list(j['pramans']).map(Praman.new).toList(),
-      syncedAt: (j['syncedAt'] as num?)?.toInt(),
+      syncedAt: j['syncedAt'] is num ? (j['syncedAt'] as num).toInt() : int.tryParse('${j['syncedAt']}'),
     );
   }
 }
@@ -121,6 +121,21 @@ class GalleryItem {
   final String fileName;
   final String filePath;
   final String? previewPath;
+
+  GalleryItem withFile(String path) => GalleryItem(
+        id: id,
+        kind: kind,
+        title: title,
+        text: text,
+        topic: topic,
+        granth: granth,
+        folderId: folderId,
+        createdAt: createdAt,
+        size: size,
+        fileName: fileName,
+        filePath: path,
+        previewPath: previewPath,
+      );
 
   GalleryItem copyWith({String? folderId}) => GalleryItem(
         id: id,
@@ -164,7 +179,7 @@ class GalleryItem {
         size: (j['size'] as num?)?.toInt() ?? 0,
         fileName: _s(j['fileName']),
         filePath: _s(j['filePath']),
-        previewPath: j['preview'] as String?,
+        previewPath: j['preview'] is String ? j['preview'] as String : null,
       );
 }
 

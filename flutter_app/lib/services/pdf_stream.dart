@@ -19,13 +19,15 @@ class PdfOp {
         text = '',
         size = 0,
         alpha = 1;
-  const PdfOp.image(this.image, this.x, this.y, this.w, this.h)
+  /// [orient]: EXIF orientation of a JPEG embedded untouched (kept in [size]); the picture
+  /// is turned upright on the page by the placement matrix, not by re-encoding.
+  const PdfOp.image(this.image, this.x, this.y, this.w, this.h, {double orient = 1})
       : kind = 2,
         r = 0,
         g = 0,
         b = 0,
         text = '',
-        size = 0,
+        size = orient,
         line = 0,
         alpha = 1;
 
@@ -48,19 +50,25 @@ class PdfOp {
 /// existing PNG's compressed pixel data (embedded as-is, lossless) or raw RGBA pixels
 /// (text rendered with HarfBuzz, flattened PNGs; stored losslessly with Flate).
 class PdfPicture {
-  const PdfPicture.jpeg(this.bytes, this.w, this.h)
+  const PdfPicture.jpeg(this.bytes, this.w, this.h, {this.orientation = 1})
       : rgba = false,
         png = null;
   const PdfPicture.rgba(this.bytes, this.w, this.h)
       : rgba = true,
-        png = null;
+        png = null,
+        orientation = 1;
 
   /// [bytes] = the PNG's joined IDAT data (zlib, PNG row filters).
-  const PdfPicture.png(this.bytes, this.w, this.h, PngLayout this.png) : rgba = false;
+  const PdfPicture.png(this.bytes, this.w, this.h, PngLayout this.png)
+      : rgba = false,
+        orientation = 1;
   final Uint8List bytes;
   final int w, h;
   final bool rgba;
   final PngLayout? png;
+
+  /// EXIF orientation (1–8) of an untouched JPEG.
+  final int orientation;
 }
 
 /// How a PNG's pixel data is laid out (what the PDF reader needs to undo the row filters).
@@ -114,7 +122,21 @@ class PngLayout {
   }
   if (!ended || idat.isEmpty) return null;
   if (type == 3 && (palette == null || palette.isEmpty || palette.length % 3 != 0)) return null;
-  return (w: w, h: h, idat: idat.takeBytes(), layout: PngLayout(colors: type == 2 ? 3 : 1, bits: bits, palette: type == 3 ? palette : null));
+  final colors = type == 2 ? 3 : 1;
+  final data = idat.takeBytes();
+  // Round 7: the compressed rows must really unpack to the full picture (every row there,
+  // valid row filters) — a damaged PNG is decoded / re-fetched instead of becoming a broken page.
+  try {
+    final rows = ZLibDecoder().convert(data);
+    final stride = 1 + (w * bits * colors + 7) ~/ 8;
+    if (rows.length < stride * h) return null;
+    for (var r = 0; r < h; r++) {
+      if (rows[r * stride] > 4) return null;
+    }
+  } catch (_) {
+    return null;
+  }
+  return (w: w, h: h, idat: data, layout: PngLayout(colors: colors, bits: bits, palette: type == 3 ? palette : null));
 }
 
 class PdfPageData {
@@ -227,7 +249,12 @@ class PdfStreamWriter {
         case 1:
           c.write('q ${_n(o.r)} ${_n(o.g)} ${_n(o.b)} RG ${_n(o.line)} w ${_n(o.x)} ${_n(o.y)} ${_n(o.w)} ${_n(o.h)} re S Q\n');
         case 2:
-          c.write('q ${_n(o.w)} 0 0 ${_n(o.h)} ${_n(o.x)} ${_n(o.y)} cm /I${o.image} Do Q\n');
+          if (o.size > 1) {
+            final m = orientedMatrix(o.size.round(), o.x, o.y, o.w, o.h);
+            c.write('q ${m.map(_n).join(' ')} cm /I${o.image} Do Q\n');
+          } else {
+            c.write('q ${_n(o.w)} 0 0 ${_n(o.h)} ${_n(o.x)} ${_n(o.y)} cm /I${o.image} Do Q\n');
+          }
         case 3:
           final t = o.text.replaceAll(r'\', r'\\').replaceAll('(', r'\(').replaceAll(')', r'\)');
           c.write('q ${_n(o.r)} ${_n(o.g)} ${_n(o.b)} rg BT /F1 ${_n(o.size)} Tf ${_n(o.x)} ${_n(o.y)} Td ($t) Tj ET Q\n');
@@ -425,4 +452,137 @@ class PdfSink {
       }
     });
   }
+}
+
+/// Round 7 — one pass over a JPEG's whole structure (no pixel decoding): every marker
+/// segment fits, the entropy-coded scans contain only valid escapes, and the file reaches
+/// its end marker. Also reports what matters for embedding it untouched in a PDF.
+class JpegScan {
+  const JpegScan({required this.complete, required this.hasHuffman, required this.orientation, required this.adobe});
+
+  /// Structure is whole: SOI … SOF … SOS (scan data) … EOI, nothing cut off.
+  final bool complete;
+
+  /// Has its own Huffman tables (a few camera / video JPEGs rely on implicit ones).
+  final bool hasHuffman;
+
+  /// EXIF orientation 1–8 (1 = upright / none).
+  final int orientation;
+
+  /// Adobe APP14 marker present (CMYK files from Photoshop store inverted ink values).
+  final bool adobe;
+}
+
+JpegScan? jpegScan(Uint8List b) {
+  if (b.length < 4 || b[0] != 0xFF || b[1] != 0xD8) return null;
+  var i = 2;
+  var sof = false;
+  var sos = false;
+  var dht = false;
+  var adobe = false;
+  var orientation = 1;
+  final n = b.length;
+  while (i < n) {
+    if (b[i] != 0xFF) return JpegScan(complete: false, hasHuffman: dht, orientation: orientation, adobe: adobe);
+    // fill bytes
+    while (i < n && b[i] == 0xFF) {
+      i++;
+    }
+    if (i >= n) break;
+    final m = b[i];
+    i++;
+    if (m == 0xD9) return JpegScan(complete: sof && sos, hasHuffman: dht, orientation: orientation, adobe: adobe);
+    if (m == 0x01 || (m >= 0xD0 && m <= 0xD7)) continue;
+    if (m == 0xD8 || m == 0x00) break;
+    if (i + 2 > n) break;
+    final len = (b[i] << 8) | b[i + 1];
+    if (len < 2 || i + len > n) break;
+    final seg = i + 2;
+    if ((m >= 0xC0 && m <= 0xCF) && m != 0xC4 && m != 0xC8 && m != 0xCC) sof = true;
+    if (m == 0xC4) dht = true;
+    if (m == 0xEE && len >= 7 && b[seg] == 0x41 && b[seg + 1] == 0x64 && b[seg + 2] == 0x6F && b[seg + 3] == 0x62 && b[seg + 4] == 0x65) adobe = true;
+    if (m == 0xE1 && len > 16) orientation = _exifOrientation(b, seg, i + len) ?? orientation;
+    i += len;
+    if (m == 0xDA) {
+      if (!sof) break;
+      sos = true;
+      // Entropy-coded data: runs until the next real marker.
+      var j = i;
+      var found = false;
+      while (j + 1 < n) {
+        if (b[j] != 0xFF) {
+          j++;
+          continue;
+        }
+        final x = b[j + 1];
+        if (x == 0x00 || (x >= 0xD0 && x <= 0xD7)) {
+          j += 2;
+          continue;
+        }
+        if (x == 0xFF) {
+          j++;
+          continue;
+        }
+        found = true;
+        break;
+      }
+      if (!found) break; // cut off inside the picture data
+      i = j;
+    }
+  }
+  return JpegScan(complete: false, hasHuffman: dht, orientation: orientation, adobe: adobe);
+}
+
+/// Orientation tag (0x0112) from an APP1 "Exif" segment [from, to).
+int? _exifOrientation(Uint8List b, int from, int to) {
+  if (to - from < 14 || b[from] != 0x45 || b[from + 1] != 0x78 || b[from + 2] != 0x69 || b[from + 3] != 0x66) return null;
+  final t = from + 6; // TIFF header
+  final le = b[t] == 0x49 && b[t + 1] == 0x49;
+  if (!le && !(b[t] == 0x4D && b[t + 1] == 0x4D)) return null;
+  int u16(int o) => o + 2 > to ? -1 : (le ? b[o] | (b[o + 1] << 8) : (b[o] << 8) | b[o + 1]);
+  int u32(int o) => o + 4 > to ? -1 : (le ? b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24) : (b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]);
+  final ifd = u32(t + 4);
+  if (ifd < 8) return null;
+  final count = u16(t + ifd);
+  if (count < 0 || count > 200) return null;
+  for (var k = 0; k < count; k++) {
+    final e = t + ifd + 2 + k * 12;
+    if (e + 12 > to) return null;
+    if (u16(e) == 0x0112) {
+      final v = u16(e + 8);
+      return v >= 1 && v <= 8 ? v : null;
+    }
+  }
+  return null;
+}
+
+/// True when the JPEG is whole (see [jpegScan]).
+bool jpegComplete(Uint8List b) => jpegScan(b)?.complete ?? false;
+
+/// Placement of a stored picture turned upright by EXIF [orientation] inside the box
+/// (x, y, w, h) on the page (PDF coordinates, y up). Returns the `cm` matrix a b c d e f
+/// that maps the image's unit square there.
+List<double> orientedMatrix(int orientation, double x, double y, double w, double h) {
+  // Stored pixel (s, t) — s left→right, t top→bottom, both 0…1 — appears at display
+  // position (X, Y) (top-left origin) according to EXIF.
+  (double, double) disp(double s, double t) => switch (orientation) {
+        2 => (1 - s, t),
+        3 => (1 - s, 1 - t),
+        4 => (s, 1 - t),
+        5 => (t, s),
+        6 => (1 - t, s),
+        7 => (1 - t, 1 - s),
+        8 => (t, 1 - s),
+        _ => (s, t),
+      };
+  // PDF image space: u = s, v = 1 − t (row 0 at the top).
+  (double, double) page(double u, double v) {
+    final (X, Y) = disp(u, 1 - v);
+    return (x + w * X, y + h * (1 - Y));
+  }
+
+  final o = page(0, 0);
+  final pu = page(1, 0);
+  final pv = page(0, 1);
+  return [pu.$1 - o.$1, pu.$2 - o.$2, pv.$1 - o.$1, pv.$2 - o.$2, o.$1, o.$2];
 }

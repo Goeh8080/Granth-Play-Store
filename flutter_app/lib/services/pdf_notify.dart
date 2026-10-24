@@ -145,5 +145,8 @@ class PdfNotify {
   Future<void> openSettings() => query('openNotificationSettings', const {});
 
   /// "PDF तैयार" notification; [uri] is the Downloads copy (opens the PDF when tapped).
+  /// Round 7: "PDF नहीं बनी" with the reason (pages missing); replaced by "PDF तैयार" later.
+  void failed(PdfJob job) => call('pdfFailed', {'id': job.id.hashCode & 0x7fffffff, 'name': job.title, 'text': job.error ?? ''});
+
   void done(PdfJob job, String? uri) => call('pdfDone', {'id': job.id.hashCode & 0x7fffffff, 'name': job.fileName, 'uri': uri});
 }

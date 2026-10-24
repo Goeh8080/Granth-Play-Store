@@ -8,6 +8,7 @@ import '../services/events.dart';
 import '../services/file_actions.dart';
 import '../services/gallery_service.dart';
 import '../services/image_cache.dart';
+import '../services/image_size.dart';
 import '../state/toast.dart';
 import '../theme/colors.dart';
 import 'common.dart';
@@ -40,6 +41,8 @@ class _GranthImageState extends State<GranthImage> {
   String? _p;
   File? _file;
   bool _failed = false;
+  double? _ratio;
+  final GlobalKey _imgKey = GlobalKey();
 
   @override
   void initState() {
@@ -53,6 +56,19 @@ class _GranthImageState extends State<GranthImage> {
     if (old.path != widget.path) _load();
   }
 
+  bool get _wantsRatio => widget.kind == ShotKind.cover || widget.kind == ShotKind.proof;
+
+  /// First time this picture is shown without a readable header: remember its shape once
+  /// it is on screen, so the next time its row has the right height from the start.
+  void _learn() {
+    final f = _file;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || f == null || _file != f) return;
+      final sz = _imgKey.currentContext?.size;
+      if (sz != null && sz.height > 1 && sz.width > 1) ImageSizes.I.learn(f, sz.width / sz.height);
+    });
+  }
+
   void _load() {
     _p = mediaPath(widget.path);
     _failed = false;
@@ -62,12 +78,16 @@ class _GranthImageState extends State<GranthImage> {
       return;
     }
     _file = ImageStore.I.cachedSync(p);
-    if (_file != null) return;
+    if (_file != null) {
+      _ratio = _wantsRatio ? ImageSizes.I.ratioOf(_file!) : null;
+      return;
+    }
     ImageStore.I.get(p).then((f) {
       if (!mounted || _p != p) return;
       setState(() {
         _file = f;
         _failed = f == null;
+        _ratio = f != null && _wantsRatio ? ImageSizes.I.ratioOf(f) : null;
       });
     });
   }
@@ -116,11 +136,21 @@ class _GranthImageState extends State<GranthImage> {
         fit: thumb ? BoxFit.cover : (widget.kind == ShotKind.lightbox ? BoxFit.contain : BoxFit.fitWidth),
         gaplessPlayback: true,
         cacheWidth: thumb ? 156 : (widget.kind == ShotKind.lightbox ? null : 1080),
-        frameBuilder: (context, child, frame, sync) => sync
+        frameBuilder: (context, child, frame, sync) {
+          if (frame != null && _ratio == null && _wantsRatio) _learn();
+          return sync
             ? child
-            : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic, child: child),
+            : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic, child: child);
+        },
         errorBuilder: (context, error, stack) => Skeleton(height: thumb ? 52 : 120, width: thumb ? 52 : null, radius: radius),
       );
+      if (_ratio != null) {
+        // Final height known before the picture is decoded: the list never changes height
+        // while pictures load, so a saved scroll position is always reachable.
+        img = AspectRatio(aspectRatio: _ratio!, child: img);
+      } else if (_wantsRatio) {
+        img = KeyedSubtree(key: _imgKey, child: img);
+      }
       if (widget.heroTag != null) img = Hero(tag: widget.heroTag!, child: img);
     }
     final decorated = Container(

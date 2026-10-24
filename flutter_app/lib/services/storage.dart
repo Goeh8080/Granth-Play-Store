@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'data_compat.dart';
+
 /// Replaces the web app's localStorage + IndexedDB (`granth-offline`).
 /// Keys are kept identical to the original so behaviour maps 1:1.
 class Store {
@@ -36,6 +38,9 @@ class Store {
   static const kHash = 'granth-hash';
   static const kOfflineIds = 'granth-offline-ids';
   static const kDevice = 'granth-device';
+
+  /// Layout version of the data kept on the phone (see data_compat.dart).
+  static const kSchema = 'granth-schema';
 
   /// Signature of the last library the "सारे ग्रंथ ऑफलाइन" card was shown for.
   static const kOfflineReady = 'granth-offline-ready';
@@ -74,12 +79,26 @@ class Store {
         } catch (_) {}
       }
     }
+    await DataCompat.migrate();
+  }
+
+  static Object? _safeGet(SharedPreferences p, String k) {
+    try {
+      return p.get(k);
+    } catch (_) {
+      return null;
+    }
   }
 
   void _adopt(SharedPreferences p) {
     if (_prefs != null) return;
     _prefs = p;
     for (final e in _mem.entries) {
+      if (e.key == kSchema) {
+        // Never lower the layout version of data that a newer app left in the file.
+        final have = int.tryParse('${_safeGet(p, kSchema)}') ?? 0;
+        if (have > (int.tryParse('${e.value}') ?? 0)) continue;
+      }
       final v = e.value;
       if (v is String) p.setString(e.key, v);
       if (v is int) p.setInt(e.key, v);
@@ -111,10 +130,21 @@ class Store {
   @visibleForTesting
   void debugAdoptPrefs(SharedPreferences p) => _adopt(p);
 
+  /// A value of another type (an int / bool / list written by another app version and
+  /// restored with the backup) reads as its text, never as an error.
   String? getString(String k) {
     final m = _mem[k];
     if (m != null) return m is String ? m : '$m';
-    return _prefs?.getString(k);
+    try {
+      return _prefs?.getString(k);
+    } catch (_) {
+      try {
+        final v = _prefs?.get(k);
+        return v == null ? null : '$v';
+      } catch (_) {
+        return null;
+      }
+    }
   }
 
   Future<void> setString(String k, String v) async {
@@ -129,10 +159,43 @@ class Store {
   }
 
   int? getInt(String k) {
-    final v = _mem[k] ?? _prefs?.get(k);
+    Object? v;
+    try {
+      v = _mem[k] ?? _prefs?.get(k);
+    } catch (_) {}
     if (v is int) return v;
+    if (v is num) return v.toInt();
     if (v is String) return int.tryParse(v);
     return null;
+  }
+
+  /// Every key in the preferences file (this session's writes included).
+  Set<String> get keys {
+    try {
+      return {...?_prefs?.getKeys(), ..._mem.keys};
+    } catch (_) {
+      return {..._mem.keys};
+    }
+  }
+
+  /// The raw stored value of any type (null when unset or unreadable).
+  Object? getRaw(String k) {
+    try {
+      return _mem[k] ?? _prefs?.get(k);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Copies a saved file next to itself as `<name>.<tag>` (once) so something the app can't
+  /// read is never lost when it is replaced by fresh data. Never throws.
+  Future<void> keepCopy(String name, String tag) async {
+    if (_root == null) return;
+    try {
+      final f = File('${root.path}/$name');
+      final c = File('${root.path}/$name.$tag');
+      if (await f.exists() && !await c.exists()) await f.copy(c.path);
+    } catch (_) {}
   }
 
   Future<void> setInt(String k, int v) async {

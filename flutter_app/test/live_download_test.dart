@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:granthprabandhan/services/api.dart' show mediaUrl;
 import 'package:granthprabandhan/services/catalog_store.dart';
 import 'package:granthprabandhan/services/image_cache.dart';
@@ -12,7 +13,8 @@ import 'package:granthprabandhan/services/image_cache.dart';
 import 'helpers.dart';
 import 'offline_test.dart' show pictureCatalog;
 
-final _jpeg = Uint8List.fromList([0xFF, 0xD8, ...List.filled(2000, 7), 0xFF, 0xD9]);
+// A real (whole) JPEG: round 7 refuses to save cut-off / damaged downloads.
+final _jpeg = Uint8List.fromList(img.encodeJpg(img.Image(width: 64, height: 48), quality: 90));
 
 void main() {
   late HttpServer server;

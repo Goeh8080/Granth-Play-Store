@@ -9,6 +9,7 @@ import '../services/file_actions.dart';
 import '../services/order.dart';
 import '../services/search.dart';
 import '../services/storage.dart';
+import '../state/places.dart';
 import '../state/router.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
@@ -27,7 +28,7 @@ class GranthsPanel extends StatefulWidget {
 }
 
 class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
-  String _q = '';
+  String _q = Places.query('granth-list-place');
   final _log = SearchLogger();
   List<Granth>? _src;
 
@@ -72,7 +73,7 @@ class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
             ),
             tools: Tools(
               grid: GridSwitch(options: const [1, 2, 3], value: cols, onChanged: (v) => UiPrefs.I.setCols(Store.kGranthCols, v)),
-              search: SearchField(placeholder: 'ग्रंथ का नाम — gita, kabir', onChanged: (v) => setState(() => _q = v)),
+              search: SearchField(placeholder: 'ग्रंथ का नाम — gita, kabir', initial: _q, onChanged: (v) { Places.setQuery('granth-list-place', v); setState(() => _q = v); }),
             ),
           ),
         ),

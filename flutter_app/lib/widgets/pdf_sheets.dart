@@ -194,8 +194,8 @@ Widget _doneActions(BuildContext context, PdfJob j, VoidCallback refresh) => Pad
 
 /// `.pdf-deck` behind the header arrow (`.pdf-arrow`, ⌄ N). Collapsed by default: only the
 /// arrow shows that PDFs are being made; a tap drops this card down under it, a second tap
-/// (or a tap outside) folds it away. Each PDF is its own row (they are made in parallel, no
-/// कतार) with its own bar, actions and × to remove it.
+/// (or a tap outside) folds it away. Round 7: one PDF card at a time (its own bar, actions and
+/// × to remove it) with पिछला / अगला between them, like ashok's deck; PDFs are still made in parallel.
 class PdfDropdown extends StatefulWidget {
   const PdfDropdown({super.key, required this.onClose});
   final VoidCallback onClose;
@@ -205,6 +205,26 @@ class PdfDropdown extends StatefulWidget {
 
 class _PdfDropdownState extends State<PdfDropdown> {
   Timer? _tick;
+
+  /// Round 7 (like ashok's `.pdf-deck`): ONE PDF card at a time, with पिछला / अगला to move
+  /// between the PDFs. [_id] is the PDF on show; [_auto] the PDF the card last jumped to by
+  /// itself (a newly started PDF is brought up once, later taps on पिछला / अगला stay put).
+  String? _id;
+  String? _auto;
+
+  int _index(List<PdfJob> jobs) {
+    final first = jobs.indexWhere((j) => j.active);
+    if (first >= 0 && jobs[first].id != _auto) {
+      _auto = jobs[first].id;
+      _id = _auto;
+    }
+    var i = _id == null ? -1 : jobs.indexWhere((j) => j.id == _id);
+    if (i < 0) i = first >= 0 ? first : jobs.length - 1; // removed / first time: running one, else newest
+    _id = jobs[i].id;
+    return i;
+  }
+
+  void _go(List<PdfJob> jobs, int to) => setState(() => _id = jobs[to.clamp(0, jobs.length - 1)].id);
 
   @override
   void initState() {
@@ -232,6 +252,7 @@ class _PdfDropdownState extends State<PdfDropdown> {
           final now = DateTime.now().millisecondsSinceEpoch;
           final active = PdfQueue.I.activeCount;
           final finished = jobs.length - active;
+          final at = jobs.isEmpty ? 0 : _index(jobs);
           return Container(
             key: const ValueKey('pdf-dropdown'),
             constraints: BoxConstraints(maxHeight: (MediaQuery.sizeOf(context).height * 0.6).clamp(220.0, 560.0)),
@@ -253,15 +274,24 @@ class _PdfDropdownState extends State<PdfDropdown> {
               ]),
               const SizedBox(height: 6),
               if (jobs.isEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('अभी कोई PDF नहीं बन रही।', style: GText.sans(size: 14, color: GColors.muted))),
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  padding: EdgeInsets.zero,
-                  itemCount: jobs.length,
-                  separatorBuilder: (_, _) => const Divider(height: 16, color: GColors.creamDark),
-                  itemBuilder: (context, i) => _JobRow(key: ValueKey(jobs[i].id), job: jobs[i], now: now, refresh: () => setState(() {}), onRemove: () => _remove(jobs[i])),
+              if (jobs.isNotEmpty) ...[
+                Flexible(
+                  child: SingleChildScrollView(
+                    key: const ValueKey('pdf-card'),
+                    padding: EdgeInsets.zero,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 160),
+                      child: _JobRow(key: ValueKey(jobs[at].id), job: jobs[at], now: now, refresh: () => setState(() {}), onRemove: () => _remove(jobs[at])),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Pill(key: const ValueKey('pdf-prev'), label: 'पिछला', icon: 'chevron-left', enabled: at > 0, onTap: () => _go(jobs, at - 1)),
+                  Expanded(child: Text('${at + 1}/${jobs.length}', key: const ValueKey('pdf-pos'), textAlign: TextAlign.center, style: GText.sans(size: 13, weight: FontWeight.w700, color: GColors.brown))),
+                  Pill(key: const ValueKey('pdf-next'), label: 'अगला', trailingIcon: 'chevron-right', enabled: at < jobs.length - 1, onTap: () => _go(jobs, at + 1)),
+                ]),
+              ],
             ]),
           );
         },
