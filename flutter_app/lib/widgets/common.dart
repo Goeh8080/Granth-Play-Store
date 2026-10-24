@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../state/ui_prefs.dart';
+import 'pop.dart';
 import '../theme/colors.dart';
 
 /// Lucide icons extracted from the original bundle (stroke icons, coloured at runtime).
@@ -825,8 +826,13 @@ class SheetButton extends StatelessWidget {
 
 /// Staggered entry: fades and slides each list item in, offset by its index.
 class Entry extends StatefulWidget {
-  const Entry({super.key, required this.index, required this.child, this.dx = 0});
+  const Entry({super.key, required this.index, required this.child, this.dx = 0, this.ledger, this.id});
   final int index;
+
+  /// With a [PopLedger] + [id] the entrance plays once per screen visit (round 8): a card
+  /// that scrolls out and is re-created on the way back up appears already in place.
+  final PopLedger? ledger;
+  final String? id;
   final Widget child;
   final double dx;
   @override
@@ -843,7 +849,10 @@ class _EntryState extends State<Entry> with SingleTickerProviderStateMixin {
     final i = widget.index.clamp(0, 12);
     _c = AnimationController(vsync: this, duration: Duration(milliseconds: 380 + i * 45));
     _a = CurvedAnimation(parent: _c, curve: Interval(i * 45 / (380 + i * 45), 1, curve: Curves.easeOutCubic));
-    if (widget.index > 12) {
+    final key = widget.ledger != null && widget.id != null ? 'e:${widget.id}' : null;
+    final seen = key != null && widget.ledger!.played(key);
+    if (key != null) widget.ledger!.mark(key);
+    if (widget.index > 12 || seen) {
       _c.value = 1;
     } else {
       _c.forward();

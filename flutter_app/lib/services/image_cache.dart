@@ -49,6 +49,18 @@ class ImageStore {
   int get priorityActive => _priority;
 
   void _enterPriority() => _priority++;
+
+  /// A screen that needs the phone's CPU / network for itself (the Photo Highlighter) asks the
+  /// background download to wait its turn; call the returned function when done (idempotent).
+  VoidCallback holdBackground() {
+    _enterPriority();
+    var released = false;
+    return () {
+      if (released) return;
+      released = true;
+      _leavePriority();
+    };
+  }
   void _leavePriority() {
     _priority--;
     if (_priority <= 0) {

@@ -324,11 +324,14 @@ void main() {
       q.dismiss('-');
       await frames(tester, 4);
       expect(find.byKey(const ValueKey('pdf-arrow')), findsOneWidget);
-      expect(find.byType(PdfDropdown), findsNothing, reason: 'no list covering the screen');
-
+      // Round 8 (ashok): a PDF that starts opens the deck by itself; the arrow toggles it.
+      expect(find.byType(PdfDeck), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('pdf-close')));
+      await frames(tester, 12);
+      expect(find.byType(PdfDeck), findsNothing, reason: 'बंद folds it away');
       await tester.tap(find.byKey(const ValueKey('pdf-arrow')));
-      await frames(tester, 4);
-      expect(find.byType(PdfDropdown), findsOneWidget);
+      await frames(tester, 12);
+      expect(find.byType(PdfDeck), findsOneWidget);
       // Two separate PDFs of the same granth stay two entries.
       expect(q.jobs.length, 3);
       // Round 7: one card at a time (the running one first), अगला / पिछला move between them.
@@ -361,9 +364,9 @@ void main() {
       expect(running.cancelled, isTrue);
       expect(q.jobs.map((e) => e.id), ['d2']);
 
-      await tester.tap(find.byKey(const ValueKey('pdf-arrow')));
-      await frames(tester, 4);
-      expect(find.byType(PdfDropdown), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('pdf-close')));
+      await frames(tester, 12);
+      expect(find.byType(PdfDeck), findsNothing);
       gate.complete('x');
       await tester.pump(const Duration(seconds: 4));
       await tester.pumpWidget(const SizedBox());

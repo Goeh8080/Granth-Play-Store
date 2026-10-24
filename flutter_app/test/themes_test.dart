@@ -12,7 +12,7 @@ import 'package:granthprabandhan/state/ui_prefs.dart';
 import 'package:granthprabandhan/theme/colors.dart';
 import 'package:granthprabandhan/widgets/common.dart';
 import 'package:granthprabandhan/widgets/overlays.dart';
-import 'package:granthprabandhan/widgets/pdf_sheets.dart' show PdfDropdown;
+import 'package:granthprabandhan/widgets/pdf_sheets.dart' show PdfDeck;
 import 'package:granthprabandhan/widgets/zoom.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -146,11 +146,11 @@ void main() {
       PdfQueue.I.start(pjob('run'), (j, r) => gate.future);
       PdfQueue.I.dismiss('-');
       await settle(t, 4);
-      await t.tap(find.byKey(const ValueKey('pdf-arrow')));
-      await settle(t, 4);
-      final dd = t.widget<Container>(find.byKey(const ValueKey('pdf-dropdown')));
-      expect(isLook(dd.decoration! as BoxDecoration, id), isTrue, reason: 'PDF list');
-      await t.tap(find.byKey(const ValueKey('pdf-arrow')));
+      // Round 8: the deck opens by itself when a PDF starts.
+      expect(find.byType(PdfDeck), findsOneWidget);
+      final decos = find.descendant(of: find.byType(PdfDeck), matching: find.byType(Container)).evaluate().map((e) => (e.widget as Container).decoration).whereType<BoxDecoration>();
+      expect(decos.any((d) => isLook(d, id)), isTrue, reason: 'PDF list');
+      await t.tap(find.byKey(const ValueKey('pdf-close')));
       await settle(t, 4);
       // A dialog (window.confirm style).
       unawaited(confirmPop(t.element(find.byType(HomeShell)), 'जाँच?'));
@@ -159,7 +159,7 @@ void main() {
       expect(sheet.evaluate().map((e) => (e.widget as Container).decoration).whereType<BoxDecoration>().any((d) => isLook(d, id)), isTrue, reason: 'dialog');
       await t.tap(find.text('OK'));
       await settle(t, 4);
-      expect(find.byType(PdfDropdown), findsNothing);
+      expect(find.byType(PdfDeck), findsNothing);
       gate.complete('x');
       await t.pump(const Duration(seconds: 4));
       await t.pumpWidget(const SizedBox());

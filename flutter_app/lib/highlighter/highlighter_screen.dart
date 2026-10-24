@@ -11,10 +11,12 @@ import 'package:share_plus/share_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
+import '../services/image_cache.dart';
 import '../services/native_bridge.dart';
 import '../services/storage.dart';
 import '../state/toast.dart';
 import '../theme/colors.dart';
+import '../widgets/zoom.dart';
 import 'highlighter_server.dart';
 
 class HighlighterScreen extends StatefulWidget {
@@ -62,9 +64,15 @@ class _HighlighterScreenState extends State<HighlighterScreen> {
   bool _hideNotice = false;
   final Map<int, ({IOSink sink, File file, String name, String mime, String mode})> _incoming = {};
 
+  VoidCallback? _release;
+
   @override
   void initState() {
     super.initState();
+    // The page gets the phone to itself: the app zoom layer steps aside (it clips / transforms
+    // the native view and has its own pinch recogniser) and the background page download waits.
+    AppZoom.suspended.value++;
+    _release = ImageStore.I.holdBackground();
     _start();
   }
 
@@ -215,6 +223,18 @@ class _HighlighterScreenState extends State<HighlighterScreen> {
     }
   }
 
+  /// Hybrid composition: the WebView is drawn by Android itself and composited, not copied into
+  /// a Flutter texture every frame (the default "texture layer" path costs a GPU copy per frame
+  /// and adds touch / keyboard latency for a canvas-heavy page like this one).
+  static Widget _page(WebViewController c) {
+    if (c.platform is AndroidWebViewController) {
+      return WebViewWidget.fromPlatformCreationParams(
+        params: AndroidWebViewWidgetCreationParams(controller: c.platform, displayWithHybridComposition: true),
+      );
+    }
+    return WebViewWidget(controller: c);
+  }
+
   Future<void> _back() async {
     final c = _c;
     if (c != null && await c.canGoBack()) {
@@ -226,6 +246,8 @@ class _HighlighterScreenState extends State<HighlighterScreen> {
 
   @override
   void dispose() {
+    AppZoom.suspended.value--;
+    _release?.call();
     for (final e in _incoming.values) {
       e.sink.close();
     }
@@ -274,7 +296,7 @@ class _HighlighterScreenState extends State<HighlighterScreen> {
                 },
               ),
               Expanded(
-                child: _c == null ? const Center(child: CircularProgressIndicator(color: GColors.gold)) : WebViewWidget(controller: _c!),
+                child: _c == null ? const Center(child: CircularProgressIndicator(color: GColors.gold)) : _page(_c!),
               ),
             ],
           ),

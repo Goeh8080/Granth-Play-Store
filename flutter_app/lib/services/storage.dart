@@ -35,6 +35,11 @@ class Store {
   static const kWifiOnly = 'granth-wifi-only';
   static const kAutoSync = 'granth-auto-sync';
   static const kKeepAwake = 'granth-keep-awake';
+  /// Round 8: "एनिमेशन" चालू ('1', default) / कम ('0') — the decorative entrance animations.
+  static const kAnimations = 'granth-animations';
+
+  /// Round 8: the "सारे ग्रंथ ऑफलाइन" card was shown once ('1'); it never comes back.
+  static const kOfflineCardSeen = 'granth-offline-card-seen';
   static const kHash = 'granth-hash';
   static const kOfflineIds = 'granth-offline-ids';
   static const kDevice = 'granth-device';

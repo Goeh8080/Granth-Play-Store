@@ -869,9 +869,15 @@ class CatalogStore extends ChangeNotifier {
     }
   }
 
-  /// Shows the "सारे ग्रंथ ऑफलाइन" card once per completed library: the first time,
-  /// and again only when new content has finished downloading.
+  /// Shows the "सारे ग्रंथ ऑफलाइन" card ONCE, ever (round 8): the first time the whole
+  /// library has finished downloading. It never comes back — not on the next open, not when
+  /// new content arrives, not after a reinstall that kept its data. (Rounds 4-7 showed it
+  /// again whenever the library's signature changed; a phone that had already seen it under
+  /// that rule has [Store.kOfflineReady] set and counts as seen.)
+  bool get offlineCardSeen => const {'1', 'true'}.contains(Store.I.getString(Store.kOfflineCardSeen)) || (Store.I.getString(Store.kOfflineReady) ?? '').isNotEmpty;
+
   void _celebrate(List<String> all) {
+    if (offlineCardSeen) return;
     final sorted = [...all]..sort();
     var h = 0;
     for (final p in sorted) {
@@ -895,6 +901,7 @@ class CatalogStore extends ChangeNotifier {
   void ackOfflineReady() {
     final r = offlineReady.value;
     if (r == null) return;
+    Store.I.setString(Store.kOfflineCardSeen, '1');
     Store.I.setString(Store.kOfflineReady, r.signature);
     offlineReady.value = null;
   }

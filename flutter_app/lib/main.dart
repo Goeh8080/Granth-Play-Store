@@ -16,6 +16,7 @@ import 'state/router.dart';
 import 'state/ui_prefs.dart';
 import 'theme/colors.dart';
 import 'widgets/zoom.dart';
+import 'widgets/bounded_scroll.dart';
 
 void main() {
   runZonedGuarded<Future<void>>(() async {
@@ -161,6 +162,7 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) => MaterialApp(
         title: 'ग्रंथ प्रबंधन',
         debugShowCheckedModeBanner: false,
+        scrollBehavior: const BoundedScrollBehavior(),
         theme: buildTheme(),
         builder: (context, child) => ValueListenableBuilder<double>(
           // Settings → अक्षर का आकार: a factor on the phone's own text size, same 1.3 cap.

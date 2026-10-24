@@ -63,6 +63,32 @@ OpenCV and Tesseract are not bundled because the arm64 APK must stay under 25 MB
 No page logic, styles or text are changed. `test/highlighter_test.dart` checks that undoing these five changes gives
 back the original file exactly.
 
+## Speed (round 8)
+
+The page itself is unchanged; the slowness was in how the app served and hosted it.
+
+| Cause found | Fix |
+| --- | --- |
+| Every response said `Cache-Control: no-cache` with **no validator**, so the WebView re-downloaded ALL libraries on every open: 19 MB per open (OpenCV 11 MB, Tesseract core 3.9 MB, English data 3 MB) through Dart on the UI isolate, and a script that is re-fetched can never reuse its compiled (V8 code-cache) copy. | Saved libraries: `public, max-age=31536000, immutable` + `ETag`. Page and bridge: `no-cache` + `ETag` (a bodiless 304 per open, so an app update shows at once). `/lib/*` (pdf.js, jsPDF): 1 day + `ETag`. |
+| Bundled files (`pdf.worker` 1 MB, pdf.js, jsPDF, the page patch + UTF-8 round trip) were re-read from the APK and re-inflated on every request. | Read once per run, kept in memory; the patched page is built once. |
+| `HttpServer.autoCompress` could gzip big scripts on the phone's CPU for a loopback client. | Switched off; `Content-Length` always set. |
+| The WebView sat under the app-wide zoom layer (`ClipRect` + `Transform` + pinch recogniser) and was composited by the default texture-layer path (a GPU copy of the page into a Flutter texture each frame, extra touch / keyboard latency). | App zoom steps aside while the highlighter is open (`AppZoom.suspended`: no clip, zoom reset) and the WebView uses hybrid composition (`displayWithHybridComposition: true`). |
+| The background page download kept running next to the page (CPU + network). | `ImageStore.holdBackground()` while the highlighter is open; released on close. |
+
+Measured with headless Chrome 156 on this box (4× CPU throttle, persistent profile = the WebView's HTTP + code
+cache, the REAL `HighlighterServer`, `tool/hl_bench.mjs` + `test/hl_bench_test.dart`, results in `docs/bench/`):
+
+| (warm open = 2nd–4th open) | before | after |
+| --- | --- | --- |
+| bytes served by the app per open | 19.0 MB | ≈ 0.5 KB (two 304s) |
+| page `load` event | 2.24–2.34 s | 1.47–1.60 s |
+| OpenCV ready (`cv.Mat`) | 2.55–2.60 s | 1.79–1.89 s |
+| 4000×3000 photo → in the page | 1.14–1.26 s | 1.07–1.22 s (page code, unchanged) |
+| Merged PDF export | 0.20–0.21 s | 0.21–0.25 s (page code, unchanged) |
+
+The photo and PDF steps are the page's own JavaScript and match, as intended. What the phone adds on top (hybrid
+composition, WASM SIMD) needs a real device to measure.
+
 ## Not verifiable without a phone
 
 Real camera and gallery pickers, OCR and OpenCV speed inside the Android WebView (WASM SIMD support differs by

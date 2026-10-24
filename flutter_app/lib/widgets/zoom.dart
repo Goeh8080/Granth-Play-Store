@@ -178,7 +178,10 @@ class ZoomStageState extends State<ZoomStage> with SingleTickerProviderStateMixi
                   ..onEnd = _onEnd,
               ),
             },
-            child: ClipRect(child: Transform(transform: _v.matrix, child: RepaintBoundary(child: widget.child))),
+            child: ClipRect(
+              clipBehavior: AppZoom.suspended.value > 0 ? Clip.none : Clip.hardEdge,
+              child: Transform(transform: _v.matrix, child: RepaintBoundary(child: widget.child)),
+            ),
           ),
         );
       });
@@ -228,6 +231,11 @@ class AppZoom extends StatefulWidget {
   /// Current app zoom (for tests / debugging).
   static final ValueNotifier<ZoomView> current = ValueNotifier(ZoomView.identity);
 
+  /// Screens that bring their own zoom and a native view (the Photo Highlighter WebView) turn
+  /// the app zoom off while they are open: no pinch recogniser in the way and no clip layer
+  /// over the platform view. Counter, so nested users are safe.
+  static final ValueNotifier<int> suspended = ValueNotifier(0);
+
   @override
   State<AppZoom> createState() => _AppZoomState();
 }
@@ -239,14 +247,25 @@ class _AppZoomState extends State<AppZoom> with SingleTickerProviderStateMixin {
   ZoomView _from = ZoomView.identity;
   ZoomView _to = ZoomView.identity;
 
+  void _onSuspend() {
+    if (AppZoom.suspended.value > 0 && _v.scale != 1) {
+      _anim.stop();
+      _set(ZoomView.identity);
+    } else if (mounted) {
+      setState(() {});
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _anim.addListener(() => _set(ZoomView.lerp(_from, _to, Curves.easeOutCubic.transform(_anim.value))));
+    AppZoom.suspended.addListener(_onSuspend);
   }
 
   @override
   void dispose() {
+    AppZoom.suspended.removeListener(_onSuspend);
     _anim.dispose();
     super.dispose();
   }
@@ -295,7 +314,10 @@ class _AppZoomState extends State<AppZoom> with SingleTickerProviderStateMixin {
                   },
               ),
             },
-            child: ClipRect(child: Transform(transform: _v.matrix, child: RepaintBoundary(child: widget.child))),
+            child: ClipRect(
+              clipBehavior: AppZoom.suspended.value > 0 ? Clip.none : Clip.hardEdge,
+              child: Transform(transform: _v.matrix, child: RepaintBoundary(child: widget.child)),
+            ),
           ),
         );
       });

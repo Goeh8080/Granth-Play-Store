@@ -43,6 +43,7 @@ class DataCompat {
     Store.kTopicCols, Store.kGranthCols, Store.kPramanCols, Store.kGalleryCols, Store.kUiCols,
     Store.kPdfStyle, Store.kLook, Store.kTextSize, Store.kWifiOnly, Store.kAutoSync, Store.kKeepAwake,
     Store.kHash, Store.kOfflineIds, Store.kDevice, Store.kOfflineReady, Store.kNotifAsked, Store.kNotifHint,
+    Store.kAnimations, Store.kOfflineCardSeen,
   ];
 
   /// Each step takes the layout from version `n` to `n + 1`. Idempotent: running one twice

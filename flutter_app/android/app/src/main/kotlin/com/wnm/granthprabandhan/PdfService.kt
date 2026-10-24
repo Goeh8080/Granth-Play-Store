@@ -30,6 +30,10 @@ class PdfService : Service() {
         const val CH_DONE = "pdf_done_v2"
         private val OLD_CHANNELS = listOf("pdf_progress", "pdf_done")
         const val NOTE_ID = 4100
+
+        /** The ONE finished/failed notification of a run (fixed id: it is replaced, never stacked). */
+        const val SUMMARY_ID = 4101
+        const val GROUP = "granth_work"
         private const val EXTRA_TEXT = "text"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_PERCENT = "percent"
@@ -98,7 +102,7 @@ class PdfService : Service() {
         private fun progressNote(ctx: Context, title: String, text: String, percent: Int): Notification {
             ensureChannels(ctx)
             return builder(ctx, CH_PROGRESS)
-                .setSmallIcon(R.drawable.ic_stat_pdf)
+                .setSmallIcon(R.drawable.ic_stat_granth)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setOngoing(true)
@@ -106,6 +110,7 @@ class PdfService : Service() {
                 .setShowWhen(false)
                 .setProgress(100, PdfNotes.clampPercent(percent), percent <= 0)
                 .setCategory(Notification.CATEGORY_PROGRESS)
+                .setGroup(GROUP)
                 .setContentIntent(openApp(ctx))
                 .apply { if (Build.VERSION.SDK_INT >= 31) setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE) }
                 .build()
@@ -125,6 +130,7 @@ class PdfService : Service() {
                 }
                 return
             }
+            cancelSummary(app)
             Log.i(TAG, "start service ($percent%), notifications visible=${notificationsVisible(app)}")
             val i = Intent(app, PdfService::class.java)
                 .putExtra(EXTRA_TITLE, title)
@@ -161,58 +167,49 @@ class PdfService : Service() {
             }
         }
 
-        /** "PDF तैयार" notification; a tap opens the PDF (or the app when it can't be opened). */
-        fun done(ctx: Context, id: Int, name: String, uri: String?) {
+        private fun cancelSummary(app: Context) {
+            try {
+                (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(SUMMARY_ID)
+            } catch (_: Exception) {}
+        }
+
+        /**
+         * Round 8: the ONE notification for a whole run of PDFs, posted once when the last one
+         * ends ("PDF तैयार" / "50 PDF तैयार" / "48 तैयार, 2 नहीं बनीं"). Fixed id, so it is replaced
+         * by the next run's progress and never stacks; a tap opens the PDF when there is exactly
+         * one finished PDF, else the app.
+         */
+        fun summary(ctx: Context, done: Int, failed: Int, names: List<String>, uri: String?, error: String) {
             val app = ctx.applicationContext
+            if (done + failed <= 0) return
             try {
                 ensureChannels(app)
                 var tap = openApp(app)
-                if (uri != null && uri.startsWith("content://")) {
+                if (done == 1 && failed == 0 && uri != null && uri.startsWith("content://")) {
                     val view = Intent(Intent.ACTION_VIEW).apply {
                         setDataAndType(Uri.parse(uri), "application/pdf")
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
                     if (view.resolveActivity(app.packageManager) != null) {
-                        tap = PendingIntent.getActivity(app, id, view, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                        tap = PendingIntent.getActivity(app, 2, view, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                     }
                 }
+                val text = PdfNotes.summaryText(done, failed, names, error)
                 val n = builder(app, CH_DONE)
-                    .setSmallIcon(R.drawable.ic_stat_pdf)
-                    .setContentTitle("PDF तैयार")
-                    .setCategory(Notification.CATEGORY_STATUS)
-                    .setContentText(name)
+                    .setSmallIcon(R.drawable.ic_stat_granth)
+                    .setContentTitle(PdfNotes.summaryTitle(done, failed))
+                    .setContentText(text)
+                    .setStyle(Notification.BigTextStyle().bigText(text))
+                    .setCategory(if (done == 0) Notification.CATEGORY_ERROR else Notification.CATEGORY_STATUS)
+                    .setGroup(GROUP)
+                    .setOnlyAlertOnce(true)
                     .setAutoCancel(true)
                     .setContentIntent(tap)
                     .build()
-                val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                nm.notify(PdfNotes.doneId(id), n)
-                Log.i(TAG, "done notification posted (visible=${notificationsVisible(app)})")
+                (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(SUMMARY_ID, n)
+                Log.i(TAG, "summary posted: $done done, $failed failed (visible=${notificationsVisible(app)})")
             } catch (e: Exception) {
-                Log.w(TAG, "done notify: $e")
-            }
-        }
-
-        /**
-         * Round 7: a PDF could not be finished (pages not downloadable, e.g. no internet). Same id
-         * as its "PDF तैयार" note, so a later successful retry replaces it. Tap opens the app.
-         */
-        fun failedNote(ctx: Context, id: Int, name: String, text: String) {
-            val app = ctx.applicationContext
-            try {
-                ensureChannels(app)
-                val n = builder(app, CH_DONE)
-                    .setSmallIcon(R.drawable.ic_stat_pdf)
-                    .setContentTitle("PDF नहीं बनी — $name")
-                    .setCategory(Notification.CATEGORY_ERROR)
-                    .setContentText(text)
-                    .setStyle(Notification.BigTextStyle().bigText(text))
-                    .setAutoCancel(true)
-                    .setContentIntent(openApp(app))
-                    .build()
-                val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                nm.notify(PdfNotes.doneId(id), n)
-            } catch (e: Exception) {
-                Log.w(TAG, "failed notify: $e")
+                Log.w(TAG, "summary notify: $e")
             }
         }
     }
@@ -281,9 +278,26 @@ class PdfService : Service() {
 object PdfNotes {
     fun clampPercent(p: Int): Int = p.coerceIn(0, 100)
 
-    /** Each finished PDF gets its own "PDF तैयार" notification, never the progress one. */
-    fun doneId(id: Int): Int = PdfService.NOTE_ID + 1 + (id and 0xFFFF)
-
     /** onStartCommand: stop straight after startForeground when the stop came first. */
     fun stopRightAway(stopRequested: Boolean, inForeground: Boolean): Boolean = stopRequested && inForeground
+
+    fun summaryTitle(done: Int, failed: Int): String = when {
+        failed == 0 && done == 1 -> "PDF तैयार"
+        failed == 0 -> "$done PDF तैयार"
+        done == 0 && failed == 1 -> "PDF नहीं बनी"
+        done == 0 -> "$failed PDF नहीं बनीं"
+        else -> "$done तैयार, $failed नहीं बनीं"
+    }
+
+    /** Up to 3 names, then "+N और"; a failure shows its reason when it is the only news. */
+    fun summaryText(done: Int, failed: Int, names: List<String>, error: String): String {
+        val shown = names.filter { it.isNotBlank() }.take(3)
+        val more = (done + failed - shown.size).coerceAtLeast(0)
+        val list = if (shown.isEmpty()) "" else shown.joinToString(", ") + if (more > 0) " +$more और" else ""
+        return when {
+            done == 0 && error.isNotBlank() && failed == 1 -> if (list.isEmpty()) error else "$list — $error"
+            list.isNotEmpty() -> list
+            else -> "ऐप खोलकर देखें"
+        }
+    }
 }

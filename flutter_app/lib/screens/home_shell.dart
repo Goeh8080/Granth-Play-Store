@@ -16,6 +16,7 @@ import '../state/router.dart';
 import '../state/toast.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
+import '../widgets/bounded_scroll.dart';
 import '../widgets/common.dart';
 import '../widgets/pdf_sheets.dart';
 import 'dashboard_screen.dart';
@@ -67,6 +68,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     PdfQueue.I.finished.removeListener(_onFinished);
     PdfNotify.I.hint.removeListener(_onNotifHint);
     CatalogStore.I.offlineReady.removeListener(_onOfflineReady);
+    _deckSel.dispose();
     _scroll.dispose();
     _panelIn.dispose();
     super.dispose();
@@ -120,34 +122,34 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     setState(() {});
   }
 
-  // ---------- PDF progress → arrow + dropdown / done (`PdfDock`) ----------
+  // ---------- PDF progress → arrow + deck / done (`PdfDock`, ashok's `Zh`) ----------
   final LayerLink _deckLink = LayerLink();
-  final GlobalKey _stackKey = GlobalKey();
   static final GlobalKey arrowKey = GlobalKey();
 
-  /// Horizontal nudge so the dropdown's right edge sits 12 px from the screen edge
-  /// (it hangs under the arrow, but must never run off the left side).
-  double _deckDx() {
-    final stack = _stackKey.currentContext?.findRenderObject() as RenderBox?;
-    final arrow = arrowKey.currentContext?.findRenderObject() as RenderBox?;
-    if (stack == null || arrow == null || !stack.hasSize || !arrow.attached) return 0;
-    final right = stack.globalToLocal(arrow.localToGlobal(arrow.size.bottomRight(Offset.zero))).dx;
-    return stack.size.width - 12 - right;
-  }
+  /// The PDF the deck shows; set to a PDF the moment it starts (ashok: `i(r)` + `n(true)`).
+  final ValueNotifier<String?> _deckSel = ValueNotifier<String?>(null);
+
+  /// Ids of PDFs already met: a PDF opens the deck once, when it first shows up as running.
+  /// (ashok re-opens it whenever the first running PDF changes, so with a queue the card keeps
+  /// jumping up in front of the reader as each one ends — not copied.)
+  final Set<String> _seenJobs = {};
+  bool _doneOpen = false;
 
   void _onQueue() {
     if (!mounted) return;
-    // Collapsed by default: a new PDF only shows in the header arrow (⌄ N). The list opens
-    // when the arrow is tapped.
+    PdfJob? fresh;
+    for (final j in PdfQueue.I.jobs) {
+      if (_seenJobs.add(j.id) && j.active && fresh == null) fresh = j;
+    }
     if (PdfQueue.I.jobs.isEmpty) _deckOpen = false;
+    if (fresh != null && !_doneOpen) {
+      _deckSel.value = fresh.id;
+      _deckOpen = true;
+    }
     setState(() {});
   }
 
-  void _openDeck([int? index]) => setState(() {
-        _deckOpen = !_deckOpen;
-        if (_deckOpen) _dx = _deckDx();
-      });
-  double _dx = 0;
+  void _openDeck([int? index]) => setState(() => _deckOpen = !_deckOpen);
 
   void _closeDeck() {
     if (_deckOpen) setState(() => _deckOpen = false);
@@ -155,7 +157,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
 
   bool _readyOpen = false;
 
-  /// "सारे ग्रंथ ऑफलाइन हो गए हैं" — once per completed library download.
+  /// "सारे ग्रंथ ऑफलाइन हो गए हैं" — ONCE, ever (round 8).
   void _onOfflineReady() {
     final r = CatalogStore.I.offlineReady.value;
     if (r == null || _readyOpen || !mounted) return;
@@ -182,13 +184,20 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     final uri = FileActions.exportToDeviceUri(j.filePath!, j.fileName).catchError((Object _) => null);
     final exported = uri.then((u) => u != null);
     uri.then((u) => PdfNotify.I.done(j, u));
-    if (_deckOpen || PdfQueue.I.activeCount > 0) {
-      // Several PDFs in progress: the row in the deck shows the actions; just confirm with a toast.
+    // ashok: a finished PDF closes the deck and the "PDF तैयार" popup takes over. Only one such
+    // popup at a time — PDFs that end while it is open (a queue of many) get a toast, not a stack.
+    if (_deckOpen) setState(() => _deckOpen = false);
+    if (_doneOpen) {
       exported.then((ok) => Toast.show(ok ? 'PDF तैयार: ${j.fileName} — Downloads में सेव' : 'PDF तैयार: ${j.fileName}'));
       return;
     }
+    _doneOpen = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) openDone(context, j, exported);
+      if (!mounted) {
+        _doneOpen = false;
+        return;
+      }
+      openDone(context, j, exported).whenComplete(() => _doneOpen = false);
     });
   }
 
@@ -247,7 +256,6 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
         child: Scaffold(
           backgroundColor: GColors.cream,
           body: Stack(
-            key: _stackKey,
             children: [
               const Positioned.fill(child: _RootBackground()),
               ListenableBuilder(
@@ -257,7 +265,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                   final total = s.topics.length + s.granths.length + s.pramans.length;
                   return CustomScrollView(
                     controller: _scroll,
-                    physics: const ClampingScrollPhysics(),
+                    physics: const BoundedScrollPhysics(),
                     slivers: [
                       SliverToBoxAdapter(
                         child: _Mast(deckOpen: _deckOpen, onDeck: () => _openDeck(0), link: _deckLink),
@@ -318,32 +326,8 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                   ),
                 ),
               ),
-              // PDF list dropdown under the header arrow.
-              if (_deckOpen) Positioned.fill(child: GestureDetector(key: const ValueKey('pdf-shade'), behavior: HitTestBehavior.opaque, onTap: _closeDeck)),
-              Positioned(
-                left: 0,
-                top: 0,
-                child: CompositedTransformFollower(
-                  link: _deckLink,
-                  showWhenUnlinked: false,
-                  targetAnchor: Alignment.bottomRight,
-                  followerAnchor: Alignment.topRight,
-                  offset: Offset(_dx, 10),
-                  child: SizedBox(
-                    width: math.min(420, ((_stackKey.currentContext?.findRenderObject() as RenderBox?)?.size.width ?? MediaQuery.sizeOf(context).width) - 24),
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 240),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      transitionBuilder: (c, a) => FadeTransition(
-                        opacity: a,
-                        child: ScaleTransition(scale: Tween(begin: 0.92, end: 1.0).animate(a), alignment: Alignment.topRight, child: c),
-                      ),
-                      child: _deckOpen && PdfQueue.I.jobs.isNotEmpty ? PdfDropdown(onClose: _closeDeck) : const SizedBox.shrink(),
-                    ),
-                  ),
-                ),
-              ),
+              // ashok's PDF deck: a centred modal over a scrim (it also covers the header).
+              if (_deckOpen && PdfQueue.I.jobs.isNotEmpty) Positioned.fill(child: PdfDeckLayer(key: const ValueKey('pdf-deck-layer'), selected: _deckSel, onClose: _closeDeck)),
               const _ToastLayer(),
             ],
           ),

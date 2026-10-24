@@ -16,6 +16,7 @@ import '../widgets/live_panel.dart';
 import '../widgets/granth_image.dart';
 import '../widgets/overlays.dart';
 import '../widgets/panel.dart';
+import '../widgets/pop.dart';
 import '../widgets/pdf_sheets.dart';
 import '../widgets/video_block.dart';
 
@@ -31,6 +32,7 @@ class _PramansPanelState extends State<PramansPanel> with LivePanel {
   late final String _key = Places.keyFor(widget.route) ?? 'praman-list::';
   late String _q = Places.query(_key);
   final _log = SearchLogger();
+  final _ledger = PopLedger();
   List<Praman>? _src;
   List<Praman>? _filteredSrc;
   String _filteredKey = '';
@@ -63,6 +65,7 @@ class _PramansPanelState extends State<PramansPanel> with LivePanel {
     final key = '${e.topicId}|${e.granthId}|${e.pramanId}';
     if (!identical(_filteredSrc, all) || key != _filteredKey) {
       _filteredSrc = all;
+      if (key != _filteredKey) _ledger.clear(); // a new page of pramans = a new visit
       _filteredKey = key;
       _filtered = orderPramans(
         all.where((t) => !((e.topicId != null && t.topicId != e.topicId) || (e.granthId != null && t.granthId != e.granthId) || (e.pramanId != null && t.id != e.pramanId))).toList(),
@@ -128,7 +131,16 @@ class _PramansPanelState extends State<PramansPanel> with LivePanel {
         count: rows.length,
         cols: cols,
         gap: 14,
-        item: (context, i) => Entry(index: i + 2, dx: dx, child: PramanCard(praman: rows[i], index: i + 1, total: rows.length)),
+        item: (context, i) {
+          final id = '$cols:${rows[i].id}';
+          return Entry(
+            index: i + 2,
+            dx: dx,
+            ledger: _ledger,
+            id: id,
+            child: CardPop(ledger: _ledger, id: id, group: '$cols', index: i + 2, child: PramanCard(praman: rows[i], index: i + 1, total: rows.length)),
+          );
+        },
       )),
       if (rows.isEmpty && _linkMissing(s, e, topic, granth))
         SliverToBoxAdapter(

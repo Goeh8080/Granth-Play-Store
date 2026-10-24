@@ -136,12 +136,15 @@ class MainActivity : FlutterActivity() {
                     PdfService.stop(applicationContext)
                     result.success(null)
                 }
-                "pdfFailed" -> {
-                    PdfService.failedNote(applicationContext, call.argument<Int>("id") ?: 0, call.argument<String>("name") ?: "PDF", call.argument<String>("text") ?: "")
-                    result.success(null)
-                }
-                "pdfDone" -> {
-                    PdfService.done(applicationContext, call.argument<Int>("id") ?: 0, call.argument<String>("name") ?: "PDF", call.argument<String>("uri"))
+                "pdfSummary" -> {
+                    PdfService.summary(
+                        applicationContext,
+                        call.argument<Int>("done") ?: 0,
+                        call.argument<Int>("failed") ?: 0,
+                        call.argument<List<String>>("names") ?: emptyList(),
+                        call.argument<String>("uri"),
+                        call.argument<String>("error") ?: "",
+                    )
                     result.success(null)
                 }
                 "notifState" -> result.success(notifState())

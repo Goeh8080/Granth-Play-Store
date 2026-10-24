@@ -3,25 +3,51 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../theme/colors.dart';
+import '../state/motion.dart';
 import 'common.dart';
+import 'pop.dart';
 import 'granth_image.dart';
 import 'zoom.dart';
 
 /// `.pdf-pop` + `.pdf-sheet` animation (sheet-fade .22s + sheet-rise .28s cubic(.22,1,.36,1)).
 const Curve kRise = Cubic(0.22, 1, 0.36, 1);
 
-Future<T?> showPop<T>(BuildContext context, WidgetBuilder builder, {bool dismissible = true}) {
+/// Blur-focus entrance of the PDF popup cards (ashok-exact, round 8): 520 ms.
+const Duration kFocusTime = Duration(milliseconds: 520);
+
+/// Leaves faster than it arrives (nothing waits half a second to be dismissed).
+class _FocusRoute<T> extends RawDialogRoute<T> {
+  _FocusRoute({required super.pageBuilder, required super.barrierColor, required super.transitionBuilder, super.barrierDismissible, super.barrierLabel})
+      : super(transitionDuration: kFocusTime);
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 200);
+}
+
+/// [blurFocus]: the card comes in out of a 12 px blur (`ImageFiltered` + `Opacity`, 520 ms) instead of
+/// the 0.28 s rise; falls back to the plain rise with "एनिमेशन: कम" / the phone's no-animation.
+Future<T?> showPop<T>(BuildContext context, WidgetBuilder builder, {bool dismissible = true, bool blurFocus = false}) {
+  Widget page(BuildContext ctx, Animation<double> a, Animation<double> b) => SafeArea(
+        child: Center(
+          child: Padding(padding: const EdgeInsets.all(16), child: Material(type: MaterialType.transparency, child: builder(ctx))),
+        ),
+      );
+  final scrim = GColors.brown.withValues(alpha: 0.28);
+  if (blurFocus && Motion.on(context)) {
+    return Navigator.of(context, rootNavigator: true).push(_FocusRoute<T>(
+      barrierDismissible: dismissible,
+      barrierLabel: 'close',
+      barrierColor: scrim,
+      pageBuilder: page,
+      transitionBuilder: (ctx, a, b, child) => BlurFocus(animation: CurvedAnimation(parent: a, curve: kRise, reverseCurve: Curves.easeIn), child: child),
+    ));
+  }
   return showGeneralDialog<T>(
     context: context,
     barrierDismissible: dismissible,
     barrierLabel: 'close',
-    barrierColor: GColors.brown.withValues(alpha: 0.28),
+    barrierColor: scrim,
     transitionDuration: const Duration(milliseconds: 280),
-    pageBuilder: (ctx, a, b) => SafeArea(
-      child: Center(
-        child: Padding(padding: const EdgeInsets.all(16), child: Material(type: MaterialType.transparency, child: builder(ctx))),
-      ),
-    ),
+    pageBuilder: page,
     transitionBuilder: (ctx, a, b, child) {
       final rise = CurvedAnimation(parent: a, curve: kRise, reverseCurve: Curves.easeIn);
       return FadeTransition(

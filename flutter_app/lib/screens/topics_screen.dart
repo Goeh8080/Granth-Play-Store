@@ -16,6 +16,7 @@ import '../widgets/common.dart';
 import '../widgets/live_panel.dart';
 import '../widgets/overlays.dart';
 import '../widgets/panel.dart';
+import '../widgets/pop.dart';
 import '../widgets/pdf_sheets.dart';
 
 /// `Th` — Topics / विषय / प्रश्नोत्तरी.
@@ -28,6 +29,7 @@ class TopicsPanel extends StatefulWidget {
 class _TopicsPanelState extends State<TopicsPanel> with LivePanel {
   String _q = Places.query('topic-list-place');
   final _log = SearchLogger();
+  final _ledger = PopLedger();
   List<Topic>? _src;
 
   SearchDoc _doc(Topic t) => CatalogStore.I.topicDoc(t);
@@ -84,16 +86,27 @@ class _TopicsPanelState extends State<TopicsPanel> with LivePanel {
         count: rows.length,
         cols: cols,
         gap: 14,
-        item: (context, i) => Entry(
-          index: i + 1,
-          dx: dx,
-          child: TopicCard(
-            topic: rows[i],
+        item: (context, i) {
+          final id = '$cols:${rows[i].id}';
+          return Entry(
             index: i + 1,
-            total: rows.length,
-            padding: cols == 2 ? 12 : 16,
-          ),
-        ),
+            dx: dx,
+            ledger: _ledger,
+            id: id,
+            child: CardPop(
+              ledger: _ledger,
+              id: id,
+              group: '$cols',
+              index: i + 1,
+              child: TopicCard(
+                topic: rows[i],
+                index: i + 1,
+                total: rows.length,
+                padding: cols == 2 ? 12 : 16,
+              ),
+            ),
+          );
+        },
       )),
       if (rows.isEmpty) const SliverToBoxAdapter(child: EmptyState(title: 'कोई विषय नहीं', body: 'सिंक पूरा होने पर विषय यहाँ दिखेंगे।')),
     ]);

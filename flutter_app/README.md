@@ -45,6 +45,7 @@ See [docs/PARITY.md](docs/PARITY.md) for the full feature-parity checklist again
   - toasts slide up;
   - dialogs rise into place (the original's own rise curve, `cubic(.22,1,.36,1)`);
   - the Top button slides in.
+- **Round 8:** cards on the Granth, Topic and Pramaan tabs pop in once per visit (scale with a small overshoot); the PDF deck opens itself and fades in out of a blur; the app fades in out of a blur after the splash; Granth cards stagger their inner parts. Settings → **एनिमेशन** (चालू / कम) turns the new motion down; the phone's "remove animations" is honoured too.
 
 ## Build
 

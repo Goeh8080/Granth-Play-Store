@@ -9,8 +9,11 @@ import 'storage.dart';
 /// Status-bar side of PDF making (Android foreground service `PdfService`).
 ///
 /// While PDFs are being made: one ongoing notification "2 PDF बन रही हैं — 45%" that keeps
-/// the app alive in the background. When the last one ends the service stops. Each
-/// finished PDF gets a "PDF तैयार" notification that opens it.
+/// the app alive in the background. When the last one ends the service stops.
+///
+/// Round 8 — no spam: finished / failed PDFs are NOT announced one by one. They are counted, and
+/// ONE summary notification ("50 PDF तैयार") is posted after the last PDF has ended (fixed id on
+/// Android, so it is replaced, never stacked). Fifty PDFs = one progress notification + one summary.
 class PdfNotify {
   PdfNotify._();
   static final PdfNotify I = PdfNotify._();
@@ -35,6 +38,16 @@ class PdfNotify {
   int _lastCount = -1;
   int _lastAt = 0;
   Timer? _trail;
+  bool _trailing = false;
+
+  /// How long after the last PDF ended (and its Downloads copy was saved) the summary is posted.
+  @visibleForTesting
+  static Duration summaryDelay = const Duration(milliseconds: 900);
+  final List<String> _doneNames = [];
+  final Map<String, String> _failed = {}; // job id → title
+  String? _lastUri;
+  String _lastError = '';
+  Timer? _flush;
 
   void attach() {
     if (_attached) return;
@@ -51,6 +64,11 @@ class PdfNotify {
     _lastCount = -1;
     _lastAt = 0;
     _trail?.cancel();
+    _flush?.cancel();
+    _doneNames.clear();
+    _failed.clear();
+    _lastUri = null;
+    _lastError = '';
     hint.value = 0;
     lastCheck = '';
   }
@@ -70,6 +88,7 @@ class PdfNotify {
         _lastCount = -1;
         _log('all PDFs ended → stop service');
         call('pdfStop', const {});
+        _schedule();
       }
       return;
     }
@@ -80,11 +99,17 @@ class PdfNotify {
     final pct = q.overallPercent;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (count == _lastCount && pct == _lastPercent) return;
-    // At most ~2 updates a second (Android drops faster ones anyway).
-    if (count == _lastCount && now - _lastAt < 500) {
+    // At most ~2 updates a second, also when the count changes (50 PDFs ending together made 50
+    // updates before; Android drops faster ones anyway). The trailing timer posts the last state.
+    if (!_trailing && now - _lastAt < 500) {
       _trail ??= Timer(const Duration(milliseconds: 520), () {
         _trail = null;
-        _onQueue();
+        _trailing = true; // the trailing post itself is never throttled again
+        try {
+          _onQueue();
+        } finally {
+          _trailing = false;
+        }
       });
       return;
     }
@@ -144,9 +169,48 @@ class PdfNotify {
 
   Future<void> openSettings() => query('openNotificationSettings', const {});
 
-  /// "PDF तैयार" notification; [uri] is the Downloads copy (opens the PDF when tapped).
-  /// Round 7: "PDF नहीं बनी" with the reason (pages missing); replaced by "PDF तैयार" later.
-  void failed(PdfJob job) => call('pdfFailed', {'id': job.id.hashCode & 0x7fffffff, 'name': job.title, 'text': job.error ?? ''});
+  /// A PDF could not be finished (e.g. pages missing, no internet). Counted for the summary; a later
+  /// successful retry of the same job takes it back out.
+  void failed(PdfJob job) {
+    _failed[job.id] = job.title;
+    _lastError = job.error ?? '';
+    _schedule();
+  }
 
-  void done(PdfJob job, String? uri) => call('pdfDone', {'id': job.id.hashCode & 0x7fffffff, 'name': job.fileName, 'uri': uri});
+  /// A PDF is finished; [uri] is its Downloads copy (opens the PDF when the summary is tapped and
+  /// it is the only one).
+  void done(PdfJob job, String? uri) {
+    _failed.remove(job.id);
+    _doneNames.add(job.fileName);
+    _lastUri = uri;
+    _schedule();
+  }
+
+  void _schedule() {
+    _flush?.cancel();
+    if (_running) return; // posted when the run ends
+    if (_doneNames.isEmpty && _failed.isEmpty) return;
+    _flush = Timer(summaryDelay, _post);
+  }
+
+  void _post() {
+    _flush = null;
+    if (_running) return;
+    final d = _doneNames.length, f = _failed.length;
+    if (d + f == 0) return;
+    final names = [..._doneNames.reversed, ..._failed.values].take(5).toList();
+    final args = <String, Object?>{
+      'done': d,
+      'failed': f,
+      'names': names,
+      'uri': d == 1 && f == 0 ? _lastUri : null,
+      'error': d == 0 && f == 1 ? _lastError : '',
+    };
+    _doneNames.clear();
+    _failed.clear();
+    _lastUri = null;
+    _lastError = '';
+    _log('one summary notification: $d done, $f failed');
+    call('pdfSummary', args);
+  }
 }

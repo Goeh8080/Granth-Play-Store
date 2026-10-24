@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:granthprabandhan/main.dart';
 import 'package:granthprabandhan/services/pdf_notify.dart';
 import 'package:granthprabandhan/services/pdf_queue.dart';
+import 'package:granthprabandhan/widgets/pdf_sheets.dart' show PdfDeck;
 
 import 'helpers.dart';
 import 'round3_test.dart' show frames, pjob;
@@ -32,9 +33,8 @@ void main() {
     final gate = Completer<String>();
     final run = q.start(pjob('run'), (j, r) => gate.future);
     q.dismiss('-');
-    await frames(t, 4);
-    await t.tap(find.byKey(const ValueKey('pdf-arrow')));
-    await frames(t, 4);
+    await frames(t, 12);
+    // Round 8 (ashok): a new running PDF opens the deck by itself.
     expect(find.byKey(const ValueKey('pdf-dropdown')), findsOneWidget);
     // The running PDF (newest, first in the list) is the one on show.
     expect(find.text('1/3'), findsOneWidget);
@@ -74,8 +74,10 @@ void main() {
     q.jobs.add(bad);
     q.dismiss('-');
     await frames(t, 4);
+    // Neither is running (added as done / failed): the deck stays shut until the arrow is tapped.
+    expect(find.byType(PdfDeck), findsNothing);
     await t.tap(find.byKey(const ValueKey('pdf-arrow')));
-    await frames(t, 4);
+    await frames(t, 12);
     expect(find.text('2/2'), findsOneWidget);
     expect(find.textContaining('कुछ पेज डाउनलोड नहीं हुए'), findsOneWidget);
     expect(find.textContaining('(3 पेज बाकी)'), findsOneWidget);

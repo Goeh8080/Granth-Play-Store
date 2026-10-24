@@ -16,12 +16,29 @@ class PdfNotesTest {
     }
 
     @Test
-    fun doneNotificationsNeverReplaceTheProgressOne() {
-        for (id in listOf(0, 1, 0xFFFF, Int.MAX_VALUE, "श्रीमद्भगवत गीता code 17".hashCode() and 0x7fffffff)) {
-            assertNotEquals(PdfService.NOTE_ID, PdfNotes.doneId(id))
-        }
-        // Two different PDFs get two notifications.
-        assertNotEquals(PdfNotes.doneId(1), PdfNotes.doneId(2))
+    fun theSummaryHasItsOwnFixedId() {
+        // One id for the whole run's result: replaced, never stacked; never the progress one.
+        assertNotEquals(PdfService.NOTE_ID, PdfService.SUMMARY_ID)
+        assertNotEquals(PageSyncService.NOTE_ID, PdfService.SUMMARY_ID)
+    }
+
+    @Test
+    fun summaryTitles() {
+        assertEquals("PDF तैयार", PdfNotes.summaryTitle(1, 0))
+        assertEquals("50 PDF तैयार", PdfNotes.summaryTitle(50, 0))
+        assertEquals("PDF नहीं बनी", PdfNotes.summaryTitle(0, 1))
+        assertEquals("3 PDF नहीं बनीं", PdfNotes.summaryTitle(0, 3))
+        assertEquals("48 तैयार, 2 नहीं बनीं", PdfNotes.summaryTitle(48, 2))
+    }
+
+    @Test
+    fun summaryTextShowsAFewNamesNotFifty() {
+        val names = (1..5).map { "g$it.pdf" }
+        assertEquals("g1.pdf, g2.pdf, g3.pdf +47 और", PdfNotes.summaryText(50, 0, names, ""))
+        assertEquals("a.pdf", PdfNotes.summaryText(1, 0, listOf("a.pdf"), ""))
+        assertEquals("गीता — इंटरनेट नहीं", PdfNotes.summaryText(0, 1, listOf("गीता"), "इंटरनेट नहीं"))
+        assertEquals("ऐप खोलकर देखें", PdfNotes.summaryText(2, 0, emptyList(), ""))
+        assertEquals("a.pdf, b.pdf", PdfNotes.summaryText(2, 0, listOf("a.pdf", " ", "b.pdf"), ""))
     }
 
     @Test

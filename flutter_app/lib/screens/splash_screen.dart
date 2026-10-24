@@ -1,9 +1,14 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../state/motion.dart';
 import '../theme/colors.dart';
 import '../widgets/common.dart';
+
+/// "ग्रंथ प्रबंधन" under the logo on the opening screen (round 8: bigger, was 34).
+const double kSplashTitleSize = 44;
 
 /// Animated opening: the native white splash hands over to this — the mala beads string
 /// themselves around the logo, a saffron glow blooms, the title rises, then the whole
@@ -106,7 +111,14 @@ class _AnimatedSplashState extends State<AnimatedSplash> with TickerProviderStat
         child: app,
         builder: (context, child) {
           final t = Curves.easeOutCubic.transform(_out.value);
-          return Opacity(opacity: t, child: Transform.scale(scale: 0.94 + 0.06 * t, child: child));
+          // Round 8: the app also comes into focus (blur 10 → 0) while it fades in. Dropped at
+          // the end of the zoom-out (t == 1) and with "एनिमेशन: कम" / the phone's no-animation.
+          final blur = Motion.on(context) ? 10 * (1 - t) : 0.0;
+          final scaled = Transform.scale(scale: 0.94 + 0.06 * t, child: child);
+          return Opacity(
+            opacity: t,
+            child: blur < 0.05 ? scaled : ImageFiltered(imageFilter: ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur, tileMode: ui.TileMode.decal), child: scaled),
+          );
         },
       ),
       AnimatedBuilder(
@@ -140,7 +152,7 @@ class _AnimatedSplashState extends State<AnimatedSplash> with TickerProviderStat
                       opacity: title,
                       child: Transform.translate(
                         offset: Offset(0, 16 * (1 - title)),
-                        child: Text('ग्रंथ प्रबंधन', style: GText.display(size: 34, color: GColors.maroon, letterSpacing: 0.5)),
+                        child: Text('ग्रंथ प्रबंधन', style: GText.display(size: kSplashTitleSize, color: GColors.maroon, letterSpacing: 0.5)),
                       ),
                     ),
                   ]),

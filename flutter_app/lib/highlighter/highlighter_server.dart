@@ -104,7 +104,34 @@ class HighlighterServer {
   int? get port => _server?.port;
   Uri get origin => Uri.parse('http://127.0.0.1:${_server!.port}');
 
-  Future<ByteData> _asset(String key) => (loadAsset ?? rootBundle.load)(key);
+  /// Bundled files, read from the APK once per run (rootBundle.load re-reads and re-inflates
+  /// the file on every request; pdf.worker alone is 1 MB). The patched page is kept too.
+  final Map<String, Future<Uint8List>> _mem = {};
+  Future<Uint8List> _bytes(String key, [Uint8List Function(Uint8List)? make]) => _mem.putIfAbsent(key, () async {
+        final b = await (loadAsset ?? rootBundle.load)(key);
+        final raw = b.buffer.asUint8List(b.offsetInBytes, b.lengthInBytes);
+        return make == null ? raw : make(raw);
+      });
+
+  /// Weak validator for a body: length + a cheap hash (FNV-1a over up to 64 KB spread across it).
+  static String etagOf(Uint8List b) {
+    var h = 0x811c9dc5;
+    final step = b.length <= 65536 ? 1 : (b.length ~/ 65536) + 1;
+    for (var i = 0; i < b.length; i += step) {
+      h = ((h ^ b[i]) * 0x01000193) & 0xffffffff;
+    }
+    return '"${b.length.toRadixString(16)}-${h.toRadixString(16)}"';
+  }
+
+  /// How long the WebView may keep a file without asking: pinned libraries once saved never
+  /// change (a year, `immutable`: no revalidation, so the 11 MB OpenCV is not even requested on
+  /// the next open and its compiled code stays cached); the page and the bridge may change with
+  /// an app update, so they are revalidated (a tiny 304) every time.
+  static String cacheControlFor(String path) {
+    if (path == '/' || path == '/index.html' || path == '/hl-shim.js') return 'no-cache';
+    if (path.startsWith('/lib/')) return 'public, max-age=86400';
+    return 'public, max-age=31536000, immutable';
+  }
 
   Future<Uri> start() async {
     if (_server != null) return origin;
@@ -115,6 +142,7 @@ class HighlighterServer {
       } catch (_) {}
     }
     final s = _server!;
+    s.autoCompress = false; // loopback: gzip of an 11 MB script only burns CPU
     s.listen(_handle, onError: (Object _) {});
     return origin;
   }
@@ -228,19 +256,34 @@ class HighlighterServer {
     }
   }
 
+  /// Sends [body] with validators; answers 304 when the WebView already has this version.
+  Future<void> _send(HttpRequest r, String path, Uint8List body, String type) async {
+    final res = r.response;
+    final tag = etagOf(body);
+    res.headers
+      ..set('etag', tag)
+      ..set('cache-control', cacheControlFor(path))
+      ..contentType = ContentType.parse(type);
+    if (r.headers.value('if-none-match') == tag) {
+      res.statusCode = 304;
+      return;
+    }
+    res.headers.contentLength = body.length;
+    if (r.method == 'HEAD') return;
+    res.add(body);
+  }
+
   Future<void> _handle(HttpRequest r) async {
     final res = r.response;
     try {
       final path = r.uri.path;
-      res.headers.set('cache-control', 'no-cache');
       if (r.method != 'GET' && r.method != 'HEAD') {
         res.statusCode = 405;
         return;
       }
       if (path == '/' || path == '/index.html') {
-        final html = utf8.decode((await _asset('assets/highlighter/index.html')).buffer.asUint8List(), allowMalformed: true);
-        res.headers.contentType = ContentType.parse(hlContentType('/'));
-        res.add(utf8.encode(patchHighlighterHtml(html)));
+        final page = await _bytes('assets/highlighter/index.html', (raw) => Uint8List.fromList(utf8.encode(patchHighlighterHtml(utf8.decode(raw, allowMalformed: true)))));
+        await _send(r, '/', page, hlContentType('/'));
         return;
       }
       if (path == '/hl-shim.js' || path.startsWith('/lib/')) {
@@ -249,9 +292,7 @@ class HighlighterServer {
           res.statusCode = 404;
           return;
         }
-        final b = await _asset('assets/highlighter/$name');
-        res.headers.contentType = ContentType.parse(hlContentType(name));
-        res.add(b.buffer.asUint8List(b.offsetInBytes, b.lengthInBytes));
+        await _send(r, path, await _bytes('assets/highlighter/$name'), hlContentType(name));
         return;
       }
       final up = upstreamFor(path);
@@ -262,12 +303,24 @@ class HighlighterServer {
       final f = await _ensure(path, up);
       if (f == null) {
         res.statusCode = 503; // not saved yet and no internet
-        res.headers.contentType = ContentType.text;
+        res.headers
+          ..set('cache-control', 'no-store')
+          ..contentType = ContentType.text;
         res.write('offline');
         return;
       }
-      res.headers.contentType = ContentType.parse(hlContentType(path));
-      res.headers.contentLength = await f.length();
+      final len = await f.length();
+      final mtime = (await f.lastModified()).millisecondsSinceEpoch;
+      final tag = '"${len.toRadixString(16)}-${mtime.toRadixString(16)}"';
+      res.headers
+        ..set('etag', tag)
+        ..set('cache-control', cacheControlFor(path))
+        ..contentType = ContentType.parse(hlContentType(path));
+      if (r.headers.value('if-none-match') == tag) {
+        res.statusCode = 304;
+        return;
+      }
+      res.headers.contentLength = len;
       if (r.method == 'HEAD') return;
       await res.addStream(f.openRead());
     } catch (e) {
@@ -280,4 +333,5 @@ class HighlighterServer {
       } catch (_) {}
     }
   }
+
 }

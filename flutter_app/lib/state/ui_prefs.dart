@@ -81,7 +81,7 @@ class UiPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool _flag(String k, bool def) => switch (Store.I.getString(k)) { '1' => true, '0' => false, _ => def };
+  bool _flag(String k, bool def) => switch (Store.I.getString(k)) { '1' || 'true' => true, '0' || 'false' => false, _ => def };
 
   /// Picture download for offline use only on WiFi (default off: download on any network).
   bool get wifiOnly => _flag(Store.kWifiOnly, false);
@@ -108,11 +108,20 @@ class UiPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Settings → "एनिमेशन" चालू / कम (default चालू). "कम" switches off the decorative entrance
+  /// animations added in round 8 (card scale-pop, blur-focus, inner stagger); the dashboard
+  /// count-up, the menu, the tilt on opening a granth and the splash are not touched.
+  bool get animations => _flag(Store.kAnimations, true);
+  set animations(bool v) {
+    Store.I.setString(Store.kAnimations, v ? '1' : '0');
+    notifyListeners();
+  }
+
   /// Settings → "सेटिंग रीसेट करें": every setting back to its default. Downloaded granths,
   /// pages, gallery and PDFs are never touched.
   static const settingKeys = [
     Store.kLook, Store.kUiCols, Store.kTopicCols, Store.kGranthCols, Store.kPramanCols, Store.kGalleryCols, //
-    Store.kPdfStyle, Store.kTextSize, Store.kWifiOnly, Store.kAutoSync, Store.kKeepAwake,
+    Store.kPdfStyle, Store.kTextSize, Store.kWifiOnly, Store.kAutoSync, Store.kKeepAwake, Store.kAnimations,
   ];
   Future<void> resetAll() async {
     for (final k in settingKeys) {

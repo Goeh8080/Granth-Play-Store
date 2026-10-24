@@ -18,6 +18,7 @@ import '../widgets/live_panel.dart';
 import '../widgets/granth_image.dart';
 import '../widgets/overlays.dart';
 import '../widgets/panel.dart';
+import '../widgets/pop.dart';
 import '../widgets/pdf_sheets.dart';
 
 /// `Dh` — Granths / Sacred texts and scriptures.
@@ -30,6 +31,7 @@ class GranthsPanel extends StatefulWidget {
 class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
   String _q = Places.query('granth-list-place');
   final _log = SearchLogger();
+  final _ledger = PopLedger();
   List<Granth>? _src;
 
   @override
@@ -85,7 +87,16 @@ class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
         count: rows.length,
         cols: cols,
         gap: cols == 1 ? 14 : (cols == 2 ? 10 : 8),
-        item: (context, i) => Entry(index: i + 1, dx: dx, child: GranthCard(granth: rows[i], index: i + 1, total: rows.length, cols: cols)),
+        item: (context, i) {
+          final id = '$cols:${rows[i].id}';
+          return Entry(
+            index: i + 1,
+            dx: dx,
+            ledger: _ledger,
+            id: id,
+            child: CardPop(ledger: _ledger, id: id, group: '$cols', index: i + 1, tailMs: GranthCard.innerMs, child: GranthCard(granth: rows[i], index: i + 1, total: rows.length, cols: cols)),
+          );
+        },
       )),
       if (rows.isEmpty) const SliverToBoxAdapter(child: EmptyState(title: 'कोई ग्रंथ नहीं', body: 'सिंक के बाद पवित्र ग्रंथ यहाँ खुलेंगे।')),
     ]);
@@ -99,6 +110,9 @@ class GranthCard extends StatefulWidget {
   final int index;
   final int total;
   final int cols;
+
+  /// Extra time after the pop for the inner stagger (image → title → buttons).
+  static const int innerMs = 360;
   @override
   State<GranthCard> createState() => _GranthCardState();
 }
@@ -180,31 +194,44 @@ class _GranthCardState extends State<GranthCard> with SingleTickerProviderStateM
                   );
               final paths = [g.imagePath, g.editorImagePath].map(mediaPath).whereType<String>().toList();
               return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(g.title, maxLines: tiny ? 4 : null, overflow: tiny ? TextOverflow.ellipsis : null, style: GText.script(size: titleSize, color: GColors.maroon)),
-                if (g.author.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Padding(padding: const EdgeInsets.only(top: 2), child: GIcon('pen-line', size: 14, color: GColors.saffronDark)),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(g.author,
-                            maxLines: tiny ? 2 : null,
-                            overflow: tiny ? TextOverflow.ellipsis : null,
-                            style: GText.sans(size: authorSize, weight: FontWeight.w700, color: GColors.saffronDark)),
+                Reveal(
+                  fromMs: 200,
+                  toMs: 500,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    Text(g.title, maxLines: tiny ? 4 : null, overflow: tiny ? TextOverflow.ellipsis : null, style: GText.script(size: titleSize, color: GColors.maroon)),
+                    if (g.author.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Padding(padding: const EdgeInsets.only(top: 2), child: GIcon('pen-line', size: 14, color: GColors.saffronDark)),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(g.author,
+                                maxLines: tiny ? 2 : null,
+                                overflow: tiny ? TextOverflow.ellipsis : null,
+                                style: GText.sans(size: authorSize, weight: FontWeight.w700, color: GColors.saffronDark)),
+                          ),
+                        ]),
                       ),
-                    ]),
-                  ),
-                if (g.description.isNotEmpty)
-                  Padding(padding: const EdgeInsets.only(top: 8), child: Text(g.description, style: GText.sans(size: 14, color: GColors.muted, height: 1.55))),
-                GranthImage(
+                    if (g.description.isNotEmpty)
+                      Padding(padding: const EdgeInsets.only(top: 8), child: Text(g.description, style: GText.sans(size: 14, color: GColors.muted, height: 1.55))),
+                  ]),
+                ),
+                Reveal(
+                  fromMs: 80,
+                  toMs: 380,
+                  child: GranthImage(
                   path: g.imagePath,
                   kind: ShotKind.cover,
                   heroTag: heroTag,
                   onView: paths.isEmpty ? null : () => openLightbox(context, paths, heroTag: heroTag),
                   save: SaveMeta(title: g.title, text: g.description, granth: g.title),
                 ),
-                Container(
+                ),
+                Reveal(
+                  fromMs: 320,
+                  toMs: 780,
+                  child: Container(
                   margin: const EdgeInsets.only(top: 12),
                   padding: const EdgeInsets.only(top: 12),
                   width: double.infinity,
@@ -217,6 +244,7 @@ class _GranthCardState extends State<GranthCard> with SingleTickerProviderStateM
                     pill('हाईलाइट PDF', tone: PillTone.maroon, onTap: () => askPdf(context, GranthPdfRequest(g))),
                     if (offline) pill('ऑफलाइन'),
                   ]),
+                ),
                 ),
               ]);
             }),

@@ -71,7 +71,7 @@ class PageSyncService : Service() {
             val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(ctx, CH) else Notification.Builder(ctx).setPriority(Notification.PRIORITY_LOW)
             val i = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: Intent(ctx, MainActivity::class.java)
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            return b.setSmallIcon(R.drawable.ic_stat_pdf)
+            return b.setSmallIcon(R.drawable.ic_stat_granth)
                 .setContentTitle(PageNotes.title(done, total))
                 .setContentText("ऑफलाइन पढ़ने के लिए")
                 .setOngoing(true)
@@ -79,6 +79,7 @@ class PageSyncService : Service() {
                 .setShowWhen(false)
                 .setProgress(maxOf(total, 1), done.coerceIn(0, maxOf(total, 1)), total <= 0)
                 .setCategory(Notification.CATEGORY_PROGRESS)
+                .setGroup(PdfService.GROUP)
                 .setContentIntent(PendingIntent.getActivity(ctx, 1, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 .build()
         }

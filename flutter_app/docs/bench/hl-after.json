@@ -1,0 +1,54 @@
+{
+ "label": "after",
+ "cpuThrottle": 4,
+ "runs": [
+  {
+   "open": "cold",
+   "load_ms": 2471,
+   "opencv_ready_ms": 2746,
+   "photo4000x3000_ms": 1065,
+   "mergedPdf_ms": 211,
+   "ocr_worker_ready_ms": 323,
+   "ocr_total_ms": 341,
+   "reqs_over_http": 12,
+   "served_from_cache": 3,
+   "MB_over_http": 19.01
+  },
+  {
+   "open": "warm1",
+   "load_ms": 2400,
+   "opencv_ready_ms": 2770,
+   "photo4000x3000_ms": 1145,
+   "mergedPdf_ms": 212,
+   "ocr_worker_ready_ms": 239,
+   "ocr_total_ms": 266,
+   "reqs_over_http": 11,
+   "served_from_cache": 3,
+   "MB_over_http": 7.68
+  },
+  {
+   "open": "warm2",
+   "load_ms": 1601,
+   "opencv_ready_ms": 1888,
+   "photo4000x3000_ms": 1216,
+   "mergedPdf_ms": 245,
+   "ocr_worker_ready_ms": 184,
+   "ocr_total_ms": 200,
+   "reqs_over_http": 11,
+   "served_from_cache": 3,
+   "MB_over_http": 7.68
+  },
+  {
+   "open": "warm3",
+   "load_ms": 1471,
+   "opencv_ready_ms": 1790,
+   "photo4000x3000_ms": 1127,
+   "mergedPdf_ms": 209,
+   "ocr_worker_ready_ms": 198,
+   "ocr_total_ms": 215,
+   "reqs_over_http": 11,
+   "served_from_cache": 3,
+   "MB_over_http": 7.68
+  }
+ ]
+}

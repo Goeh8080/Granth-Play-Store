@@ -114,7 +114,7 @@ void main() {
     expect(s.offlineIds, isEmpty);
   });
 
-  test('offline-ready fires once per completed library, again after new content', () async {
+  test('offline-ready fires ONCE ever: not again on re-sync, not when new content arrives', () async {
     final s = CatalogStore.I..debugSetCatalog(pictureCatalog());
     FakeNet(s);
     s.savePages();
@@ -131,11 +131,23 @@ void main() {
     await drain(s);
     expect(s.offlineReady.value, isNull);
 
-    // New pramans arrive and finish downloading: card again.
+    // New pramans arrive and finish downloading: round 8 — still no card (once, ever).
     s.debugSetCatalog(pictureCatalog(extra: 2));
     s.savePages();
     await drain(s);
-    expect(s.offlineReady.value?.pages, 13);
+    expect(s.offlineReady.value, isNull);
+    expect(Store.I.getString(Store.kOfflineCardSeen), '1');
+    expect(s.offlineCardSeen, isTrue);
+  });
+
+  test('a phone that saw the card under the old rule (only the signature key) counts as seen', () async {
+    await Store.I.setString(Store.kOfflineReady, '11-12345');
+    final s = CatalogStore.I..debugSetCatalog(pictureCatalog());
+    FakeNet(s);
+    s.savePages();
+    await drain(s);
+    expect(s.offlineReady.value, isNull);
+    expect(s.images.complete, isTrue);
   });
 
   test('not acknowledged (app killed before the card showed) → shown next start', () async {
