@@ -5,7 +5,7 @@ import 'package:flutter/widgets.dart';
 /// so one swipe never throws a long list from top to bottom (ashok's WebView has the same
 /// ~"momentum scrolling" cap of a normal phone browser). Dragging follows the finger exactly;
 /// only the release velocity is limited. Edges stay clamped (no overscroll stretch).
-const double kMaxFling = 3600;
+const double kMaxFling = 6500;
 
 class BoundedScrollPhysics extends ClampingScrollPhysics {
   const BoundedScrollPhysics({super.parent});

@@ -73,4 +73,6 @@ flutter {
 dependencies {
     // JVM unit tests of the native PDF notification helpers (android/app/src/test).
     testImplementation("junit:junit:4.13.2")
+    // android.jar only has stubs of org.json; the transfer tests need the real parser.
+    testImplementation("org.json:json:20240303")
 }

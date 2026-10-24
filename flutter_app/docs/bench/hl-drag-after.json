@@ -1,0 +1,102 @@
+{
+ "label": "after",
+ "cpuThrottle": 4,
+ "scenarios": {
+  "plain": {
+   "canvas": "1028x771",
+   "dispatched_moves": 120,
+   "delivered_pointermoves": 120,
+   "drawScan_calls": 121,
+   "drawScan_ms": {
+    "mean": 1.43,
+    "p95": 2,
+    "max": 15.2
+   },
+   "input_to_handler_ms": {
+    "mean": 26.09,
+    "p95": 40.3
+   },
+   "frame_interval_ms": {
+    "mean": 16.52,
+    "p95": 16.8,
+    "max": 16.8
+   },
+   "frames_over_33ms": 0,
+   "wall_ms_for_drag": 3286,
+   "final_layer_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   },
+   "expected_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   }
+  },
+  "layers15": {
+   "canvas": "1028x771",
+   "dispatched_moves": 120,
+   "delivered_pointermoves": 120,
+   "drawScan_calls": 121,
+   "drawScan_ms": {
+    "mean": 7.81,
+    "p95": 8.8,
+    "max": 11.4
+   },
+   "input_to_handler_ms": {
+    "mean": 31.73,
+    "p95": 38.3
+   },
+   "frame_interval_ms": {
+    "mean": 17.29,
+    "p95": 16.8,
+    "max": 100.1
+   },
+   "frames_over_33ms": 2,
+   "wall_ms_for_drag": 4080,
+   "final_layer_offset_px": {
+    "dx": 144,
+    "dy": 59.31
+   },
+   "expected_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   }
+  },
+  "ocr400": {
+   "canvas": "1028x771",
+   "dispatched_moves": 120,
+   "delivered_pointermoves": 120,
+   "drawScan_calls": 121,
+   "drawScan_ms": {
+    "mean": 1.36,
+    "p95": 2.1,
+    "max": 2.5
+   },
+   "input_to_handler_ms": {
+    "mean": 27.3,
+    "p95": 40.6
+   },
+   "frame_interval_ms": {
+    "mean": 16.46,
+    "p95": 16.8,
+    "max": 16.8
+   },
+   "frames_over_33ms": 0,
+   "wall_ms_for_drag": 3340,
+   "final_layer_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   },
+   "expected_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   },
+   "ocr_tap_check": {
+    "boxes": 400,
+    "highlighted_before": 0,
+    "after_tap": 1,
+    "after_second_tap": 0
+   }
+  }
+ }
+}

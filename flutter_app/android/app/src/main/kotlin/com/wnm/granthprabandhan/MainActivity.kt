@@ -35,11 +35,8 @@ import java.util.concurrent.Executors
  */
 class MainActivity : FlutterActivity() {
     private val channelName = "com.wnm.granthprabandhan/downloads"
-    private val album = "ग्रंथ प्रबंधन"
     private var pending: Pair<MethodCall, MethodChannel.Result>? = null
     private var pendingNotif: MethodChannel.Result? = null
-    private var pendingPick: MethodChannel.Result? = null
-    private var cameraUri: android.net.Uri? = null
 
     // PDF page pictures are scaled / re-encoded here, off the UI thread, with the platform's
     // JPEG codec (much faster than pure Dart, and big photos are decoded at reduced size).
@@ -77,6 +74,11 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        private const val REQ_HIGHLIGHTER = 4730
+
+        // Static: if the activity is re-created while the highlighter is open, the result still lands.
+        @Volatile private var pendingHighlighter: MethodChannel.Result? = null
+
         /**
          * Channel for an engine started headless by [PageSyncService] (no activity): only
          * what the page download needs. MainActivity replaces it with the full one on open.
@@ -166,7 +168,7 @@ class MainActivity : FlutterActivity() {
                 "openNotificationSettings" -> {
                     result.success(openNotificationSettings())
                 }
-                "pickFiles" -> pickFiles(call, result)
+                "openHighlighter" -> openHighlighter(call, result)
                 "exitApp" -> {
                     result.success(null)
                     finishAffinity()
@@ -177,70 +179,39 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * Photo Highlighter `<input type=file>`: camera (capture inputs) or the system picker,
-     * like Chrome does. Results are content:// URIs the WebView reads.
+     * Photo Highlighter: opens the native [HighlighterActivity] (a plain WebView, no Flutter view
+     * in the touch path) on the page Flutter's local server is serving. The call completes when
+     * the Activity closes, so Flutter knows when to let the background download continue.
      */
-    private fun pickFiles(call: MethodCall, result: MethodChannel.Result) {
-        pendingPick?.success(emptyList<String>())
-        pendingPick = null
-        val accept = (call.argument<List<String>>("accept") ?: emptyList()).flatMap { it.split(',') }.map { it.trim() }.filter { it.isNotEmpty() }
-        val multiple = call.argument<Boolean>("multiple") == true
-        val capture = call.argument<Boolean>("capture") == true
-        val images = accept.isEmpty() || accept.all { it.startsWith("image/") || it == "image/*" }
+    private fun openHighlighter(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url")
+        if (url == null || HlLogic.originOf(url) == null) {
+            result.error("args", "bad url", null)
+            return
+        }
+        pendingHighlighter?.success(false)
+        pendingHighlighter = null
         try {
-            if (capture && images) {
-                HlFileProvider.cleanup(this)
-                val f = java.io.File(HlFileProvider.dir(this), "IMG_${System.currentTimeMillis()}.jpg")
-                val uri = HlFileProvider.uriFor(this, f)
-                cameraUri = uri
-                val i = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-                    .putExtra(MediaStore.EXTRA_OUTPUT, uri)
-                    .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                i.clipData = android.content.ClipData.newRawUri("", uri)
-                pendingPick = result
-                startActivityForResult(i, 4721)
-                return
-            }
-            val types = accept.map { if (it.startsWith(".")) android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(it.substring(1)) ?: "*/*" else it }.distinct()
-            val i = Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE)
-                .setType(if (types.size == 1) types[0] else "*/*")
-                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
-            if (types.size > 1) i.putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
-            pendingPick = result
-            startActivityForResult(Intent.createChooser(i, null), 4722)
+            val i = Intent(this, HighlighterActivity::class.java)
+                .putExtra(HighlighterActivity.EXTRA_URL, url)
+                .putExtra(HighlighterActivity.EXTRA_KEEP_AWAKE, call.argument<Boolean>("keepAwake") == true)
+            pendingHighlighter = result
+            startActivityForResult(i, REQ_HIGHLIGHTER)
         } catch (e: Exception) {
-            Log.w("GranthHL", "picker: $e")
-            pendingPick = null
-            result.success(emptyList<String>())
+            Log.w("GranthHL", "open: $e")
+            pendingHighlighter = null
+            result.error("launch", e.message, null)
         }
     }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode != 4721 && requestCode != 4722) {
+        if (requestCode != REQ_HIGHLIGHTER) {
             super.onActivityResult(requestCode, resultCode, data)
             return
         }
-        val r = pendingPick ?: return
-        pendingPick = null
-        val out = mutableListOf<String>()
-        if (resultCode == RESULT_OK) {
-            if (requestCode == 4721) {
-                cameraUri?.let { u ->
-                    val f = java.io.File(HlFileProvider.dir(this), u.lastPathSegment ?: "")
-                    if (f.length() > 0) out += u.toString()
-                }
-            } else {
-                val clip = data?.clipData
-                if (clip != null) {
-                    for (k in 0 until clip.itemCount) clip.getItemAt(k).uri?.let { out += it.toString() }
-                } else {
-                    data?.data?.let { out += it.toString() }
-                }
-            }
-        }
-        cameraUri = null
-        r.success(out)
+        pendingHighlighter?.success(true)
+        pendingHighlighter = null
     }
 
     // A shared link opened while the app is already running arrives here (singleTask).
@@ -445,96 +416,11 @@ class MainActivity : FlutterActivity() {
         }
         Thread {
             try {
-                val out = if (call.method == "copyToDownloads") toDownloads(File(path), name, mime) else toAlbum(File(path), name, mime)
+                val out = if (call.method == "copyToDownloads") HlSaver.toDownloads(this, File(path), name, mime) else HlSaver.toAlbum(this, File(path), name, mime)
                 runOnUiThread { result.success(out) }
             } catch (e: Exception) {
                 runOnUiThread { result.error("io", e.message, null) }
             }
         }.start()
-    }
-
-    private fun toDownloads(src: File, name: String, mime: String): String {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: throw IllegalStateException("insert")
-            try {
-                val out = contentResolver.openOutputStream(uri) ?: throw IllegalStateException("open")
-                out.use { o -> FileInputStream(src).use { it.copyTo(o) } }
-            } catch (e: Exception) {
-                // Never leave a half-written, hidden (pending) file behind in Downloads.
-                try { contentResolver.delete(uri, null, null) } catch (_: Exception) {}
-                throw e
-            }
-            values.clear()
-            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            contentResolver.update(uri, values, null, null)
-            return uri.toString()
-        }
-        @Suppress("DEPRECATION")
-        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        dir.mkdirs()
-        val dest = unique(dir, name)
-        try {
-            src.copyTo(dest, overwrite = false)
-        } catch (e: Exception) {
-            dest.delete()
-            throw e
-        }
-        MediaScannerConnection.scanFile(this, arrayOf(dest.absolutePath), arrayOf(mime), null)
-        return dest.absolutePath
-    }
-
-    private fun toAlbum(src: File, name: String, mime: String): String {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                put(MediaStore.Images.Media.MIME_TYPE, if (mime.startsWith("image/")) mime else "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/" + album)
-                put(MediaStore.Images.Media.IS_PENDING, 1)
-            }
-            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: throw IllegalStateException("insert")
-            try {
-                val out = contentResolver.openOutputStream(uri) ?: throw IllegalStateException("open")
-                out.use { o -> FileInputStream(src).use { it.copyTo(o) } }
-            } catch (e: Exception) {
-                try { contentResolver.delete(uri, null, null) } catch (_: Exception) {}
-                throw e
-            }
-            values.clear()
-            values.put(MediaStore.Images.Media.IS_PENDING, 0)
-            contentResolver.update(uri, values, null, null)
-            return uri.toString()
-        }
-        @Suppress("DEPRECATION")
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), album)
-        dir.mkdirs()
-        val dest = unique(dir, name)
-        try {
-            src.copyTo(dest, overwrite = false)
-        } catch (e: Exception) {
-            dest.delete()
-            throw e
-        }
-        MediaScannerConnection.scanFile(this, arrayOf(dest.absolutePath), arrayOf(mime), null)
-        return dest.absolutePath
-    }
-
-    private fun unique(dir: File, name: String): File {
-        var f = File(dir, name)
-        if (!f.exists()) return f
-        val dot = name.lastIndexOf('.')
-        val base = if (dot > 0) name.substring(0, dot) else name
-        val ext = if (dot > 0) name.substring(dot) else ""
-        var i = 1
-        while (f.exists()) {
-            f = File(dir, "$base ($i)$ext")
-            i++
-        }
-        return f
     }
 }

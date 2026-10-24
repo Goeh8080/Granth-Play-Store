@@ -62,6 +62,16 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
+        <!-- Photo Highlighter: a plain full-screen WebView in its own Activity (native touch path). -->
+        <activity
+            android:name=".HighlighterActivity"
+            android:exported="false"
+            android:theme="@style/HighlighterTheme"
+            android:screenOrientation="portrait"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
+            android:enableOnBackInvokedCallback="true"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|density|uiMode|fontScale|locale|layoutDirection" />
         <!-- Photo Highlighter: camera photos are handed to the page through this (not exported). -->
         <provider
             android:name=".HlFileProvider"

@@ -88,14 +88,14 @@ class NativeBridge {
     } catch (_) {}
   }
 
-  /// Photo Highlighter `<input type=file>`: the system picker (or the camera when the
-  /// input asks for capture). Returns content:// URIs for the WebView; [] on cancel.
-  static Future<List<String>> pickFiles({required List<String> accept, bool multiple = false, bool capture = false}) async {
+  /// Opens the native Photo Highlighter Activity (a plain WebView, no Flutter view in the touch
+  /// path) on [url]; completes when it is closed. False when it could not be opened.
+  static Future<bool> openHighlighter(String url, {bool keepAwake = false}) async {
     try {
-      final r = await _ch.invokeMethod<List<Object?>>('pickFiles', {'accept': accept, 'multiple': multiple, 'capture': capture});
-      return [for (final u in r ?? const []) if (u is String && u.isNotEmpty) u];
+      final r = await _ch.invokeMethod<bool>('openHighlighter', {'url': url, 'keepAwake': keepAwake});
+      return r ?? false;
     } catch (_) {
-      return const [];
+      return false;
     }
   }
 

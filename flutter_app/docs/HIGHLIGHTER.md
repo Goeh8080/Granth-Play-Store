@@ -1,9 +1,49 @@
 # Photo Highlighter
 
 The 5th hamburger-menu entry (**PHOTO HIGHLIGHTER**) opens `assets/highlighter/index.html`, a byte-for-byte copy of the
-provided `photo_highlighter.html`, in a full-screen WebView. All the code lives in `lib/highlighter/`, plus
-`assets/highlighter/`, the `pickFiles` handler in `MainActivity.kt` and `HlFileProvider.kt`. Nothing else in the app
-depends on it.
+provided `photo_highlighter.html`, in a full-screen **native Android Activity** (Round 9): `HighlighterActivity.kt` hosts one plain
+`android.webkit.WebView`, with no Flutter view or PlatformView in the touch path (it behaves like the page in Chrome).
+Code: `lib/highlighter/` (server, patches, launcher), `assets/highlighter/`, and in `android/.../granthprabandhan/`
+`HighlighterActivity`, `HlLogic` (pure helpers), `HlTransfer` (bridge downloads), `HlSaver` (Downloads / album) and
+`HlFileProvider`. Nothing else in the app depends on it.
+
+## Native Activity (Round 9)
+
+- The menu item calls `HighlighterLauncher.open`: Flutter starts the local server (and the background save of OCR /
+  scan libraries), then the `openHighlighter` MethodChannel call does `startActivityForResult`. The call completes when
+  the Activity closes. The page still comes from the Dart server, so the origin and its IndexedDB are unchanged and
+  existing albums / themes persist (same app WebView data directory).
+- WebView: JS, DOM storage, hardware acceleration, `useWideViewPort` (the page's own viewport zoom is kept),
+  pinch zoom allowed, file access off, text zoom 100 %, camera / mic permission requests denied.
+- File chooser: gallery / files, multiple selection, camera only when the input has `capture` and accepts images.
+- Downloads / share: `GranthHL` JavaScript interface (the same bridge shim as before) + a `DownloadListener` for
+  `blob:` / `data:` links. Files are written in pieces to `cache/hl-out/`, then saved to Downloads (fallback: share
+  sheet) or shared through a read-only `HlFileProvider` URI.
+- Back: WebView history first, then the Activity closes (predictive-back callback on Android 13+).
+- Insets: edge-to-edge with padding for system bars, cutout and keyboard (Android 11+); the platform default below.
+- Keep-screen-on follows the app's setting. The background page download is paused while the Activity is open.
+- The Hindi progress / offline notice is a native banner fed by `GET /__status` on the local server (polled every 2 s,
+  tap hides it).
+- The Activity only finishes when the process was killed (the local server is gone); it is `exported=false`, portrait.
+
+### Drag lag: measured cause and fix
+
+`tool/hl_drag_bench.mjs` drives the page in headless Chrome 156 (CDP touch events, 4× CPU throttle, DPR 2.6, a
+1028×771 px layer, 120 touchMoves ~8 ms apart) and checks that the layer ends exactly under the finger. Results are in
+`docs/bench/hl-drag-before.json` / `hl-drag-after.json`.
+
+| scenario (OCR on page, 400 word boxes) | before | after |
+| --- | --- | --- |
+| draw-scan per move | 6.38 ms (max 49) | 1.26–1.36 ms |
+| input → handler | 63.4 ms (p95 82.5) | 24.1 ms (p95 26.3) |
+| frame interval | 22.9 ms mean, max 100 | 16.46 ms, max 16.8 |
+| frames over 33 ms | 32 | 0 |
+| total drag time | 7918 ms | 3124 ms |
+
+Plain pages (one layer) were already at ~1.3 ms, so there the page was not the problem. The page rebuilt the whole OCR
+overlay DOM on every pointermove; a minimal patch (`/*granth:ocr-overlay-memo*/`, in `highlighter_server.dart`) skips the
+rebuild when nothing changed. The most likely extra cause on the phone is the Flutter hybrid PlatformView touch path
+(gesture arena, re-sent MotionEvents, frame timing); the Activity removes it. That cannot be measured here.
 
 ## How it runs
 
@@ -91,6 +131,6 @@ composition, WASM SIMD) needs a real device to measure.
 
 ## Not verifiable without a phone
 
-Real camera and gallery pickers, OCR and OpenCV speed inside the Android WebView (WASM SIMD support differs by
+The drag feel of the native WebView, real camera and gallery pickers, back button / insets on real devices, OCR and OpenCV speed inside the Android WebView (WASM SIMD support differs by
 WebView version), and saving to Downloads on each Android version. The server, cache, offline paths, patches and the
 download bridge are covered by tests.

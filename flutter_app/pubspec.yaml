@@ -23,7 +23,6 @@ dependencies:
   unorm_dart: ^0.3.0
   url_launcher: ^6.3.1
   webview_flutter: ^4.13.0
-  webview_flutter_android: ^4.14.1
 
 dev_dependencies:
   flutter_test:

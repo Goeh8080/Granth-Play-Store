@@ -42,9 +42,13 @@ class DataCompat {
   static const List<String> textKeys = [
     Store.kTopicCols, Store.kGranthCols, Store.kPramanCols, Store.kGalleryCols, Store.kUiCols,
     Store.kPdfStyle, Store.kLook, Store.kTextSize, Store.kWifiOnly, Store.kAutoSync, Store.kKeepAwake,
-    Store.kHash, Store.kOfflineIds, Store.kDevice, Store.kOfflineReady, Store.kNotifAsked, Store.kNotifHint,
-    Store.kAnimations, Store.kOfflineCardSeen,
+    Store.kHash, Store.kOfflineIds, Store.kDevice, Store.kNotifAsked, Store.kNotifHint,
+    Store.kAnimations,
   ];
+
+  /// Keys older builds wrote that nothing reads any more (round 9 removed the "सारे ग्रंथ ऑफलाइन"
+  /// card). They are left in place and ignored: harmless, and an older build over this data still works.
+  static const List<String> retiredKeys = ['granth-offline-ready', 'granth-offline-card-seen'];
 
   /// Each step takes the layout from version `n` to `n + 1`. Idempotent: running one twice
   /// is the same as once.

@@ -51,28 +51,30 @@ void main() {
       expect(Store.I.getInt(Store.kSchema), kDataSchema);
     });
 
-    test('round 8: the animation setting and the offline-card flag are covered, in any stored type', () async {
+    test('round 8/9: the animation setting is covered, in any stored type', () async {
       // Every setting the app can reset, and every one-time flag, is a key DataCompat knows.
-      for (final k in [...UiPrefs.settingKeys, Store.kOfflineCardSeen, Store.kOfflineReady, Store.kNotifAsked, Store.kNotifHint, Store.kHash, Store.kOfflineIds]) {
+      for (final k in [...UiPrefs.settingKeys, Store.kNotifAsked, Store.kNotifHint, Store.kHash, Store.kOfflineIds]) {
         expect(DataCompat.textKeys, contains(k), reason: k);
       }
       // Written as booleans by some other build / a restored backup.
-      await boot({Store.kAnimations: false, Store.kOfflineCardSeen: true});
+      await boot({Store.kAnimations: false, 'granth-offline-card-seen': true, 'granth-offline-ready': '11-1'});
       // Read as they are, before any migration (an older app over newer data):
       expect(UiPrefs.I.animations, isFalse);
-      expect(CatalogStore.I.offlineCardSeen, isTrue);
       await DataCompat.migrate();
       expect(Store.I.getString(Store.kAnimations), '0');
-      expect(Store.I.getString(Store.kOfflineCardSeen), '1');
       expect(UiPrefs.I.animations, isFalse);
-      expect(CatalogStore.I.offlineCardSeen, isTrue);
+      // Round 9: the retired offline-card keys are left exactly as they are and ignored.
+      expect(Store.I.getRaw('granth-offline-card-seen'), true);
+      expect(Store.I.getRaw('granth-offline-ready'), '11-1');
+      for (final k in DataCompat.retiredKeys) {
+        expect(DataCompat.textKeys, isNot(contains(k)));
+      }
     });
 
-    test('round 7 data (no animation key, no card flag) opens with animations on and the card still pending', () async {
+    test('round 7 data (no animation key) opens with animations on', () async {
       await boot({Store.kUiCols: 2, Store.kLook: 'classic'});
       await DataCompat.migrate();
       expect(UiPrefs.I.animations, isTrue);
-      expect(CatalogStore.I.offlineCardSeen, isFalse);
       // A value from the future (not 0/1/true/false) never crashes and falls back to the default.
       await boot({Store.kAnimations: 'sometimes'});
       expect(UiPrefs.I.animations, isTrue);

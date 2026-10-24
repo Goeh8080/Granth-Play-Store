@@ -69,15 +69,6 @@ class ImageProgress {
   String toString() => 'ImageProgress($done/$total running=$running checking=$checking manual=$manual)';
 }
 
-/// Shown once each time the whole library finishes downloading.
-class OfflineReady {
-  const OfflineReady({required this.pages, required this.granths, required this.bytes, required this.signature});
-  final String signature;
-  final int pages;
-  final int granths;
-  final int bytes;
-}
-
 const kLowSpaceStop = 'फ़ोन में जगह कम है — पेज डाउनलोड रुका। जगह खाली करके सिंक दबाएँ।';
 
 const kNoDataError = 'डेटा नहीं आ पाया। इंटरनेट चेक करके फिर सिंक करें।';
@@ -585,7 +576,6 @@ class CatalogStore extends ChangeNotifier {
   static const lowSpaceBytes = 150 << 20;
 
   /// Fires each time the whole library has just become available offline.
-  final ValueNotifier<OfflineReady?> offlineReady = ValueNotifier(null);
 
   Future<bool> _fetchWithRetry(String path, int run) async {
     for (var i = 0; i < 3; i++) {
@@ -754,7 +744,6 @@ class CatalogStore extends ChangeNotifier {
     markOffline(granths.where((e) => _granthPaths(e).every(_saved.contains)).map((e) => e.id));
     notifyListeners();
     if (done >= all.length) {
-      _celebrate(all);
       if (!manual) unawaited(revalidate());
     }
   }
@@ -867,43 +856,6 @@ class CatalogStore extends ChangeNotifier {
         if (r != null) yield r;
       }
     }
-  }
-
-  /// Shows the "सारे ग्रंथ ऑफलाइन" card ONCE, ever (round 8): the first time the whole
-  /// library has finished downloading. It never comes back — not on the next open, not when
-  /// new content arrives, not after a reinstall that kept its data. (Rounds 4-7 showed it
-  /// again whenever the library's signature changed; a phone that had already seen it under
-  /// that rule has [Store.kOfflineReady] set and counts as seen.)
-  bool get offlineCardSeen => const {'1', 'true'}.contains(Store.I.getString(Store.kOfflineCardSeen)) || (Store.I.getString(Store.kOfflineReady) ?? '').isNotEmpty;
-
-  void _celebrate(List<String> all) {
-    if (offlineCardSeen) return;
-    final sorted = [...all]..sort();
-    var h = 0;
-    for (final p in sorted) {
-      for (final c in p.codeUnits) {
-        h = (h * 31 + c) & 0x3fffffff;
-      }
-    }
-    final key = '${all.length}-$h';
-    if (Store.I.getString(Store.kOfflineReady) == key || offlineReady.value?.signature == key) return;
-    var bytes = 0;
-    for (final p in all) {
-      try {
-        bytes += ImageStore.I.cachedSync(p)?.lengthSync() ?? 0;
-      } catch (_) {}
-    }
-    offlineReady.value = OfflineReady(pages: all.length, granths: granths.length, bytes: bytes, signature: key);
-  }
-
-  /// The card was shown: remember it so it is not shown again for the same library
-  /// (only saved once seen, so a kill before it shows brings it back next start).
-  void ackOfflineReady() {
-    final r = offlineReady.value;
-    if (r == null) return;
-    Store.I.setString(Store.kOfflineCardSeen, '1');
-    Store.I.setString(Store.kOfflineReady, r.signature);
-    offlineReady.value = null;
   }
 
   void stopSave() {

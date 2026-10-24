@@ -64,7 +64,31 @@ String patchHighlighterHtml(String html) {
     final at = i + tess.length;
     out = '${out.substring(0, at)}\n<script src="/hl-shim.js"></script>${out.substring(at)}';
   }
-  return out;
+  return _skipIdenticalOcrRebuild(out);
+}
+
+/// Served-copy patch (the bundled original is untouched): `drawScan()` ends with
+/// `renderOCROverlay()`, which throws away and re-creates one `<div>` per OCR word on EVERY call —
+/// i.e. on every pointermove while a layer is dragged. With a few hundred recognised words that is
+/// a DOM + layout rebuild per move (measured: dropped frames and ~60 ms input latency at 4x CPU
+/// throttle, tool/hl_drag_bench.mjs). The boxes only depend on words, highlight flags, pan, zoom and
+/// canvas size, so when none of those changed the rebuild is skipped; the output is identical.
+const kHlOcrPatchMarker = '/*granth:ocr-overlay-memo*/';
+String _skipIdenticalOcrRebuild(String html) {
+  final re = RegExp(r'function renderOCROverlay\(\) \{(\r?\n)(\s*)const overlay = document\.getElementById\("ocrOverlay"\);(\r?\n)(\s*)overlay\.innerHTML = "";');
+  final m = re.firstMatch(html);
+  if (m == null) return html;
+  const guard = '''function renderOCROverlay() {
+  const overlay = document.getElementById("ocrOverlay");
+  $kHlOcrPatchMarker
+  const __w = origImgObj ? origImgObj.ocrWords : null;
+  let __hc = 0, __hs = 0;
+  if (__w) for (let i = 0; i < __w.length; i++) if (__w[i].highlighted) { __hc++; __hs += i + 1; }
+  const __sig = [__w ? __w.length : -1, __hc, __hs, scanCanvas.width, scanCanvas.height, panX, panY, zoomScale].join("|");
+  if (__w === window.__ocrRef && __sig === window.__ocrSig && overlay.childElementCount === (__w ? __w.length : 0)) return;
+  window.__ocrRef = __w; window.__ocrSig = __sig;
+  overlay.innerHTML = "";''';
+  return html.replaceRange(m.start, m.end, guard);
 }
 
 /// Content type by file name.
@@ -100,6 +124,10 @@ class HighlighterServer {
 
   /// A library the page asked for could not be fetched (no internet, not saved yet).
   final ValueNotifier<bool> missedOffline = ValueNotifier(false);
+
+  /// The Hindi line the native page shows above the page (null / '' = nothing); the Activity
+  /// reads it from /__status every couple of seconds.
+  String? Function()? notice;
 
   int? get port => _server?.port;
   Uri get origin => Uri.parse('http://127.0.0.1:${_server!.port}');
@@ -279,6 +307,13 @@ class HighlighterServer {
       final path = r.uri.path;
       if (r.method != 'GET' && r.method != 'HEAD') {
         res.statusCode = 405;
+        return;
+      }
+      if (path == '/__status') {
+        res.headers
+          ..set('cache-control', 'no-store')
+          ..contentType = ContentType('text', 'plain', charset: 'utf-8');
+        if (r.method != 'HEAD') res.add(utf8.encode(notice?.call() ?? ''));
         return;
       }
       if (path == '/' || path == '/index.html') {

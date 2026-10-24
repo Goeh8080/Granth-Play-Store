@@ -1,0 +1,96 @@
+{
+ "label": "before",
+ "cpuThrottle": 4,
+ "scenarios": {
+  "plain": {
+   "canvas": "1028x771",
+   "dispatched_moves": 120,
+   "delivered_pointermoves": 120,
+   "drawScan_calls": 121,
+   "drawScan_ms": {
+    "mean": 1.19,
+    "p95": 1.8,
+    "max": 2.3
+   },
+   "input_to_handler_ms": {
+    "mean": 24.67,
+    "p95": 30.8
+   },
+   "frame_interval_ms": {
+    "mean": 16.53,
+    "p95": 16.8,
+    "max": 16.8
+   },
+   "frames_over_33ms": 0,
+   "wall_ms_for_drag": 3198,
+   "final_layer_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   },
+   "expected_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   }
+  },
+  "layers15": {
+   "canvas": "1028x771",
+   "dispatched_moves": 120,
+   "delivered_pointermoves": 120,
+   "drawScan_calls": 121,
+   "drawScan_ms": {
+    "mean": 7.34,
+    "p95": 8.5,
+    "max": 10.6
+   },
+   "input_to_handler_ms": {
+    "mean": 29.39,
+    "p95": 36.6
+   },
+   "frame_interval_ms": {
+    "mean": 16.83,
+    "p95": 16.8,
+    "max": 50.1
+   },
+   "frames_over_33ms": 1,
+   "wall_ms_for_drag": 3831,
+   "final_layer_offset_px": {
+    "dx": 144,
+    "dy": 59.31
+   },
+   "expected_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   }
+  },
+  "ocr400": {
+   "canvas": "1028x771",
+   "dispatched_moves": 120,
+   "delivered_pointermoves": 120,
+   "drawScan_calls": 121,
+   "drawScan_ms": {
+    "mean": 6.38,
+    "p95": 7.6,
+    "max": 49.1
+   },
+   "input_to_handler_ms": {
+    "mean": 63.39,
+    "p95": 82.5
+   },
+   "frame_interval_ms": {
+    "mean": 22.89,
+    "p95": 33.4,
+    "max": 100
+   },
+   "frames_over_33ms": 32,
+   "wall_ms_for_drag": 7918,
+   "final_layer_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   },
+   "expected_offset_px": {
+    "dx": 144,
+    "dy": 57.6
+   }
+  }
+ }
+}

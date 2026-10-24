@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,7 +7,6 @@ import 'package:granthprabandhan/main.dart';
 import 'package:granthprabandhan/models/models.dart';
 import 'package:granthprabandhan/services/catalog_store.dart';
 import 'package:granthprabandhan/services/storage.dart';
-import 'package:granthprabandhan/widgets/pdf_sheets.dart';
 
 import 'helpers.dart';
 
@@ -99,7 +99,6 @@ void main() {
     expect(s.images.complete, isFalse);
     // p3 belongs to granth 11: only granth 10 is fully offline.
     expect(s.offlineIds, {'10'});
-    expect(s.offlineReady.value, isNull);
   });
 
   test('low storage stops the download with a message', () async {
@@ -112,57 +111,6 @@ void main() {
     expect(s.images.running, isFalse);
     expect(s.error, kLowSpaceStop);
     expect(s.offlineIds, isEmpty);
-  });
-
-  test('offline-ready fires ONCE ever: not again on re-sync, not when new content arrives', () async {
-    final s = CatalogStore.I..debugSetCatalog(pictureCatalog());
-    FakeNet(s);
-    s.savePages();
-    await drain(s);
-    final r = s.offlineReady.value;
-    expect(r, isNotNull);
-    expect(r!.pages, 11);
-    expect(r.granths, 2);
-    s.ackOfflineReady();
-    expect(Store.I.getString(Store.kOfflineReady), r.signature);
-
-    // Re-open / re-sync with the same library: no card.
-    s.savePages();
-    await drain(s);
-    expect(s.offlineReady.value, isNull);
-
-    // New pramans arrive and finish downloading: round 8 — still no card (once, ever).
-    s.debugSetCatalog(pictureCatalog(extra: 2));
-    s.savePages();
-    await drain(s);
-    expect(s.offlineReady.value, isNull);
-    expect(Store.I.getString(Store.kOfflineCardSeen), '1');
-    expect(s.offlineCardSeen, isTrue);
-  });
-
-  test('a phone that saw the card under the old rule (only the signature key) counts as seen', () async {
-    await Store.I.setString(Store.kOfflineReady, '11-12345');
-    final s = CatalogStore.I..debugSetCatalog(pictureCatalog());
-    FakeNet(s);
-    s.savePages();
-    await drain(s);
-    expect(s.offlineReady.value, isNull);
-    expect(s.images.complete, isTrue);
-  });
-
-  test('not acknowledged (app killed before the card showed) → shown next start', () async {
-    final s = CatalogStore.I..debugSetCatalog(pictureCatalog());
-    final net = FakeNet(s);
-    s.savePages();
-    await drain(s);
-    expect(s.offlineReady.value, isNotNull);
-    final fresh = CatalogStore(connectivity: const Stream.empty());
-    fresh.debugSetCatalog(pictureCatalog());
-    FakeNet(fresh).saved.addAll(net.saved);
-    fresh.havePages = (all) async => all.where(net.saved.contains).toSet();
-    fresh.savePages();
-    await drain(fresh);
-    expect(fresh.offlineReady.value, isNotNull);
   });
 
   testWidgets('no floating pill while downloading: progress shows in the strip, card after', (tester) async {
@@ -184,32 +132,44 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(s.images.running, isFalse, reason: '${s.images.done}/${s.images.total} ${net.calls} ${net.saved.length}');
-    // And the offline-ready card popped up once.
+    // Round 9: nothing pops up when the library is saved — no card, no dialog, no sheet.
     await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('सारे ग्रंथ ऑफलाइन हो गए हैं — अब बिना इंटरनेट के चलेंगे'), findsOneWidget);
-    expect(find.byType(OfflineReadyCard), findsOneWidget);
-    await tester.tap(find.text('ठीक है'));
-    for (var i = 0; i < 8; i++) {
-      await tester.pump(const Duration(milliseconds: 100));
-    }
-    expect(find.byType(OfflineReadyCard), findsNothing);
-    expect(s.offlineReady.value, isNull);
+    expect(find.textContaining('ऑफलाइन हो गए'), findsNothing);
+    expect(find.textContaining('बिना इंटरनेट'), findsNothing);
+    expect(find.byType(Dialog), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('offline-ready card is not shown again on the next open', (tester) async {
+  testWidgets('round 9: opening the app with the whole library saved shows no offline card, ever', (tester) async {
     final s = CatalogStore.I..debugSetCatalog(pictureCatalog());
     FakeNet(s);
     s.savePages();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(s.offlineReady.value, isNotNull);
-    s.ackOfflineReady();
-    s.savePages();
-    await tester.pump(const Duration(milliseconds: 100));
     expect(s.images.complete, isTrue);
-    await tester.pumpWidget(const GranthApp(splash: false, links: false));
-    await tester.pump(const Duration(seconds: 1));
-    expect(find.byType(OfflineReadyCard), findsNothing);
-    await tester.pumpWidget(const SizedBox());
+    // Old flags from rounds 4-8 may sit in the stored data: they are ignored.
+    await Store.I.setString('granth-offline-ready', '11-12345');
+    await Store.I.setString('granth-offline-card-seen', '1');
+    for (var open = 0; open < 3; open++) {
+      await tester.pumpWidget(const GranthApp(splash: false, links: false));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.textContaining('ऑफलाइन हो गए'), findsNothing);
+      expect(find.textContaining('बिना इंटरनेट के चलेंगे'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    }
+  });
+
+  test('round 9: no code, string or asset anywhere can show the "सारे ग्रंथ ऑफलाइन हो गए" message', () {
+    final hits = <String>[];
+    for (final root in ['lib', 'android/app/src/main', 'assets/highlighter']) {
+      for (final f in Directory(root).listSync(recursive: true).whereType<File>()) {
+        if (!RegExp(r'\.(dart|kt|xml|html|js)$').hasMatch(f.path) || f.path.contains('/lib/') && f.path.contains('assets/highlighter/lib/')) continue;
+        final t = f.readAsStringSync();
+        for (final needle in ['ऑफलाइन हो गए', 'अब बिना इंटरनेट के चलेंगे', 'OfflineReady', 'offlineReady', 'granth-offline-ready']) {
+          if (t.contains(needle) && !f.path.endsWith('data_compat.dart')) hits.add('${f.path}: $needle');
+        }
+      }
+    }
+    expect(hits, isEmpty);
   });
 }
