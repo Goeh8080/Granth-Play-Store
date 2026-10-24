@@ -116,7 +116,7 @@ void main() {
     testWidgets('granths 3×3 shows three per row', (tester) async {
       await tester.binding.setSurfaceSize(const Size(412, 915));
       await tester.pumpWidget(const GranthApp(splash: false, links: false));
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(tester);
       await tester.tap(find.text('3×3'));
       await settle(tester);

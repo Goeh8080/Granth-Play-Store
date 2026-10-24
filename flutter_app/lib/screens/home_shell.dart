@@ -21,7 +21,7 @@ import '../widgets/common.dart';
 import '../widgets/pdf_sheets.dart';
 import 'dashboard_screen.dart';
 import 'gallery_screen.dart';
-import 'granths_screen.dart';
+import 'shelves_screen.dart';
 import 'pramans_screen.dart';
 import 'topics_screen.dart';
 
@@ -218,7 +218,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
   Widget _panel(GRoute r) => switch (r.panel) {
         Panel.dashboard => const DashboardPanel(),
         Panel.topics => const TopicsPanel(),
-        Panel.granths => const GranthsPanel(),
+        Panel.granths => ShelvesPanel(route: r),
         Panel.pramans => PramansPanel(route: r),
         Panel.gallery => const GalleryPanel(),
       };

@@ -1,0 +1,626 @@
+[
+{
+"id": "4",
+"title": "श्रीमद्भगवत गीता code 17",
+"position": "2",
+"pramanCount": "51"
+},
+{
+"id": "7",
+"title": "कबीर सागर संपूर्ण 11 भाग",
+"position": "3",
+"pramanCount": "92"
+},
+{
+"id": "8",
+"title": "संक्षिप्त श्रीमद्देवीभागवत code 1133",
+"position": "12",
+"pramanCount": "43"
+},
+{
+"id": "9",
+"title": "संक्षिप शिव पुराण code 789",
+"position": "15",
+"pramanCount": "18"
+},
+{
+"id": "10",
+"title": "गरुण पुराण सरोद्धार code 1416",
+"position": "5",
+"pramanCount": "10"
+},
+{
+"id": "11",
+"title": "संक्षिप्त स्कन्द पुराण code 279",
+"position": "7",
+"pramanCount": "22"
+},
+{
+"id": "12",
+"title": "श्रीमद्देवीभागवत महापुराण प्रथम खण्ड code 1897",
+"position": "13",
+"pramanCount": "34"
+},
+{
+"id": "13",
+"title": "श्रीमद्देवीभागवत महापुराण द्वितीय खण्ड code 1898",
+"position": "14",
+"pramanCount": "19"
+},
+{
+"id": "14",
+"title": "श्री शिव महापुराण प्रथम खण्ड code 2223",
+"position": "16",
+"pramanCount": "14"
+},
+{
+"id": "15",
+"title": "श्री शिव महापुराण द्वितीय खण्ड code 2224",
+"position": "17",
+"pramanCount": "17"
+},
+{
+"id": "16",
+"title": "श्रीमद्भागवत सुधासागर code 1930",
+"position": "39",
+"pramanCount": "33"
+},
+{
+"id": "17",
+"title": "श्री रामचरितमानस code 81",
+"position": "18",
+"pramanCount": "17"
+},
+{
+"id": "18",
+"title": "घट रामायण (तुलसी साहब हाथरस वाले)",
+"position": "23",
+"pramanCount": "6"
+},
+{
+"id": "19",
+"title": "संक्षिप्त गरुण पुराण code 1189",
+"position": "6",
+"pramanCount": "9"
+},
+{
+"id": "20",
+"title": "कूर्म पुराण code 1131",
+"position": "25",
+"pramanCount": "12"
+},
+{
+"id": "21",
+"title": "संक्षिप्त मार्कण्डेय पुराण code 539",
+"position": "27",
+"pramanCount": "4"
+},
+{
+"id": "22",
+"title": "संक्षिप्त पद्म पुराण Code 44",
+"position": "28",
+"pramanCount": "6"
+},
+{
+"id": "23",
+"title": "संक्षिप्त ब्रह्मवैवर्त पुराण code 631",
+"position": "31",
+"pramanCount": "13"
+},
+{
+"id": "24",
+"title": "भागवत नवनीत code 2009",
+"position": "38",
+"pramanCount": "3"
+},
+{
+"id": "25",
+"title": "ब्रह्मवैवर्त महापुराण पूर्वभाग",
+"position": "32",
+"pramanCount": "7"
+},
+{
+"id": "26",
+"title": "ब्रह्मवैवर्त महापुराण उत्तरभाग",
+"position": "33",
+"pramanCount": "4"
+},
+{
+"id": "27",
+"title": "संक्षिप्त महाभारत प्रथम खण्ड code 39",
+"position": "34",
+"pramanCount": "2"
+},
+{
+"id": "29",
+"title": "संक्षिप्त महाभारत द्वितीय खण्ड code 511",
+"position": "35",
+"pramanCount": "8"
+},
+{
+"id": "30",
+"title": "श्रीमद्भागवत महापुराण प्रथम खण्ड code 26",
+"position": "40",
+"pramanCount": "2"
+},
+{
+"id": "31",
+"title": "श्रीमद्भागवत महापुराण द्वितीय खण्ड code 27",
+"position": "41",
+"pramanCount": "11"
+},
+{
+"id": "32",
+"title": "विष्णु पुराण code 48",
+"position": "42",
+"pramanCount": "18"
+},
+{
+"id": "33",
+"title": "लिंगमहापुराण code 1985",
+"position": "43",
+"pramanCount": "6"
+},
+{
+"id": "34",
+"title": "वामन पुराण code 1432",
+"position": "45",
+"pramanCount": "3"
+},
+{
+"id": "35",
+"title": "नारद पुराण code 1183",
+"position": "44",
+"pramanCount": "2"
+},
+{
+"id": "36",
+"title": "संक्षिप्त योगवशिष्ट Code 574",
+"position": "46",
+"pramanCount": "4"
+},
+{
+"id": "37",
+"title": "यजुर्वेद",
+"position": "56",
+"pramanCount": "19"
+},
+{
+"id": "38",
+"title": "मत्स्य महापुराण code 557",
+"position": "47",
+"pramanCount": "12"
+},
+{
+"id": "39",
+"title": "कबीरपंथी शब्दावली",
+"position": "48",
+"pramanCount": "16"
+},
+{
+"id": "40",
+"title": "विशुद्ध मनुस्मृति",
+"position": "92",
+"pramanCount": "1"
+},
+{
+"id": "41",
+"title": "संक्षिप्त भविष्य पुराण code 584",
+"position": "50",
+"pramanCount": "2"
+},
+{
+"id": "42",
+"title": "वाल्मीकि रामायण भाग 1",
+"position": "19",
+"pramanCount": "15"
+},
+{
+"id": "43",
+"title": "वाल्मीकि रामायण भाग 2",
+"position": "20",
+"pramanCount": "5"
+},
+{
+"id": "44",
+"title": "ऋग्वेद मंडल 1",
+"position": "57",
+"pramanCount": "5"
+},
+{
+"id": "45",
+"title": "ऋग्वेद मंडल 2,3,4",
+"position": "58",
+"pramanCount": "0"
+},
+{
+"id": "46",
+"title": "ऋग्वेद मंडल 7,8",
+"position": "60",
+"pramanCount": "10"
+},
+{
+"id": "47",
+"title": "ऋग्वेद मंडल 9,10",
+"position": "61",
+"pramanCount": "36"
+},
+{
+"id": "48",
+"title": "सामवेद",
+"position": "62",
+"pramanCount": "2"
+},
+{
+"id": "49",
+"title": "अथर्ववेद काण्ड 1 से 7",
+"position": "63",
+"pramanCount": "3"
+},
+{
+"id": "50",
+"title": "सभी प्रकार के लघु चित्र शरीर कमलों और ब्रह्माण्डो के",
+"position": "1",
+"pramanCount": "14"
+},
+{
+"id": "51",
+"title": "भाई वाले वाली जन्म साखी",
+"position": "65",
+"pramanCount": "6"
+},
+{
+"id": "52",
+"title": "आदि श्री गुरु ग्रन्थ साहिब भाग 1",
+"position": "66",
+"pramanCount": "3"
+},
+{
+"id": "53",
+"title": "आदि श्री गुरु ग्रन्थ साहिब भाग 2",
+"position": "67",
+"pramanCount": "5"
+},
+{
+"id": "54",
+"title": "सत्यार्थ प्रकाश satyarth prakash",
+"position": "78",
+"pramanCount": "22"
+},
+{
+"id": "55",
+"title": "कबीर मंसूर",
+"position": "4",
+"pramanCount": "1"
+},
+{
+"id": "56",
+"title": "आनंद रामायण",
+"position": "24",
+"pramanCount": "1"
+},
+{
+"id": "57",
+"title": "ब्रह्म पुराण code 111",
+"position": "54",
+"pramanCount": "3"
+},
+{
+"id": "58",
+"title": "अग्नि पुराण code 1362",
+"position": "26",
+"pramanCount": "1"
+},
+{
+"id": "59",
+"title": "जीवनी हजरत मुहम्मद",
+"position": "68",
+"pramanCount": "3"
+},
+{
+"id": "60",
+"title": "कुरआन शरीफ़",
+"position": "69",
+"pramanCount": "18"
+},
+{
+"id": "61",
+"title": "पवित्र बाइबल",
+"position": "70",
+"pramanCount": "9"
+},
+{
+"id": "62",
+"title": "ऋग्वेद मंडल 5,6,7",
+"position": "59",
+"pramanCount": "0"
+},
+{
+"id": "63",
+"title": "रैदास बानी",
+"position": "71",
+"pramanCount": "4"
+},
+{
+"id": "64",
+"title": "महाभारत पंचम खण्ड code 36",
+"position": "36",
+"pramanCount": "3"
+},
+{
+"id": "65",
+"title": "ज्ञान गंगा",
+"position": "72",
+"pramanCount": "5"
+},
+{
+"id": "66",
+"title": "भविष्य महापुराण भाग 2",
+"position": "52",
+"pramanCount": "1"
+},
+{
+"id": "67",
+"title": "आओ जैन धर्म को जाने",
+"position": "75",
+"pramanCount": "2"
+},
+{
+"id": "68",
+"title": "संस्कृत हिन्दी शब्दकोश",
+"position": "74",
+"pramanCount": "1"
+},
+{
+"id": "69",
+"title": "भगवान बुद्ध और उनका धम्म",
+"position": "77",
+"pramanCount": "5"
+},
+{
+"id": "70",
+"title": "महर्षि दयानन्द सरस्वती जी का जीवन चरित्र maharishi Dayanand Saraswati ji ka jivan charitra",
+"position": "79",
+"pramanCount": "8"
+},
+{
+"id": "71",
+"title": "महर्षि दयानन्द सरस्वती की आत्मकथा",
+"position": "80",
+"pramanCount": "1"
+},
+{
+"id": "72",
+"title": "जैन संस्कृति कोश",
+"position": "76",
+"pramanCount": "0"
+},
+{
+"id": "73",
+"title": "मूलबीजक टीकासाहित",
+"position": "81",
+"pramanCount": "1"
+},
+{
+"id": "74",
+"title": "जीने की राह",
+"position": "73",
+"pramanCount": "1"
+},
+{
+"id": "75",
+"title": "श्रीरामानंदआचार्यजन्मोत्सवकथा",
+"position": "82",
+"pramanCount": "1"
+},
+{
+"id": "76",
+"title": "श्रीमद्भागवत गीता गर्भ गीता",
+"position": "83",
+"pramanCount": "1"
+},
+{
+"id": "77",
+"title": "पैंतीस अक्षरी",
+"position": "84",
+"pramanCount": "1"
+},
+{
+"id": "78",
+"title": "पद्म महापुराण भाग 6 उत्तरखण्ड 2",
+"position": "30",
+"pramanCount": "3"
+},
+{
+"id": "79",
+"title": "पद्म महापुराण प्रथम सृष्टि खण्ड",
+"position": "29",
+"pramanCount": "3"
+},
+{
+"id": "80",
+"title": "बृहदारण्यक-उपनिषद CODE 577",
+"position": "85",
+"pramanCount": "1"
+},
+{
+"id": "81",
+"title": "कहे जन सिंगा",
+"position": "86",
+"pramanCount": "5"
+},
+{
+"id": "82",
+"title": "चौबीस प्रमाण",
+"position": "87",
+"pramanCount": "7"
+},
+{
+"id": "83",
+"title": "श्री गोरख नाथ संहिता",
+"position": "88",
+"pramanCount": "1"
+},
+{
+"id": "84",
+"title": "स्कन्द महापुराण प्रथम महेश्वर खण्ड",
+"position": "8",
+"pramanCount": "6"
+},
+{
+"id": "85",
+"title": "स्कन्द महापुराण द्वितीय वैष्णव खण्ड",
+"position": "9",
+"pramanCount": "3"
+},
+{
+"id": "86",
+"title": "सत्य कबीर की साखी",
+"position": "49",
+"pramanCount": "3"
+},
+{
+"id": "87",
+"title": "वाल्मीकि रामायण द्वितीय खण्ड code 76",
+"position": "22",
+"pramanCount": "1"
+},
+{
+"id": "88",
+"title": "जयगुरुदेव की अमरवाणी भाग 2",
+"position": "89",
+"pramanCount": "2"
+},
+{
+"id": "89",
+"title": "पाराशर स्मृति",
+"position": "90",
+"pramanCount": "1"
+},
+{
+"id": "90",
+"title": "ब्रह्म महापुराण पूर्वभाग",
+"position": "55",
+"pramanCount": "1"
+},
+{
+"id": "91",
+"title": "जीवन चरित्र हुजूर स्वामी जी महाराज राधास्वामी",
+"position": "91",
+"pramanCount": "0"
+},
+{
+"id": "92",
+"title": "अथर्ववेद काण्ड 8 से 20",
+"position": "64",
+"pramanCount": "4"
+},
+{
+"id": "93",
+"title": "गीत गोविन्द",
+"position": "93",
+"pramanCount": "5"
+},
+{
+"id": "94",
+"title": "श्री साईं सत्चरित्र हिन्दी",
+"position": "95",
+"pramanCount": "7"
+},
+{
+"id": "95",
+"title": "भक्ति बोध",
+"position": "96",
+"pramanCount": "2"
+},
+{
+"id": "96",
+"title": "वाल्मीकि रामायण प्रथम खण्ड Code 75",
+"position": "21",
+"pramanCount": "2"
+},
+{
+"id": "97",
+"title": "भविष्य मालिक पुराण भाग 1",
+"position": "97",
+"pramanCount": "4"
+},
+{
+"id": "98",
+"title": "भविष्य मालिक पुराण भाग 2",
+"position": "98",
+"pramanCount": "1"
+},
+{
+"id": "99",
+"title": "यथार्थ भक्ति बोध",
+"position": "99",
+"pramanCount": "1"
+},
+{
+"id": "100",
+"title": "गरिमा गीता की",
+"position": "100",
+"pramanCount": "1"
+},
+{
+"id": "101",
+"title": "मेरी आत्मकथा डा भीमराव अंबेडकर",
+"position": "101",
+"pramanCount": "0"
+},
+{
+"id": "102",
+"title": "अनुराग सागर",
+"position": "102",
+"pramanCount": "1"
+},
+{
+"id": "103",
+"title": "भविष्य महापुराण भाग 1",
+"position": "51",
+"pramanCount": "0"
+},
+{
+"id": "104",
+"title": "भविष्य महापुराण भाग 3",
+"position": "53",
+"pramanCount": "0"
+},
+{
+"id": "105",
+"title": "राधा सुधा निधि",
+"position": "94",
+"pramanCount": "0"
+},
+{
+"id": "106",
+"title": "स्कन्द महापुराण तृतीय ब्रह्म खण्ड",
+"position": "10",
+"pramanCount": "1"
+},
+{
+"id": "107",
+"title": "स्कन्द महापुराण पञ्चम खण्ड अवंति खण्ड",
+"position": "11",
+"pramanCount": "17"
+},
+{
+"id": "108",
+"title": "महाभारत षष्ठ खण्ड code 37",
+"position": "37",
+"pramanCount": "1"
+},
+{
+"id": "109",
+"title": "कुलार्णवतंत्रम",
+"position": "103",
+"pramanCount": "1"
+},
+{
+"id": "110",
+"title": "अगस्त संहिता",
+"position": "104",
+"pramanCount": "0"
+}
+]

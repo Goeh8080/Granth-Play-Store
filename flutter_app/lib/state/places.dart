@@ -14,7 +14,10 @@ class Places {
   static String? keyFor(GRoute r) => switch (r.panel) {
         Panel.dashboard => 'dashboard-place',
         Panel.topics => 'topic-list-place',
-        Panel.granths => 'granth-list-place',
+        Panel.granths when r.flat => 'granth-list-place',
+        Panel.granths when r.religionId == null => 'religions-place',
+        Panel.granths when r.groupId == null => 'religion-list:${r.religionId}',
+        Panel.granths => 'group-list:${[r.religionId, r.groupId, r.subId].whereType<String>().join(':')}',
         Panel.gallery => 'gallery-list-place',
         Panel.pramans when r.pramanId == null => 'praman-list:${r.granthId ?? ''}:${r.topicId ?? ''}',
         _ => null,

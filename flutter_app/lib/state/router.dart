@@ -10,11 +10,18 @@ enum Panel { dashboard, topics, granths, pramans, gallery }
 /// `ig()` — the parsed hash route of the web app (`#/pramans?topic=…`).
 @immutable
 class GRoute {
-  const GRoute(this.panel, {this.topicId, this.granthId, this.pramanId});
+  const GRoute(this.panel, {this.topicId, this.granthId, this.pramanId, this.religionId, this.groupId, this.subId, this.flat = false});
   final Panel panel;
   final String? topicId;
   final String? granthId;
   final String? pramanId;
+
+  /// Round 10 — the folder levels of the Granth tab (`#/granths?r=…&g=…&s=…`): religion, group,
+  /// sub-group. All null = the religions screen. [flat] (`#/granths?all=1`) = the old flat list.
+  final String? religionId;
+  final String? groupId;
+  final String? subId;
+  final bool flat;
 
   static GRoute parse(String hash) {
     final raw = hash.replaceFirst(RegExp('^#'), '');
@@ -24,12 +31,32 @@ class GRoute {
     String? v(String k) => (q[k] ?? '').isEmpty ? null : q[k];
     if (path.startsWith('/gallery')) return const GRoute(Panel.gallery);
     if (path.startsWith('/topics')) return const GRoute(Panel.topics);
-    if (path.startsWith('/granths')) return const GRoute(Panel.granths);
+    if (path.startsWith('/granths')) {
+      if (v('all') == '1') return const GRoute(Panel.granths, flat: true);
+      final r = v('r');
+      // A group needs a religion and a sub-group a group: a half-formed link shows the level above.
+      final g = r == null ? null : v('g');
+      final s = g == null ? null : v('s');
+      return GRoute(Panel.granths, religionId: r, groupId: g, subId: s);
+    }
     if (path.startsWith('/pramans')) return GRoute(Panel.pramans, topicId: v('topic'), granthId: v('granth'), pramanId: v('id'));
     return const GRoute(Panel.dashboard);
   }
 
-  String get key => '${panel.name}:${topicId ?? ''}:${granthId ?? ''}:${pramanId ?? ''}';
+  String get key => '${panel.name}:${topicId ?? ''}:${granthId ?? ''}:${pramanId ?? ''}${_folderKey()}';
+
+  // Empty for every route that existed before round 10, so their keys are unchanged.
+  String _folderKey() => flat
+      ? '|all'
+      : religionId == null
+          ? ''
+          : '|${[religionId, groupId, subId].nonNulls.join('/')}';
+
+  /// `#/granths?r=…&g=…&s=…` for a folder level.
+  static String folderHash({String? religion, String? group, String? sub}) {
+    if (religion == null) return '#/granths';
+    return '#/granths?r=${Uri.encodeQueryComponent(religion)}${group != null ? '&g=${Uri.encodeQueryComponent(group)}' : ''}${group != null && sub != null ? '&s=${Uri.encodeQueryComponent(sub)}' : ''}';
+  }
 
   @override
   bool operator ==(Object other) => other is GRoute && other.key == key;

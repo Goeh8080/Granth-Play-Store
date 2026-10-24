@@ -51,6 +51,11 @@ void main() {
     await tester.tap(find.text('पवित्र ग्रन्थ'));
     await settle(tester);
     expect(find.text('Granths'), findsOneWidget);
+    // Round 10: religion → group → granth (the sample's id 11 sits in पुराण by id).
+    await tester.tap(find.text('हिन्दू'));
+    await settle(tester);
+    await tester.tap(find.text('पुराण'));
+    await settle(tester);
     await tester.tap(find.text('कबीर सागर').first);
     await settle(tester);
     expect(AppNav.I.route.granthId, '11');
@@ -59,6 +64,7 @@ void main() {
     await tester.binding.handlePopRoute();
     await settle(tester);
     expect(AppNav.I.route.panel, Panel.granths);
+    expect(AppNav.I.route.groupId, 'puran', reason: 'back lands in the folder it came from');
   });
 
   testWidgets('menu opens and PDF style sheet shows both styles', (tester) async {

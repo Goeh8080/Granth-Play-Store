@@ -3,11 +3,13 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../models/structure.dart';
 import '../services/api.dart';
 import '../services/catalog_store.dart';
 import '../services/file_actions.dart';
 import '../services/order.dart';
 import '../services/search.dart';
+import '../services/shelves.dart';
 import '../services/storage.dart';
 import '../state/places.dart';
 import '../state/router.dart';
@@ -22,14 +24,37 @@ import '../widgets/pop.dart';
 import '../widgets/pdf_sheets.dart';
 
 /// `Dh` — Granths / Sacred texts and scriptures.
+///
+/// Round 10: the same panel (header, search, 1×1/2×2/3×3 grid, [GranthCard]s) serves every
+/// granth list: the flat list of all granths (the default), one folder ([scope]) and the
+/// religions screen ([idle] shows the folders until something is typed in the search box,
+/// then the matching granths — search always covers every granth).
 class GranthsPanel extends StatefulWidget {
-  const GranthsPanel({super.key});
+  const GranthsPanel({
+    super.key,
+    this.placeKey = 'granth-list-place',
+    this.scope,
+    this.title = 'Granths',
+    this.subtitle = 'Sacred texts and scriptures',
+    this.leading,
+    this.idle,
+  });
+
+  /// [Places] key of the list (scroll position + search text).
+  final String placeKey;
+  final ShelfScope? scope;
+  final String title;
+  final String subtitle;
+  final Widget? leading;
+
+  /// Slivers shown instead of the card grid while the search box is empty.
+  final Widget Function(BuildContext context, double dx, PopLedger ledger)? idle;
   @override
   State<GranthsPanel> createState() => _GranthsPanelState();
 }
 
 class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
-  String _q = Places.query('granth-list-place');
+  late String _q = Places.query(widget.placeKey);
   final _log = SearchLogger();
   final _ledger = PopLedger();
   List<Granth>? _src;
@@ -46,7 +71,11 @@ class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
     if (!identical(all, _src)) {
       _src = all;
     }
-    var rows = searchRows(all, _q, CatalogStore.I.granthDoc);
+    final scope = widget.scope;
+    // The folder's granths are resolved once per catalog (Shelves caches the index).
+    final pool = scope == null || widget.idle != null ? all : scope.resolve(Shelves.indexFor(all));
+    final idleOn = widget.idle != null && _q.trim().isEmpty;
+    var rows = searchRows(pool, _q, CatalogStore.I.granthDoc);
     if (_q.trim().isEmpty) {
       rows = [...rows];
       stableSort(rows, (a, b) => numericCompare(a.position, b.position));
@@ -62,11 +91,12 @@ class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
           child: PageHeader(
             tone: Tone.maroon,
             icon: 'library',
-            title: 'Granths',
-            subtitle: 'Sacred texts and scriptures',
+            title: widget.title,
+            subtitle: widget.subtitle,
+            leading: widget.leading,
             trailingLow: true,
             trailing: Pressable(
-              onTap: () => showPop<void>(context, (ctx) => _MultiGranthSheet(granths: rows.isEmpty ? all : rows)),
+              onTap: () => showPop<void>(context, (ctx) => _MultiGranthSheet(granths: rows.isEmpty ? pool : rows)),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(color: GColors.paper, border: Border.all(color: GColors.maroon), borderRadius: BorderRadius.circular(999)),
@@ -75,7 +105,7 @@ class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
             ),
             tools: Tools(
               grid: GridSwitch(options: const [1, 2, 3], value: cols, onChanged: (v) => UiPrefs.I.setCols(Store.kGranthCols, v)),
-              search: SearchField(placeholder: 'ग्रंथ का नाम — gita, kabir', initial: _q, onChanged: (v) { Places.setQuery('granth-list-place', v); setState(() => _q = v); }),
+              search: SearchField(placeholder: 'ग्रंथ का नाम — gita, kabir', initial: _q, onChanged: (v) { Places.setQuery(widget.placeKey, v); setState(() => _q = v); }),
             ),
           ),
         ),
@@ -83,7 +113,8 @@ class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
       const SliverToBoxAdapter(child: SizedBox(height: 18)),
       // Keyed by the column count: switching 1×1 / 2×2 / 3×3 re-lays out the grid and
       // replays the staggered card entry, so the change is visible and animated.
-      KeyedSubtree(key: ValueKey('grid-$cols'), child: gridSliver(
+      if (idleOn) widget.idle!(context, dx, _ledger),
+      if (!idleOn) KeyedSubtree(key: ValueKey('grid-$cols'), child: gridSliver(
         count: rows.length,
         cols: cols,
         gap: cols == 1 ? 14 : (cols == 2 ? 10 : 8),
@@ -98,7 +129,7 @@ class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
           );
         },
       )),
-      if (rows.isEmpty) const SliverToBoxAdapter(child: EmptyState(title: 'कोई ग्रंथ नहीं', body: 'सिंक के बाद पवित्र ग्रंथ यहाँ खुलेंगे।')),
+      if (rows.isEmpty && !idleOn) const SliverToBoxAdapter(child: EmptyState(title: 'कोई ग्रंथ नहीं', body: 'सिंक के बाद पवित्र ग्रंथ यहाँ खुलेंगे।')),
     ]);
   }
 }

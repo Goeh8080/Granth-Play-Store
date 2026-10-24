@@ -164,7 +164,7 @@ void main() {
       testWidgets('granth list, $n×$n: open a granth, back', (t) async {
         UiPrefs.I.setCols(Store.kGranthCols, n);
         await openApp(t);
-        AppNav.I.go('#/granths');
+        AppNav.I.go('#/granths?all=1');
         await settle(t);
         await decodeWait(t);
         await scrollDown(t, n == 1 ? 6000 : (n == 2 ? 3500 : 2500));
@@ -234,7 +234,7 @@ void main() {
     testWidgets('home → granths → a granth → back → back → forward again', (t) async {
       UiPrefs.I.setCols(Store.kGranthCols, 2);
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       await decodeWait(t);
       await scrollDown(t, 3000);
@@ -256,7 +256,7 @@ void main() {
 
     testWidgets('inside a big granth: scroll its pages, open one, back; then back to the granth list', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       await decodeWait(t);
       await scrollDown(t, 500);
@@ -284,7 +284,7 @@ void main() {
 
     testWidgets('pinch-zoomed: scroll, open, back — same place, still zoomed', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       await decodeWait(t);
       AppZoom.current.value = const ZoomView(1.8, Offset(-120, -200));
@@ -313,7 +313,7 @@ void main() {
     testWidgets('right away, before a single picture has decoded, the place is already reached', (t) async {
       UiPrefs.I.setCols(Store.kGranthCols, 2);
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       await decodeWait(t);
       await scrollDown(t, 9000);

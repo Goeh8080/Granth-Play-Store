@@ -75,7 +75,7 @@ void main() {
   group('grid switch (1×1 / 2×2 / 3×3 under ग्रंथ)', () {
     testWidgets('a wobbly finger changes the columns at once and the choice is saved', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       expect(firstRowCards(t), 2);
       for (final (n, cards) in [(3, 3), (1, 1), (2, 2), (3, 3)]) {
@@ -92,7 +92,7 @@ void main() {
 
     testWidgets('a plain tap and a tap while the app is pinch-zoomed both work', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       await fingerTap(t, find.byKey(const ValueKey('grid-1')), wobble: Offset.zero);
       await settle(t, 4);
@@ -107,7 +107,7 @@ void main() {
 
     testWidgets('a pinch that starts on a grid button zooms and does not switch the grid', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       final c = t.getCenter(find.byKey(const ValueKey('grid-3')));
       final a = await t.startGesture(c, pointer: 7);
@@ -125,7 +125,7 @@ void main() {
 
     testWidgets('a real scroll that starts on the switch does not count as a tap', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       await fingerTap(t, find.byKey(const ValueKey('grid-3')), wobble: const Offset(0, -120));
       await settle(t, 4);
@@ -137,7 +137,7 @@ void main() {
       final prefs = await SharedPreferences.getInstance(); // (empty mock from setUp)
       await t.runAsync(() async => Store.I.initForTest(null, await Directory.systemTemp.createTemp('granth_late')));
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       await fingerTap(t, find.byKey(const ValueKey('grid-3')));
       await settle(t, 4);
@@ -185,7 +185,7 @@ void main() {
       await settle(t, 6);
       expect(find.byKey(const ValueKey('set-layout-1')), findsNothing, reason: 'पीछे closes the sheet');
       // Layout 1×1 applied to the screen underneath without leaving it.
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       expect(find.byType(IntrinsicHeight), findsNothing);
       expect(t.takeException(), isNull);
@@ -276,7 +276,7 @@ void main() {
 
     testWidgets('granth view: a granth opens its pramans in every grid size', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       for (final n in [1, 2, 3]) {
         await fingerTap(t, find.byKey(ValueKey('grid-$n')));
@@ -297,7 +297,7 @@ void main() {
 
     testWidgets('search filters granths and pramans', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       await t.enterText(find.byType(TextField).first, 'kabir');
       await settle(t, 5);

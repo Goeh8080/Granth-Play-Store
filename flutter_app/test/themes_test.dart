@@ -97,7 +97,7 @@ void main() {
       await settle(t, 6);
 
       // Granths grid: cards + search box.
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await settle(t);
       expect(count(t, id), greaterThanOrEqualTo(3), reason: 'granths: 2 cards + search');
       // Granth view (its pramans + banner).

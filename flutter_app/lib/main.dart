@@ -10,6 +10,7 @@ import 'screens/splash_screen.dart';
 import 'services/catalog_store.dart';
 import 'services/device_profile.dart';
 import 'services/file_actions.dart';
+import 'services/shelves.dart';
 import 'services/events.dart';
 import 'services/storage.dart';
 import 'state/router.dart';
@@ -40,6 +41,11 @@ void main() {
       await Future.wait([DeviceProfile.load(), FileActions.cleanupPartials()]).timeout(const Duration(seconds: 2));
     } catch (e) {
       debugPrint('init: profile/cleanup: $e');
+    }
+    try {
+      await Shelves.load().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('init: structure: $e');
     }
     try {
       AppNav.I.restore();

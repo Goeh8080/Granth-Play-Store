@@ -33,6 +33,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icons/
+    - assets/structure/structure.json
     # Photo Highlighter page + its bundled libraries (assets/store/ is for the Play listing, not the APK)
     - assets/highlighter/
     - assets/highlighter/lib/

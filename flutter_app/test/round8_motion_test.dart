@@ -144,7 +144,7 @@ void main() {
     testWidgets('Granths tab: cards pop once; scrolling away and back up never replays; the scroll offset is exact', (t) async {
       CatalogStore.I.debugSetCatalog(bigCatalog());
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await t.pump(const Duration(milliseconds: 60));
       await t.pump(const Duration(milliseconds: 60));
       final first = popScales(t);
@@ -171,7 +171,7 @@ void main() {
 
     testWidgets('Granth card: image, then title, then buttons fade in staggered; layout never moves', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await t.pump(const Duration(milliseconds: 20));
       final card = find.byType(GranthCard).first;
       List<double> fades() => [
@@ -193,7 +193,7 @@ void main() {
     testWidgets('"कम": cards and inner parts are plain from the first frame', (t) async {
       UiPrefs.I.animations = false;
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await t.pump(const Duration(milliseconds: 20));
       expect(popScales(t), isEmpty);
       expect(find.descendant(of: find.byType(GranthCard).first, matching: find.byKey(kRevealKey)), findsNothing);
@@ -201,7 +201,7 @@ void main() {
 
     testWidgets('the granth-open tilt works together with the entrance animations (even mid-pop)', (t) async {
       await openApp(t);
-      AppNav.I.go('#/granths');
+      AppNav.I.go('#/granths?all=1');
       await t.pump(const Duration(milliseconds: 100));
       await t.tap(find.byType(GranthCard).first, warnIfMissed: false);
       await settle(t, 6);

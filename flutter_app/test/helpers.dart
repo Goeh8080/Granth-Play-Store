@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:granthprabandhan/models/models.dart';
 import 'package:granthprabandhan/services/catalog_store.dart';
+import 'package:granthprabandhan/models/structure.dart';
+import 'package:granthprabandhan/services/shelves.dart';
 import 'package:granthprabandhan/services/storage.dart';
 import 'package:granthprabandhan/services/image_size.dart';
 import 'package:granthprabandhan/state/places.dart';
@@ -25,7 +27,11 @@ Catalog sampleCatalog() => Catalog(
       syncedAt: DateTime(2026, 10, 20, 9, 30).millisecondsSinceEpoch,
     );
 
+/// The structure file the APK ships (read from disk: tests have no asset bundle at this point).
+Structure shippedStructure() => Structure.parse(File('assets/structure/structure.json').readAsStringSync());
+
 Future<void> setUpApp() async {
+  Shelves.use(shippedStructure());
   SharedPreferences.setMockInitialValues({});
   final prefs = await SharedPreferences.getInstance();
   final dir = await Directory.systemTemp.createTemp('granth_test');
