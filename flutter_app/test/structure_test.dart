@@ -8,6 +8,7 @@ import 'package:granthprabandhan/services/shelves.dart';
 import 'package:granthprabandhan/state/places.dart';
 import 'package:granthprabandhan/state/router.dart';
 import 'package:granthprabandhan/widgets/group_icon.dart';
+import 'package:granthprabandhan/widgets/religion_symbol.dart';
 
 import 'helpers.dart';
 
@@ -60,7 +61,7 @@ void main() {
 
     test('group ids are unique per religion; every icon is one that is painted or shipped as an svg', () {
       for (final r in structure.religions) {
-        expect(File('assets/icons/${r.icon}.svg').existsSync(), isTrue, reason: 'religion icon ${r.icon}');
+        expect(religionSymbolNames, contains(r.icon), reason: 'religion symbol ${r.icon}');
         expect({for (final g in r.groups) g.id}.length, r.groups.length, reason: r.id);
         for (final g in r.groups) {
           expect(groupIconNames, contains(g.icon), reason: '${r.id}/${g.id}');
@@ -71,6 +72,8 @@ void main() {
         }
       }
       expect(groupIconNames, contains(structure.other.icon));
+      expect(religionSymbolNames, contains(structure.other.icon), reason: 'अन्य shows the neutral symbol');
+      expect({for (final r in structure.religions) r.icon}.length, structure.religions.length, reason: 'every religion has its own symbol');
     });
   });
 

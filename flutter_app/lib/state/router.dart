@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../services/events.dart';
 import '../services/storage.dart';
 
-enum Panel { dashboard, topics, granths, pramans, gallery }
+enum Panel { dashboard, topics, granths, pramans, gallery, ai }
 
 /// `ig()` — the parsed hash route of the web app (`#/pramans?topic=…`).
 @immutable
@@ -30,6 +30,7 @@ class GRoute {
     final q = parts.length > 1 ? Uri.splitQueryString(parts[1].split('#').first) : const <String, String>{};
     String? v(String k) => (q[k] ?? '').isEmpty ? null : q[k];
     if (path.startsWith('/gallery')) return const GRoute(Panel.gallery);
+    if (path.startsWith('/ai')) return const GRoute(Panel.ai);
     if (path.startsWith('/topics')) return const GRoute(Panel.topics);
     if (path.startsWith('/granths')) {
       if (v('all') == '1') return const GRoute(Panel.granths, flat: true);
@@ -64,7 +65,7 @@ class GRoute {
   int get hashCode => key.hashCode;
 }
 
-const _topHashes = {'#/dashboard', '#/topics', '#/granths', '#/pramans', '#/gallery'};
+const _topHashes = {'#/dashboard', '#/topics', '#/granths', '#/pramans', '#/gallery', '#/ai'};
 
 bool _isDash(String h) => h == '#/dashboard' || h == '#/' || h.isEmpty || h.startsWith('#/dashboard');
 
@@ -89,9 +90,50 @@ class AppNav extends ChangeNotifier {
   int get direction => _forward;
   List<String> get debugStack => List.unmodifiable(_stack);
 
+  /// Start-up: the place the user was at, with the stack that leads back from it, so Back
+  /// after a restart (process death, task swiped away) walks up exactly like it did before.
+  /// A missing or stale stack is rebuilt from the hash itself ([ancestorsOf]) — Back never
+  /// jumps somewhere unexpected.
   void restore() {
     final saved = Store.I.ready ? Store.I.getString(Store.kHash) : null;
-    if (saved != null && saved.startsWith('#/')) _set(saved, notify: false);
+    if (saved == null || !saved.startsWith('#/')) return;
+    _set(saved, notify: false);
+    if (_isDash(saved)) return;
+    var stack = <String>[];
+    try {
+      final raw = Store.I.getString('granth-nav');
+      if (raw != null) {
+        final j = jsonDecode(raw);
+        if (j is List) stack = [for (final e in j) if (e is String && e.startsWith('#/') && e != saved) e];
+      }
+    } catch (_) {}
+    // A stack that does not start at the dashboard cannot be trusted to lead anywhere sane.
+    if (stack.isEmpty || !_isDash(stack.first)) stack = ancestorsOf(saved);
+    _stack
+      ..clear()
+      ..addAll(stack);
+  }
+
+  /// The screens "above" [h], nearest last: granth list → group → religion → religions →
+  /// dashboard. Used when the saved back stack is gone.
+  @visibleForTesting
+  static List<String> ancestorsOf(String h) {
+    final r = GRoute.parse(h);
+    final out = <String>['#/dashboard'];
+    if (r.panel == Panel.dashboard) return const [];
+    if (r.panel == Panel.granths && !r.flat) {
+      if (r.religionId != null) {
+        out.add('#/granths');
+        if (r.groupId != null) {
+          out.add(GRoute.folderHash(religion: r.religionId));
+          if (r.subId != null) out.add(GRoute.folderHash(religion: r.religionId, group: r.groupId));
+        }
+      }
+    } else if (r.panel == Panel.pramans && (r.topicId != null || r.granthId != null) && r.pramanId == null) {
+      // A topic's or a granth's pramans: from its list.
+      out.add(r.granthId != null ? '#/granths' : '#/topics');
+    }
+    return out;
   }
 
   void _persistStack() {

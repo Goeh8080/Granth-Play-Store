@@ -292,7 +292,7 @@ void main() {
 
   group('menu', () {
     setUp(setUpApp);
-    testWidgets('5th menu entry, same style; opens the native Photo Highlighter', (t) async {
+    testWidgets('last menu entry (below तत्त्व AI), same style; opens the native Photo Highlighter', (t) async {
       var opened = 0;
       HighlighterLauncher.opener = (_) async => opened++;
       addTearDown(() => HighlighterLauncher.opener = (_) => HighlighterLauncher.openWith());
@@ -301,7 +301,7 @@ void main() {
       await realPause(t);
       await t.pumpAndSettle();
       expect(find.text('PHOTO HIGHLIGHTER'), findsOneWidget);
-      for (final k in ['landmark', 'clipboard-list', 'library', 'image', 'highlighter']) {
+      for (final k in ['landmark', 'clipboard-list', 'library', 'image', 'sparkles', 'highlighter']) {
         expect(find.byKey(ValueKey('nav-$k')), findsOneWidget);
       }
       // Same row style as the others: same height and icon size.

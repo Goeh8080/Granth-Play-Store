@@ -130,6 +130,14 @@ w('1. `other.forceIds` → अन्य.\n2. Its id is in a group\'s `granthIds`
   '3. Otherwise its title is matched against each group\'s `keywords` (minus `notKeywords`); exactly one group → that group; '
   'none or several → अन्य.\n'
   'So a **new granth from the API** appears in अन्य unless its title clearly names one group.\n')
+w('## Layout and religion symbols (round 11)\n')
+w('- Every folder screen (religions, a religion, a group with sub-groups) opens in the **2×2 grid** by default and has the same '
+  '**1×1 / 2×2 / 3×3** switch as the granth list. They share one saved choice (`Store.kGranthCols`), so one switch lays out the whole Granth tab; '
+  'the choice survives restarts. 1×1 keeps the horizontal row; 2×2 / 3×3 use centred tiles with two-line titles (ellipsis, never overflow).\n'
+  '- Each religion has a **vector symbol** painted in code (`lib/widgets/religion_symbol.dart`, no image or font files): '
+  'हिन्दू ॐ, इस्लाम ☪ (crescent + star), सिख खंडा ☬, ईसाई ✝, बुद्ध धर्मचक्र, कबीर इकतारा, अन्य (neutral four-square). '
+  'ॐ and ☬ are outlines baked from OFL fonts by `tool/gen_symbol_paths.py` into `lib/widgets/religion_paths.dart` (~3 KB). '
+  'The symbol sits on the religion\'s tone tile (`tone` + `icon` in the JSON; allowed icons: `religionSymbolNames`), so it follows every card look.\n')
 w('## Editing\n')
 w('- Edit `assets/structure/structure.json` (ids are API ids as strings; order inside a group follows the API `position`).\n'
   '- Or edit `tool/gen_structure.py` and run `python3 tool/gen_structure.py` (it overwrites the JSON).\n'

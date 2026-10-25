@@ -242,6 +242,13 @@ class Pill extends StatelessWidget {
 
 enum Tone { saffron, maroon, gold }
 
+/// The gradient and the ink of a [Tone] (shared by [IconBox] and the religion symbols).
+(List<Color>, Color) toneColors(Tone tone) => switch (tone) {
+      Tone.saffron => ([GColors.saffron, GColors.saffronDark], GColors.paper),
+      Tone.maroon => ([GColors.maroonLight, GColors.maroon], GColors.paper),
+      Tone.gold => ([GColors.goldLight, GColors.gold], GColors.brown),
+    };
+
 /// `.icon-box.tone-*`
 class IconBox extends StatelessWidget {
   const IconBox({super.key, required this.tone, required this.icon, this.size = 44, this.radius = 10, this.iconSize = 22});
@@ -253,11 +260,7 @@ class IconBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (colors, fg) = switch (tone) {
-      Tone.saffron => ([GColors.saffron, GColors.saffronDark], GColors.paper),
-      Tone.maroon => ([GColors.maroonLight, GColors.maroon], GColors.paper),
-      Tone.gold => ([GColors.goldLight, GColors.gold], GColors.brown),
-    };
+    final (colors, fg) = toneColors(tone);
     return Container(
       width: size,
       height: size,

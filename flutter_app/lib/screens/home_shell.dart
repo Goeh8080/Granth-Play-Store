@@ -20,6 +20,7 @@ import '../widgets/bounded_scroll.dart';
 import '../widgets/common.dart';
 import '../widgets/pdf_sheets.dart';
 import 'dashboard_screen.dart';
+import 'ai_screen.dart';
 import 'gallery_screen.dart';
 import 'shelves_screen.dart';
 import 'pramans_screen.dart';
@@ -221,6 +222,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
         Panel.granths => ShelvesPanel(route: r),
         Panel.pramans => PramansPanel(route: r),
         Panel.gallery => const GalleryPanel(),
+        Panel.ai => const AiPanel(),
       };
 
   @override
@@ -616,6 +618,8 @@ class _NavMenu extends StatelessWidget {
     ('clipboard-list', 'Topics', '#/topics', Panel.topics),
     ('library', 'Granths', '#/granths', Panel.granths),
     ('image', 'प्रमाण', '#/pramans', Panel.pramans),
+    // Round 11: तत्त्व AI (coming soon) sits directly above the Photo Highlighter.
+    ('sparkles', 'तत्त्व AI से पूछे', '#/ai', Panel.ai),
     // Round 6: opens the Photo Highlighter (its own full-screen page, lib/highlighter/).
     ('highlighter', 'Photo Highlighter', '', null),
   ];

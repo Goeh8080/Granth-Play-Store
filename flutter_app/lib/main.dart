@@ -153,7 +153,14 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) CatalogStore.I.onResume();
+    if (state == AppLifecycleState.resumed) {
+      CatalogStore.I.onResume();
+      // The home screen always handles Back itself (inner screens go up a level; the root asks
+      // before exiting). A new MainActivity (reopened from recents, a notification tap, after the
+      // photo highlighter) starts without that flag, and Android would then close the app on
+      // Back — so say it again on every resume.
+      SystemNavigator.setFrameworkHandlesBack(true).catchError((Object _) {});
+    }
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) CatalogStore.I.onPause();
   }
 

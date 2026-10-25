@@ -64,6 +64,24 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         PageSyncService.activityAlive = true
         super.onCreate(savedInstanceState)
+        setFrameworkHandlesBack(true)
+    }
+
+    /**
+     * Back always goes to Flutter (HomeShell: inner screens go up one level, the root asks
+     * before leaving). Every new MainActivity starts with Flutter's back callback OFF and
+     * only turns it on when Dart reports a change — which it does not when the engine was kept
+     * alive (PDF / page download running) and a fresh activity attaches to it (reopened from
+     * recents, notification tap, after the highlighter). Back then closed the whole app. So the
+     * callback is switched on here, and Dart's later `false` can never switch it off.
+     */
+    override fun setFrameworkHandlesBack(frameworkHandlesBack: Boolean) {
+        super.setFrameworkHandlesBack(true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        setFrameworkHandlesBack(true)
     }
 
     override fun onDestroy() {

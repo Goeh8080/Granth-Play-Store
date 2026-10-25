@@ -6,7 +6,7 @@
    "id": "hindu",
    "title": "हिन्दू",
    "tone": "saffron",
-   "icon": "folder-open",
+   "icon": "om",
    "groups": [
     {
      "id": "ved",
@@ -274,7 +274,7 @@
    "id": "islam",
    "title": "इस्लाम",
    "tone": "maroon",
-   "icon": "folder-open",
+   "icon": "crescent",
    "groups": [
     {
      "id": "quran",
@@ -309,7 +309,7 @@
    "id": "sikh",
    "title": "सिख",
    "tone": "gold",
-   "icon": "folder-open",
+   "icon": "khanda",
    "groups": [
     {
      "id": "guru-granth",
@@ -344,7 +344,7 @@
    "id": "christian",
    "title": "ईसाई",
    "tone": "saffron",
-   "icon": "folder-open",
+   "icon": "cross",
    "groups": [
     {
      "id": "bible",
@@ -366,7 +366,7 @@
    "id": "buddh",
    "title": "बुद्ध",
    "tone": "maroon",
-   "icon": "folder-open",
+   "icon": "dharma",
    "groups": [
     {
      "id": "tripitak",
@@ -392,7 +392,7 @@
    "id": "kabir",
    "title": "कबीर",
    "tone": "gold",
-   "icon": "folder-open",
+   "icon": "ektara",
    "groups": [
     {
      "id": "kabir-sagar",

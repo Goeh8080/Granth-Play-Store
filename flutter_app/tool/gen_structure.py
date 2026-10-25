@@ -48,24 +48,24 @@ hindu_groups = [
 ]
 
 religions = [
-    {'id': 'hindu', 'title': 'हिन्दू', 'tone': 'saffron', 'icon': 'folder-open', 'groups': hindu_groups},
-    {'id': 'islam', 'title': 'इस्लाम', 'tone': 'maroon', 'icon': 'folder-open', 'groups': [
+    {'id': 'hindu', 'title': 'हिन्दू', 'tone': 'saffron', 'icon': 'om', 'groups': hindu_groups},
+    {'id': 'islam', 'title': 'इस्लाम', 'tone': 'maroon', 'icon': 'crescent', 'groups': [
         leaf('quran', 'क़ुरान', 'quran', [60], ['कुरआन', 'कुरान', 'क़ुरआन', 'क़ुरान', 'कुर्आन', 'कुर्आन शरीफ']),
         leaf('hadees', 'हदीस', 'hadees', [], ['हदीस', 'हदीथ', 'हदीष']),
     ]},
-    {'id': 'sikh', 'title': 'सिख', 'tone': 'gold', 'icon': 'folder-open', 'groups': [
+    {'id': 'sikh', 'title': 'सिख', 'tone': 'gold', 'icon': 'khanda', 'groups': [
         leaf('guru-granth', 'गुरु ग्रंथ साहिब', 'granth-sahib', [52, 53],
              ['गुरु ग्रन्थ साहिब', 'गुरु ग्रंथ साहिब', 'गुरुग्रंथ साहिब', 'गुरुग्रन्थ साहिब']),
         leaf('dasam', 'दसम ग्रंथ', 'dasam', [], ['दसम ग्रंथ', 'दसम ग्रन्थ', 'दशम ग्रंथ', 'दशम ग्रन्थ']),
     ]},
-    {'id': 'christian', 'title': 'ईसाई', 'tone': 'saffron', 'icon': 'folder-open', 'groups': [
+    {'id': 'christian', 'title': 'ईसाई', 'tone': 'saffron', 'icon': 'cross', 'groups': [
         leaf('bible', 'बाइबल', 'bible', [61], ['बाइबल', 'बाईबल', 'बाइबिल', 'बाईबिल']),
     ]},
-    {'id': 'buddh', 'title': 'बुद्ध', 'tone': 'maroon', 'icon': 'folder-open', 'groups': [
+    {'id': 'buddh', 'title': 'बुद्ध', 'tone': 'maroon', 'icon': 'dharma', 'groups': [
         leaf('tripitak', 'त्रिपिटक', 'tripitak', [], ['त्रिपिटक']),
         leaf('dhammapad', 'धम्मपद', 'dhammapad', [], ['धम्मपद']),
     ]},
-    {'id': 'kabir', 'title': 'कबीर', 'tone': 'gold', 'icon': 'folder-open', 'groups': [
+    {'id': 'kabir', 'title': 'कबीर', 'tone': 'gold', 'icon': 'ektara', 'groups': [
         leaf('kabir-sagar', 'कबीर सागर', 'kabir-sagar', [7, 102], ['कबीर सागर', 'अनुराग सागर']),
         leaf('bijak', 'बीजक', 'bijak', [73], ['बीजक']),
         leaf('shabdavali', 'शब्दावली', 'shabdavali', [39], ['कबीरपंथी शब्दावली', 'कबीर शब्दावली']),
