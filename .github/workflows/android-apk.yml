@@ -34,8 +34,20 @@ jobs:
       - name: Test
         run: flutter test
 
+      # APP_KEY (optional repository secret): the permanent app identifier for the admin dashboard's
+      # "verified installs". Without the secret (forks, PRs, not yet added) the build simply has no key.
       - name: Build APK
-        run: flutter build apk --release
+        env:
+          APP_KEY: ${{ secrets.APP_KEY }}
+        run: |
+          set +x
+          args=""
+          if [ -n "$APP_KEY" ]; then
+            printf '{"APP_KEY":"%s"}' "$APP_KEY" > "$RUNNER_TEMP/dd.json"
+            args="--dart-define-from-file=$RUNNER_TEMP/dd.json"
+          fi
+          flutter build apk --release $args
+          rm -f "$RUNNER_TEMP/dd.json"
 
       - name: Kotlin unit tests (PDF notification service)
         working-directory: flutter_app/android

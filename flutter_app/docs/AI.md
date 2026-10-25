@@ -43,9 +43,13 @@ The question, the last turns of history and the candidate quotes are sent to the
 
 Anonymous counters, one batch per day at most 5 times, sent to `https://granth-admin.vedpuran8090.workers.dev/events` (gzip JSON, ≤7.5 KB):
 
-`v, batch_id, iid (random install id), app, os, sdk, cfg (config version), day, fg_s, sessions, open{g,f,t,p}, watch_s{g,f,scr}, sync{ok,fail,kinds}, pdf{ok,fail,kinds}, ai{asked,answered,cite_tap}`
+`v, batch_id, iid (random install id), app, app_version, build, os, sdk, cfg (config version), day, fg_s, sessions, open{g,f,t,p}, watch_s{g,f,scr}, sync{ok,fail,kinds}, pdf{ok,fail,kinds}, ai{asked,answered,cite_tap}`
 
 Not sent: name, phone, e-mail, device or ad id, location, question or answer text, granth text. Only while the app is in the foreground; off when the config flag says so; sampled by `analytics.sample`. Failed uploads are retried with the same `batch_id` (429 / 5xx / network); 4xx batches are dropped; batches older than 2 days are dropped; at most 20 are queued.
+
+### App key (`X-App-Key`)
+
+Every `POST /events` also carries the **permanent app key** as the HTTP header `X-App-Key`, so the dashboard can split *verified* (genuine app) from *unverified* installs and show installs by app version (`app_version` + `build` are in the body). The key is compiled in at build time: `String.fromEnvironment('APP_KEY')` in `lib/config.dart`, set with `--dart-define=APP_KEY=…` (preferably `--dart-define-from-file=<temp json>` so it is not echoed). It is **never rotated** (every installed app would lose its verified tag), it is an **identifier, not a secret** (a key inside a public APK can be extracted), and its value is **not in the repository** (nor in config.json, logs or crash reports). When `APP_KEY` is empty (tests, forks, CI without the secret) the header is simply left out — the server still stores the batch as "unverified". CI: if a repository secret named `APP_KEY` exists, `.github/workflows/android-apk.yml` passes it to the release builds; without it the workflow works unchanged.
 
 ## Tests
 

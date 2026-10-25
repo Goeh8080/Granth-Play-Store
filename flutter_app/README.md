@@ -69,6 +69,13 @@ debug key. No signing keys are kept in this repository. Add your own `key.proper
 GitHub Actions (`.github/workflows/android-apk.yml`) builds the APK on every push and uploads it as the
 `granth-flutter-apk` (universal) and `granth-flutter-apk-arm64` artifacts.
 
+## App key (analytics `X-App-Key`)
+
+The permanent app key is embedded **at build time** (`--dart-define=APP_KEY=…`, or `--dart-define-from-file=` a
+temporary JSON so the value is not echoed) and sent as the `X-App-Key` header on every analytics POST. It is
+**never rotated** and is an **identifier, not a secret**; its value is not in this repository. Builds without it
+(CI without the `APP_KEY` secret, tests, forks) just omit the header. See [docs/AI.md](docs/AI.md#app-key-x-app-key).
+
 ## Release signing
 
 Put `android/key.properties` (gitignored) next to `android/build.gradle.kts`:

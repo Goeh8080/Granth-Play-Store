@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:granthprabandhan/config.dart';
 import 'package:granthprabandhan/services/analytics.dart';
 import 'package:granthprabandhan/services/remote_config.dart';
 import 'package:granthprabandhan/services/storage.dart';
@@ -83,11 +84,14 @@ void main() {
     final b = net.bodies.single;
     expect(net.opts.single.uri.toString(), 'https://ev.test/events');
     expect(net.opts.single.headers['Content-Encoding'], 'gzip');
-    expect(b.keys.toSet(), {'v', 'batch_id', 'iid', 'app', 'os', 'sdk', 'cfg', 'day', 'fg_s', 'sessions', 'open', 'watch_s', 'sync', 'pdf', 'ai'});
+    expect(b.keys.toSet(), {'v', 'batch_id', 'iid', 'app', 'app_version', 'build', 'os', 'sdk', 'cfg', 'day', 'fg_s', 'sessions', 'open', 'watch_s', 'sync', 'pdf', 'ai'});
     expect(b['v'], 1);
     expect(b['batch_id'], matches(RegExp(r'^[0-9A-Za-z_-]{8,64}$')));
     expect(b['iid'], matches(RegExp(r'^[0-9a-f]{32}$')));
     expect(b['app'], '1.0.0+1');
+    expect(b['app_version'], '1.0.0');
+    expect(b['app_version'], matches(RegExp(r'^[0-9A-Za-z.+_-]{1,24}$')));
+    expect(b['build'], 1);
     expect(b['app'], matches(RegExp(r'^[0-9A-Za-z.+_-]{1,24}$')));
     expect(b['os'], 'android');
     expect(b['sdk'], inInclusiveRange(0, 99));
@@ -277,5 +281,68 @@ void main() {
     for (final h in ['#/', '#/topics', '#/granths?all=1', '#/granths', '#/granths?r=hindu&g=ved', '#/pramans?granth=1', '#/gallery', '#/ai', '#/legal?p=privacy', '#/legal?p=contacts']) {
       expect(Analytics.screenName(GRoute.parse(h)), matches(RegExp(r'^[a-z0-9_-]{1,24}$')), reason: h);
     }
+  });
+
+  group('app key (X-App-Key)', () {
+    Analytics withKey(String? key) => Analytics(dio: Dio()..httpClientAdapter = net, now: () => clock, config: () => cfg, url: 'https://ev.test/events', enabled: true, appKey: key);
+
+    Future<void> oneBatch(Analytics a) async {
+      a.start();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await nav('#/pramans?granth=44');
+      tick(30);
+      await a.flush(force: true);
+    }
+
+    test('with a key configured, every POST carries it as the X-App-Key header (and it is not in the body)', () async {
+      final a = withKey('test-key');
+      await oneBatch(a);
+      expect(net.opts, hasLength(1));
+      expect(net.opts.single.headers['X-App-Key'], 'test-key');
+      expect(net.opts.single.headers['Content-Encoding'], 'gzip');
+      expect(jsonEncode(net.bodies.single).contains('test-key'), isFalse);
+      expect(jsonEncode(await Store.I.readText(Analytics.queueFile) ?? '').contains('test-key'), isFalse);
+      // a second POST (retry path) also carries it
+      a.debugReset();
+      net.script.addAll([0, 204]);
+      a.aiAsked();
+      await a.flush(force: true);
+      await a.flush();
+      for (final o in net.opts) {
+        expect(o.headers['X-App-Key'], 'test-key');
+      }
+    });
+
+    test('with an empty key (CI / tests) the header is omitted and the batch still goes out', () async {
+      for (final k in [null, '', '   ']) {
+        net = Ingest();
+        await oneBatch(withKey(k));
+        expect(net.opts, hasLength(1), reason: 'key=$k');
+        expect(net.opts.single.headers.containsKey('X-App-Key'), isFalse, reason: 'key=$k');
+        await setUpApp();
+        clock = DateTime.utc(2026, 10, 25, 9);
+      }
+    });
+
+    test('the default key is the compile-time APP_KEY (empty under flutter test), so the header is omitted', () async {
+      expect(Analytics(enabled: true).appKey, kAppKey);
+      expect(kAppKey, isA<String>());
+    });
+
+    test('failures with a key configured never throw and keep the batch: network error, 5xx, 4xx', () async {
+      final a = withKey('test-key');
+      net.script.addAll([0, 500, 403]);
+      a.start();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await nav('#/pramans?granth=44');
+      tick(30);
+      await expectLater(a.flush(force: true), completes); // offline
+      expect(a.debugQueue, hasLength(1));
+      await expectLater(a.flush(), completes); // 500: retry later
+      expect(a.debugQueue, hasLength(1));
+      await expectLater(a.flush(), completes); // 403: dropped, never resent
+      expect(a.debugQueue, isEmpty);
+      expect(net.opts.every((o) => o.headers['X-App-Key'] == 'test-key'), isTrue);
+    });
   });
 }

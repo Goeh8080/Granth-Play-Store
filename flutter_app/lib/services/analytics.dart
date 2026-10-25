@@ -27,11 +27,12 @@ import 'storage.dart';
 /// and nothing is sent unless the remote config's `analytics_enabled` is on and this install is
 /// inside `analytics_sample`.
 class Analytics with WidgetsBindingObserver {
-  Analytics({Dio? dio, DateTime Function()? now, RemoteConfig Function()? config, String? url, bool? enabled})
+  Analytics({Dio? dio, DateTime Function()? now, RemoteConfig Function()? config, String? url, bool? enabled, String? appKey})
       : _dio = dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 8), sendTimeout: const Duration(seconds: 8), receiveTimeout: const Duration(seconds: 8))),
         _now = now ?? DateTime.now,
         _cfg = config ?? (() => RemoteConfig.I),
         url = url ?? kEventsUrl,
+        appKey = (appKey ?? kAppKey).trim(),
         enabledByBuild = enabled ?? !Platform.environment.containsKey('FLUTTER_TEST');
 
   static Analytics I = Analytics();
@@ -47,6 +48,9 @@ class Analytics with WidgetsBindingObserver {
   final DateTime Function() _now;
   final RemoteConfig Function() _cfg;
   final String url;
+
+  /// Sent as `X-App-Key` on every POST to /events; empty = header omitted. Never logged.
+  final String appKey;
 
   /// False under `flutter test` unless a test builds its own instance.
   final bool enabledByBuild;
@@ -297,6 +301,8 @@ class Analytics with WidgetsBindingObserver {
         'batch_id': _hex(16),
         'iid': iid,
         'app': kAppFull,
+        'app_version': kAppVersion,
+        'build': kBuildNumber,
         'os': 'android',
         'sdk': DeviceProfile.I.sdk.clamp(0, 99),
         'cfg': _cfg().cfgVersion,
@@ -409,7 +415,7 @@ class Analytics with WidgetsBindingObserver {
             url,
             data: Uint8List.fromList(bytes),
             options: Options(
-              headers: {'Content-Type': 'application/json', 'Content-Encoding': 'gzip'},
+              headers: {'Content-Type': 'application/json', 'Content-Encoding': 'gzip', if (appKey.isNotEmpty) 'X-App-Key': appKey},
               validateStatus: (_) => true,
               responseType: ResponseType.plain,
             ),
