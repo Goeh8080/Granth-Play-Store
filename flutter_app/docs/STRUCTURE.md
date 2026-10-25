@@ -28,20 +28,29 @@ The Granth tab opens a folder tree built from `assets/structure/structure.json`.
 | हिन्दू | **total** | 60 |
 | इस्लाम | क़ुरान | 1 |
 | इस्लाम | हदीस | 0 |
-| इस्लाम | **total** | 1 |
+| इस्लाम | जीवनी (सीरत) | 1 |
+| इस्लाम | **total** | 2 |
 | सिख | गुरु ग्रंथ साहिब | 2 |
 | सिख | दसम ग्रंथ | 0 |
-| सिख | **total** | 2 |
+| सिख | जन्म साखी | 1 |
+| सिख | **total** | 3 |
 | ईसाई | बाइबल | 1 |
 | ईसाई | **total** | 1 |
 | बुद्ध | त्रिपिटक | 0 |
 | बुद्ध | धम्मपद | 0 |
-| बुद्ध | **total** | 0 |
+| बुद्ध | बौद्ध साहित्य | 2 |
+| बुद्ध | **total** | 2 |
+| जैन | जैन आगम | 0 |
+| जैन | जैन धर्म | 1 |
+| जैन | जैन कोश | 1 |
+| जैन | **total** | 2 |
 | कबीर | कबीर सागर | 2 |
 | कबीर | बीजक | 1 |
 | कबीर | शब्दावली | 1 |
-| कबीर | **total** | 4 |
-| अन्य | (all) | 36 |
+| कबीर | साखी | 1 |
+| कबीर | कबीर मंसूर | 1 |
+| कबीर | **total** | 6 |
+| अन्य | (all) | 28 |
 | **all** | | **104** (API: 104) |
 
 ## हिन्दू
@@ -180,6 +189,12 @@ The Granth tab opens a folder tree built from `assets/structure/structure.json`.
 
 ### हदीस — 0 (hidden in the app until a granth matches)
 
+### जीवनी (सीरत) — 1
+
+| id | title | pramans | note |
+|---:|---|---:|---|
+| 59 | जीवनी हजरत मुहम्मद | 3 | Round 12: जीवनी हजरत मुहम्मद → इस्लाम › जीवनी (सीरत) |
+
 ## सिख
 
 ### गुरु ग्रंथ साहिब — 2
@@ -190,6 +205,12 @@ The Granth tab opens a folder tree built from `assets/structure/structure.json`.
 | 53 | आदि श्री गुरु ग्रन्थ साहिब भाग 2 | 5 |  |
 
 ### दसम ग्रंथ — 0 (hidden in the app until a granth matches)
+
+### जन्म साखी — 1
+
+| id | title | pramans | note |
+|---:|---|---:|---|
+| 51 | भाई वाले वाली जन्म साखी | 6 | Round 12: जन्म साखी (Guru Nanak): title and pramans say "नानक जी" |
 
 ## ईसाई
 
@@ -204,6 +225,29 @@ The Granth tab opens a folder tree built from `assets/structure/structure.json`.
 ### त्रिपिटक — 0 (hidden in the app until a granth matches)
 
 ### धम्मपद — 0 (hidden in the app until a granth matches)
+
+### बौद्ध साहित्य — 2
+
+| id | title | pramans | note |
+|---:|---|---:|---|
+| 69 | भगवान बुद्ध और उनका धम्म | 5 | Round 12: भगवान बुद्ध और उनका धम्म (Ambedkar) → बुद्ध |
+| 101 | मेरी आत्मकथा डा भीमराव अंबेडकर | 0 | Round 12 judgment call: "मेरी आत्मकथा" has 0 pramans and no religion in the title; placed in बुद्ध as Ambedkar's autobiography (his Buddhist conversion) — move to अन्य if you disagree |
+
+## जैन
+
+### जैन आगम — 0 (hidden in the app until a granth matches)
+
+### जैन धर्म — 1
+
+| id | title | pramans | note |
+|---:|---|---:|---|
+| 67 | आओ जैन धर्म को जाने | 2 | Round 12: the only Jain dharm book in the API |
+
+### जैन कोश — 1
+
+| id | title | pramans | note |
+|---:|---|---:|---|
+| 72 | जैन संस्कृति कोश | 0 | Round 12: जैन संस्कृति कोश → जैन |
 
 ## कबीर
 
@@ -226,27 +270,32 @@ The Granth tab opens a folder tree built from `assets/structure/structure.json`.
 |---:|---|---:|---|
 | 39 | कबीरपंथी शब्दावली | 16 |  |
 
+### साखी — 1
 
-## अन्य — 36
+| id | title | pramans | note |
+|---:|---|---:|---|
+| 86 | सत्य कबीर की साखी | 3 | Round 12: सत्य कबीर की साखी → कबीर › साखी |
+
+### कबीर मंसूर — 1
+
+| id | title | pramans | note |
+|---:|---|---:|---|
+| 55 | कबीर मंसूर | 1 | Round 12: कबीर मंसूर, a Kabir book by title |
+
+
+## अन्य — 28
 
 These stay in अन्य on purpose (the reason is in the note). Move one by deleting its id from `other.forceIds` and adding it to a group's `granthIds`.
 
 | id | title | pramans | note |
 |---:|---|---:|---|
 | 50 | सभी प्रकार के लघु चित्र शरीर कमलों और ब्रह्माण्डो के | 14 | Rampal/Satlok book |
-| 55 | कबीर मंसूर | 1 | कबीर मंसूर: could be Kabir panth, unclear: review |
 | 18 | घट रामायण (तुलसी साहब हाथरस वाले) | 6 | घट रामायण: a Sant Mat text, not the Ramayana epic |
 | 36 | संक्षिप्त योगवशिष्ट Code 574 | 4 | योगवशिष्ट: a Vedanta text, not one of the 6 शास्त्र and not a पुराण |
-| 86 | सत्य कबीर की साखी | 3 | सत्य कबीर की साखी: could be कबीर → बीजक/सागर: review |
-| 51 | भाई वाले वाली जन्म साखी | 6 | Sikh janam-sakhi, but not Guru Granth Sahib/Dasam Granth: left for review |
-| 59 | जीवनी हजरत मुहम्मद | 3 | जीवनी हजरत मुहम्मद: a biography, not the Quran/Hadees |
 | 63 | रैदास बानी | 4 | रैदास बानी: Ravidas, a different Sant tradition |
 | 65 | ज्ञान गंगा | 5 | Rampal/Satlok book |
 | 74 | जीने की राह | 1 | Rampal/Satlok book |
 | 68 | संस्कृत हिन्दी शब्दकोश | 1 | dictionary |
-| 67 | आओ जैन धर्म को जाने | 2 | Jain text |
-| 72 | जैन संस्कृति कोश | 0 | Jain text |
-| 69 | भगवान बुद्ध और उनका धम्म | 5 | बुद्ध पर किताब, not the Tripitak/Dhammapad: बुद्ध stays empty |
 | 54 | सत्यार्थ प्रकाश satyarth prakash | 22 | Arya Samaj text |
 | 70 | महर्षि दयानन्द सरस्वती जी का जीवन चरित्र maharishi Dayanand Saraswati ji ka jivan charitra | 8 | Arya Samaj biography |
 | 71 | महर्षि दयानन्द सरस्वती की आत्मकथा | 1 | Arya Samaj biography |
@@ -266,15 +315,15 @@ These stay in अन्य on purpose (the reason is in the note). Move one by d
 | 98 | भविष्य मालिक पुराण भाग 2 | 1 | भविष्य मालिक पुराण: not one of the 18 पुराण: review |
 | 99 | यथार्थ भक्ति बोध | 1 | Rampal/Satlok book |
 | 100 | गरिमा गीता की | 1 | गरिमा गीता की: a book about the Gita, not the Gita itself |
-| 101 | मेरी आत्मकथा डा भीमराव अंबेडकर | 0 | autobiography |
 | 109 | कुलार्णवतंत्रम | 1 | तंत्र text |
 | 110 | अगस्त संहिता | 0 | अगस्त संहिता: a संहिता, not a Veda |
 
 ## Ambiguous / worth a second look
 
-- **Placed by inference** (title implies the group, but not the exact word): 16 (श्रीमद्भागवत सुधासागर code 1930), 24 (भागवत नवनीत code 2009), 102 (अनुराग सागर), 17 (श्री रामचरितमानस code 81), 56 (आनंद रामायण).
-- **Left in अन्य, could move with a decision**: 18 घट रामायण, 36 योगवशिष्ट, 55 कबीर मंसूर, 86 सत्य कबीर की साखी, 89 पाराशर स्मृति, 93 गीत गोविन्द, 97/98 भविष्य मालिक पुराण, 100 गरिमा गीता की, 59 जीवनी हजरत मुहम्मद, 69 भगवान बुद्ध और उनका धम्म.
-- **Empty groups** are hidden in the app (सूक्ष्मवेद, the 6 शास्त्र, हदीस, दसम ग्रंथ, त्रिपिटक, धम्मपद); a religion with nothing (बुद्ध) is still shown, with "जल्द आ रहा है".
+- **Placed by inference** (title implies the group, but not the exact word): 51 (भाई वाले वाली जन्म साखी), 55 (कबीर मंसूर), 59 (जीवनी हजरत मुहम्मद), 67 (आओ जैन धर्म को जाने), 69 (भगवान बुद्ध और उनका धम्म), 72 (जैन संस्कृति कोश), 86 (सत्य कबीर की साखी), 101 (मेरी आत्मकथा डा भीमराव अंबेडकर), 16 (श्रीमद्भागवत सुधासागर code 1930), 24 (भागवत नवनीत code 2009), 102 (अनुराग सागर), 17 (श्री रामचरितमानस code 81), 56 (आनंद रामायण).
+- **Left in अन्य, could move with a decision**: 18 घट रामायण, 36 योगवशिष्ट, 89 पाराशर स्मृति, 93 गीत गोविन्द, 97/98 भविष्य मालिक पुराण, 100 गरिमा गीता की, 109 कुलार्णवतंत्रम, 110 अगस्त संहिता, 50/65/74/95/99 (Sant Rampal books: Kabir-centred, but the titles do not say so), 63 रैदास बानी, 77 पैंतीस अक्षरी, 81/82/75 (Sant Mat / Vaishnav Sant texts), 54/70/71 (Arya Samaj).
+- **Round 12 judgment call**: 101 "मेरी आत्मकथा" (0 pramans) is in बुद्ध › बौद्ध साहित्य as Ambedkar's autobiography; nothing in its title says Buddhism.
+- **Empty groups** are hidden in the app (सूक्ष्मवेद, the 6 शास्त्र, हदीस, दसम ग्रंथ, त्रिपिटक, धम्मपद, जैन आगम). A religion with no granth at all would still be shown with "जल्द आ रहा है"; today every religion has at least one.
 - The sum of `pramanCount` in the snapshot is 822.
 
 ## How the app places a granth
@@ -287,7 +336,7 @@ So a **new granth from the API** appears in अन्य unless its title clearl
 ## Layout and religion symbols (round 11)
 
 - Every folder screen (religions, a religion, a group with sub-groups) opens in the **2×2 grid** by default and has the same **1×1 / 2×2 / 3×3** switch as the granth list. They share one saved choice (`Store.kGranthCols`), so one switch lays out the whole Granth tab; the choice survives restarts. 1×1 keeps the horizontal row; 2×2 / 3×3 use centred tiles with two-line titles (ellipsis, never overflow).
-- Each religion has a **vector symbol** painted in code (`lib/widgets/religion_symbol.dart`, no image or font files): हिन्दू ॐ, इस्लाम ☪ (crescent + star), सिख खंडा ☬, ईसाई ✝, बुद्ध धर्मचक्र, कबीर इकतारा, अन्य (neutral four-square). ॐ and ☬ are outlines baked from OFL fonts by `tool/gen_symbol_paths.py` into `lib/widgets/religion_paths.dart` (~3 KB). The symbol sits on the religion's tone tile (`tone` + `icon` in the JSON; allowed icons: `religionSymbolNames`), so it follows every card look.
+- Each religion has a **vector symbol** painted in code (`lib/widgets/religion_symbol.dart`, no image or font files): हिन्दू ॐ, इस्लाम ☪ (crescent + star), सिख खंडा ☬, ईसाई ✝, बुद्ध धर्मचक्र, जैन अहिंसा-हस्त with a wheel (round 12), कबीर चदरिया + दोहे का स्क्रॉल (round 12, replaces the इकतारा), अन्य (neutral four-square). ॐ and ☬ are outlines baked from OFL fonts by `tool/gen_symbol_paths.py` into `lib/widgets/religion_paths.dart` (~3 KB). The symbol sits on the religion's tone tile (`tone` + `icon` in the JSON; allowed icons: `religionSymbolNames`), so it follows every card look.
 
 ## Editing
 

@@ -5,12 +5,12 @@ import 'package:flutter/foundation.dart';
 import '../services/events.dart';
 import '../services/storage.dart';
 
-enum Panel { dashboard, topics, granths, pramans, gallery, ai }
+enum Panel { dashboard, topics, granths, pramans, gallery, ai, legal }
 
 /// `ig()` — the parsed hash route of the web app (`#/pramans?topic=…`).
 @immutable
 class GRoute {
-  const GRoute(this.panel, {this.topicId, this.granthId, this.pramanId, this.religionId, this.groupId, this.subId, this.flat = false});
+  const GRoute(this.panel, {this.topicId, this.granthId, this.pramanId, this.religionId, this.groupId, this.subId, this.flat = false, this.legalPage});
   final Panel panel;
   final String? topicId;
   final String? granthId;
@@ -23,6 +23,10 @@ class GRoute {
   final String? subId;
   final bool flat;
 
+  /// Round 12 — `#/legal` is the list of policies; `#/legal?p=<slug>` one policy; `p=contacts` is
+  /// the विशेष जानकार page.
+  final String? legalPage;
+
   static GRoute parse(String hash) {
     final raw = hash.replaceFirst(RegExp('^#'), '');
     final parts = (raw.isEmpty ? '/dashboard' : raw).split('?');
@@ -31,6 +35,7 @@ class GRoute {
     String? v(String k) => (q[k] ?? '').isEmpty ? null : q[k];
     if (path.startsWith('/gallery')) return const GRoute(Panel.gallery);
     if (path.startsWith('/ai')) return const GRoute(Panel.ai);
+    if (path.startsWith('/legal')) return GRoute(Panel.legal, legalPage: v('p'));
     if (path.startsWith('/topics')) return const GRoute(Panel.topics);
     if (path.startsWith('/granths')) {
       if (v('all') == '1') return const GRoute(Panel.granths, flat: true);
@@ -44,7 +49,7 @@ class GRoute {
     return const GRoute(Panel.dashboard);
   }
 
-  String get key => '${panel.name}:${topicId ?? ''}:${granthId ?? ''}:${pramanId ?? ''}${_folderKey()}';
+  String get key => '${panel.name}:${topicId ?? ''}:${granthId ?? ''}:${pramanId ?? ''}${_folderKey()}${legalPage == null ? '' : '|$legalPage'}';
 
   // Empty for every route that existed before round 10, so their keys are unchanged.
   String _folderKey() => flat
@@ -129,6 +134,8 @@ class AppNav extends ChangeNotifier {
           if (r.subId != null) out.add(GRoute.folderHash(religion: r.religionId, group: r.groupId));
         }
       }
+    } else if (r.panel == Panel.legal) {
+      if (r.legalPage != null) out.add('#/legal');
     } else if (r.panel == Panel.pramans && (r.topicId != null || r.granthId != null) && r.pramanId == null) {
       // A topic's or a granth's pramans: from its list.
       out.add(r.granthId != null ? '#/granths' : '#/topics');

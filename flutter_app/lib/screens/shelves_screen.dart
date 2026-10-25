@@ -46,6 +46,7 @@ class ShelvesPanel extends StatelessWidget {
         scope: const ShelfScope.other(),
         title: Shelves.structure.other.title,
         subtitle: 'बाकी सभी ग्रंथ',
+        emptyNote: Shelves.structure.other.comingSoon,
         leading: const GroupIcon('misc', size: 44),
       );
     }
@@ -63,6 +64,7 @@ class ShelvesPanel extends StatelessWidget {
       title: leaf.title,
       subtitle: group.hasSubgroups ? '${religion.title} • ${group.title}' : religion.title,
       leading: GroupIcon(leaf.icon, size: 44),
+      emptyNote: leaf.comingSoon,
     );
   }
 }
@@ -202,25 +204,27 @@ class _ReligionFolders extends StatelessWidget {
     final rows = <Widget>[];
     final ids = <String>[];
     for (final r in index.structure.religions) {
+      if (!r.visible) continue; // the admin hid the tile (its granths stay reachable elsewhere)
       final list = index.inReligion(r.id);
       ids.add(r.id);
       rows.add(FolderRow(
         cols: cols,
         leading: (size) => ReligionSymbol(r.icon, tone: _tone(r.tone), size: size),
         title: r.title,
-        subtitle: list.isEmpty ? 'जल्द आ रहा है' : _count(list.length, ShelfIndex.pramans(list)),
+        subtitle: list.isEmpty ? (r.comingSoon.isNotEmpty ? r.comingSoon : 'जल्द आ रहा है') : _count(list.length, ShelfIndex.pramans(list)),
         dim: list.isEmpty,
         onTap: () => AppNav.I.go(GRoute.folderHash(religion: r.id)),
       ));
     }
     final other = index.other;
-    if (other.isNotEmpty) {
+    if (other.isNotEmpty || index.structure.other.comingSoon.isNotEmpty) {
       ids.add(kOtherId);
       rows.add(FolderRow(
         cols: cols,
         leading: (size) => ReligionSymbol(index.structure.other.icon, tone: Tone.gold, size: size),
         title: index.structure.other.title,
-        subtitle: _count(other.length, ShelfIndex.pramans(other)),
+        subtitle: other.isEmpty ? index.structure.other.comingSoon : _count(other.length, ShelfIndex.pramans(other)),
+        dim: other.isEmpty,
         onTap: () => AppNav.I.go(GRoute.folderHash(religion: kOtherId)),
       ));
     }
@@ -298,7 +302,9 @@ class _FolderScreenState extends State<_FolderScreen> with LivePanel {
         SliverToBoxAdapter(
           child: EmptyState(
             title: 'जल्द आ रहा है',
-            body: '${group?.title ?? religion.title} के ग्रंथ अभी उपलब्ध नहीं हैं।',
+            body: (group?.comingSoon.isNotEmpty ?? false)
+                ? group!.comingSoon
+                : (group == null && religion.comingSoon.isNotEmpty ? religion.comingSoon : '${group?.title ?? religion.title} के ग्रंथ अभी उपलब्ध नहीं हैं।'),
           ),
         ),
     ]);

@@ -26,15 +26,16 @@ void main() {
   final granths = realGranths();
 
   group('structure.json (the file the APK ships)', () {
-    test('six religions in the agreed order, with the agreed groups', () {
-      expect([for (final r in structure.religions) r.title], ['हिन्दू', 'इस्लाम', 'सिख', 'ईसाई', 'बुद्ध', 'कबीर']);
+    test('seven religions in the agreed order, with the agreed groups', () {
+      expect([for (final r in structure.religions) r.title], ['हिन्दू', 'इस्लाम', 'सिख', 'ईसाई', 'बुद्ध', 'जैन', 'कबीर']);
       List<String> groups(String r) => [for (final g in structure.religion(r)!.groups) g.title];
       expect(groups('hindu'), ['वेद', 'गीता', 'पुराण', 'उपनिषद', 'रामायण', 'महाभारत', 'मनुस्मृति', '6 शास्त्र']);
-      expect(groups('islam'), ['क़ुरान', 'हदीस']);
-      expect(groups('sikh'), ['गुरु ग्रंथ साहिब', 'दसम ग्रंथ']);
+      expect(groups('islam'), ['क़ुरान', 'हदीस', 'जीवनी (सीरत)']);
+      expect(groups('sikh'), ['गुरु ग्रंथ साहिब', 'दसम ग्रंथ', 'जन्म साखी']);
       expect(groups('christian'), ['बाइबल']);
-      expect(groups('buddh'), ['त्रिपिटक', 'धम्मपद']);
-      expect(groups('kabir'), ['कबीर सागर', 'बीजक', 'शब्दावली']);
+      expect(groups('buddh'), ['त्रिपिटक', 'धम्मपद', 'बौद्ध साहित्य']);
+      expect(groups('jain'), ['जैन आगम', 'जैन धर्म', 'जैन कोश']);
+      expect(groups('kabir'), ['कबीर सागर', 'बीजक', 'शब्दावली', 'साखी', 'कबीर मंसूर']);
       List<String> subs(String g) => [for (final s in structure.religion('hindu')!.groups.firstWhere((e) => e.id == g).subgroups) s.title];
       expect(subs('ved'), ['ऋग्वेद', 'यजुर्वेद', 'सामवेद', 'अथर्ववेद', 'सूक्ष्मवेद']);
       expect(subs('shastra'), ['न्याय', 'वैशेषिक', 'सांख्य', 'योग', 'मीमांसा', 'वेदांत']);
@@ -110,7 +111,15 @@ void main() {
       expect(n('kabir', 'kabir-sagar'), 2);
       expect(n('kabir', 'bijak'), 1);
       expect(n('kabir', 'shabdavali'), 1);
-      expect(index.other.length, 36);
+      expect(n('kabir', 'sakhi'), 1);
+      expect(n('kabir', 'kabir-mansoor'), 1);
+      expect(n('islam', 'seerat'), 1);
+      expect(n('sikh', 'janam-sakhi'), 1);
+      expect(n('buddh', 'baudh-sahitya'), 2);
+      expect(n('jain', 'agam'), 0);
+      expect(n('jain', 'jain-dharm'), 1);
+      expect(n('jain', 'jain-kosh'), 1);
+      expect(index.other.length, 28);
       final inReligions = structure.religions.fold<int>(0, (a, r) => a + index.inReligion(r.id).length);
       expect(inReligions + index.other.length, 104);
     });
@@ -118,8 +127,8 @@ void main() {
     test('titles that look like a match but are not stay in अन्य (a wrong shelf is worse)', () {
       String title(String id) => granths.firstWhere((g) => g.id == id).title;
       final other = {for (final g in index.other) g.id};
-      // घट रामायण (a Sant-mat text), भविष्य मालिक पुराण, योगवशिष्ट, पाराशर स्मृति, a biography of Muhammad …
-      for (final id in ['18', '97', '98', '36', '89', '59', '69', '55', '86']) {
+      // घट रामायण (a Sant-mat text), भविष्य मालिक पुराण, योगवशिष्ट, पाराशर स्मृति, …
+      for (final id in ['18', '97', '98', '36', '89']) {
         expect(other, contains(id), reason: '$id ${title(id)}');
       }
     });
@@ -143,10 +152,13 @@ void main() {
       expect([for (final g in index.visibleGroups('hindu')) g.id], ['ved', 'geeta', 'puran', 'upanishad', 'ramayan', 'mahabharat', 'manusmriti']);
       expect([for (final s in index.visibleSubgroups('hindu', 'ved')) s.id], ['rigved', 'yajurved', 'samved', 'atharvved']);
       expect(index.visibleSubgroups('hindu', 'shastra'), isEmpty);
-      expect([for (final g in index.visibleGroups('islam')) g.id], ['quran']);
-      expect([for (final g in index.visibleGroups('sikh')) g.id], ['guru-granth']);
-      expect(index.visibleGroups('buddh'), isEmpty, reason: 'बुद्ध has no granth yet: the religion folder says जल्द आ रहा है');
-      expect(index.inReligion('buddh'), isEmpty);
+      expect([for (final g in index.visibleGroups('islam')) g.id], ['quran', 'seerat']);
+      expect([for (final g in index.visibleGroups('sikh')) g.id], ['guru-granth', 'janam-sakhi']);
+      expect([for (final g in index.visibleGroups('buddh')) g.id], ['baudh-sahitya']);
+      expect([for (final g in index.visibleGroups('jain')) g.id], ['jain-dharm', 'jain-kosh'], reason: 'जैन आगम is empty and hidden');
+      expect({for (final g in index.inReligion('buddh')) g.id}, {'69', '101'});
+      expect({for (final g in index.inReligion('jain')) g.id}, {'67', '72'});
+      expect({for (final g in index.inReligion('kabir')) g.id}, containsAll(['55', '86', '7', '102', '73', '39']));
     });
   });
 
@@ -199,7 +211,7 @@ void main() {
       expect(idx.placements['9001']!.key, kOtherId);
       expect(idx.placements['9002']!.key, kOtherId);
       expect(idx.other.map((g) => g.id), containsAll(['9001', '9002']));
-      expect(idx.other.length, 38);
+      expect(idx.other.length, 30);
       expect(idx.placements.length, 106);
     });
 

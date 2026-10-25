@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 
 import '../highlighter/highlighter_launcher.dart';
 import '../services/catalog_store.dart';
+import '../services/remote_config.dart';
+import 'legal_screen.dart';
 import '../services/file_actions.dart';
 import '../services/native_bridge.dart';
 import '../services/pdf_notify.dart';
@@ -223,6 +225,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
         Panel.pramans => PramansPanel(route: r),
         Panel.gallery => const GalleryPanel(),
         Panel.ai => const AiPanel(),
+        Panel.legal => LegalPanel(key: ValueKey('legal-${r.legalPage}'), page: r.legalPage),
       };
 
   @override
@@ -237,7 +240,11 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
         value: SystemUiOverlayStyle.light.copyWith(statusBarColor: GColors.maroon),
         child: Scaffold(
           backgroundColor: GColors.cream,
-          body: Stack(
+          // The AI chat's text box sits under the page (not over it), so the list is only as tall
+          // as what is left above the keyboard and the last message is never hidden.
+          body: Column(children: [
+            Expanded(
+              child: Stack(
             children: [
               const Positioned.fill(child: _RootBackground()),
               ListenableBuilder(
@@ -312,7 +319,10 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
               if (_deckOpen && PdfQueue.I.jobs.isNotEmpty) Positioned.fill(child: PdfDeckLayer(key: const ValueKey('pdf-deck-layer'), selected: _deckSel, onClose: _closeDeck)),
               const _ToastLayer(),
             ],
-          ),
+              ),
+            ),
+            if (r.panel == Panel.ai) ListenableBuilder(listenable: RemoteConfig.I, builder: (_, _) => RemoteConfig.I.aiEnabled ? const AiComposer() : const SizedBox.shrink()),
+          ]),
         ),
       ),
     );
@@ -625,7 +635,12 @@ class _NavMenu extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) => AnimatedSize(
+  Widget build(BuildContext context) => ListenableBuilder(
+      listenable: RemoteConfig.I,
+      builder: (context, _) {
+        // Remote config `ai_enabled: false` takes the AI entry out of the menu.
+        final items = [for (final it in _items) if (!(it.$4 == Panel.ai && !RemoteConfig.I.aiEnabled)) it];
+        return AnimatedSize(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic,
         alignment: Alignment.topCenter,
@@ -639,11 +654,12 @@ class _NavMenu extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
                 child: Column(
                   children: [
-                    for (var i = 0; i < _items.length; i++) ...[if (i > 0) const SizedBox(height: 4), Entry(index: i, dx: -16, child: _navBtn(_items[i]))],
+                    for (var i = 0; i < items.length; i++) ...[if (i > 0) const SizedBox(height: 4), Entry(index: i, dx: -16, child: _navBtn(items[i]))],
                   ],
                 ),
               ),
       );
+      });
 
   Widget _navBtn((String, String, String, Panel?) it) {
     final active = it.$4 != null && AppNav.I.route.panel == it.$4;

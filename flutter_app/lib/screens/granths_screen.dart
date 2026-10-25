@@ -38,6 +38,7 @@ class GranthsPanel extends StatefulWidget {
     this.subtitle = 'Sacred texts and scriptures',
     this.leading,
     this.idle,
+    this.emptyNote = '',
   });
 
   /// [Places] key of the list (scroll position + search text).
@@ -46,6 +47,9 @@ class GranthsPanel extends StatefulWidget {
   final String title;
   final String subtitle;
   final Widget? leading;
+
+  /// Remote config `coming_soon` of the folder: shown instead of "कोई ग्रंथ नहीं" when it is empty.
+  final String emptyNote;
 
   /// Slivers shown instead of the card grid while the search box is empty.
   final Widget Function(BuildContext context, double dx, PopLedger ledger)? idle;
@@ -129,7 +133,12 @@ class _GranthsPanelState extends State<GranthsPanel> with LivePanel {
           );
         },
       )),
-      if (rows.isEmpty && !idleOn) const SliverToBoxAdapter(child: EmptyState(title: 'कोई ग्रंथ नहीं', body: 'सिंक के बाद पवित्र ग्रंथ यहाँ खुलेंगे।')),
+      if (rows.isEmpty && !idleOn)
+        SliverToBoxAdapter(
+          child: widget.emptyNote.isNotEmpty && _q.trim().isEmpty
+              ? EmptyState(title: 'जल्द आ रहा है', body: widget.emptyNote)
+              : const EmptyState(title: 'कोई ग्रंथ नहीं', body: 'सिंक के बाद पवित्र ग्रंथ यहाँ खुलेंगे।'),
+        ),
     ]);
   }
 }

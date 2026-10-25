@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../models/models.dart';
+import 'analytics.dart';
 import 'api.dart';
 import 'catalog_store.dart';
 import 'device_profile.dart';
@@ -327,6 +328,7 @@ class PdfQueue extends ChangeNotifier {
           ..finishedAt = DateTime.now().millisecondsSinceEpoch;
         notifyListeners();
         finished.value = job;
+        Analytics.I.pdfResult(true);
         try {
           EventLog.I.log('pdf_download', job.granthId.isNotEmpty ? job.granthId : job.id, job.fileName);
         } catch (_) {}
@@ -342,13 +344,13 @@ class PdfQueue extends ChangeNotifier {
         debugPrint('PDF "${job.title}" attempt ${job.attempts} failed: $e\n$st');
         if (_isNoSpace(e)) {
           final free = e is PdfNoSpace ? e.freeBytes : await freeBytes().catchError((Object _) => null);
-          _fail(job, pdfNoSpaceMessage(free));
+          _fail(job, pdfNoSpaceMessage(free), 'nospace');
           return;
         }
         if (e is PdfPageFailed) {
           // Pages that could not be fetched even after retries: never a PDF with blank pages.
           job.waitsForNet = true;
-          _fail(job, pdfPagesMissingMessage(e.pages.length));
+          _fail(job, pdfPagesMissingMessage(e.pages.length), 'pages');
           PdfNotify.I.failed(job);
           _watchNet();
           return;
@@ -368,7 +370,7 @@ class PdfQueue extends ChangeNotifier {
           if (job.cancelled) return;
           continue; // one automatic retry
         }
-        _fail(job, e is OutOfMemoryError ? 'फ़ोन की मेमोरी कम पड़ गई। दूसरे ऐप बंद करके “फिर कोशिश करें” दबाएँ।' : kPdfFailed);
+        _fail(job, e is OutOfMemoryError ? 'फ़ोन की मेमोरी कम पड़ गई। दूसरे ऐप बंद करके “फिर कोशिश करें” दबाएँ।' : kPdfFailed, e is OutOfMemoryError ? 'memory' : Analytics.kindOf(e));
         return;
       }
     }
@@ -384,7 +386,8 @@ class PdfQueue extends ChangeNotifier {
   /// Temporary file a job builds into (`*.part`, removed on failure / next start).
   static String workPath(PdfJob job) => '${Store.I.pdfDir}/${job.id}.pdf.part';
 
-  void _fail(PdfJob job, String message) {
+  void _fail(PdfJob job, String message, [String kind = 'other']) {
+    Analytics.I.pdfResult(false, kind);
     job
       ..phase = PdfPhase.error
       ..etaMs = 0

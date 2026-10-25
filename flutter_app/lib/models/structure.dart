@@ -32,10 +32,18 @@ class ShelfGroup {
     this.keywords = const [],
     this.notKeywords = const [],
     this.subgroups = const [],
+    this.visible = true,
+    this.comingSoon = '',
   });
 
   final String id;
   final String title;
+
+  /// Remote config: `false` hides this folder's tile only (never its granths).
+  final bool visible;
+
+  /// Remote config: a note shown on the folder (and instead of "no granths" when it is empty).
+  final String comingSoon;
 
   /// Name of a painted group icon (see `GroupIcon`).
   final String icon;
@@ -54,13 +62,19 @@ class ShelfGroup {
         keywords: _strings(j['keywords']),
         notKeywords: _strings(j['notKeywords']),
         subgroups: [for (final s in (j['subgroups'] as List? ?? const [])) ShelfGroup.fromJson((s as Map).cast<String, dynamic>())],
+        visible: j['visible'] != false,
+        comingSoon: j['coming_soon'] is String ? (j['coming_soon'] as String).trim() : '',
       );
 }
 
 class ShelfReligion {
-  const ShelfReligion({required this.id, required this.title, this.tone = 'maroon', this.icon = 'folder-open', this.groups = const []});
+  const ShelfReligion({required this.id, required this.title, this.tone = 'maroon', this.icon = 'folder-open', this.groups = const [], this.visible = true, this.comingSoon = ''});
   final String id;
   final String title;
+
+  /// Remote config: `false` hides the religion's tile only.
+  final bool visible;
+  final String comingSoon;
 
   /// `saffron` / `maroon` / `gold` — resolved to a theme colour by the screen.
   final String tone;
@@ -73,6 +87,8 @@ class ShelfReligion {
         tone: '${j['tone'] ?? 'maroon'}',
         icon: '${j['icon'] ?? 'folder-open'}',
         groups: [for (final g in (j['groups'] as List? ?? const [])) ShelfGroup.fromJson((g as Map).cast<String, dynamic>())],
+        visible: j['visible'] != false,
+        comingSoon: j['coming_soon'] is String ? (j['coming_soon'] as String).trim() : '',
       );
 }
 
@@ -88,8 +104,9 @@ class Structure {
   final List<ShelfReligion> religions;
   final ShelfGroup other;
 
-  factory Structure.parse(String source) {
-    final j = jsonDecode(source) as Map<String, dynamic>;
+  factory Structure.parse(String source) => Structure.fromMap(jsonDecode(source) as Map<String, dynamic>);
+
+  factory Structure.fromMap(Map<String, dynamic> j) {
     return Structure(
       religions: [for (final r in (j['religions'] as List? ?? const [])) ShelfReligion.fromJson((r as Map).cast<String, dynamic>())],
       other: j['other'] is Map ? ShelfGroup.fromJson((j['other'] as Map).cast<String, dynamic>()) : const ShelfGroup(id: kOtherId, title: 'अन्य', icon: 'misc'),
@@ -129,7 +146,7 @@ class Placement {
   /// A [leafKey], or [kOtherId].
   final String key;
 
-  /// `id` (listed in the JSON), `keyword`, `forced` (listed under अन्य), `fallback`.
+  /// `override` (remote config), `id` (listed in the JSON), `keyword`, `forced` (listed under अन्य), `fallback`.
   final String how;
   bool get isOther => key == kOtherId;
 }
@@ -144,7 +161,9 @@ class ShelfIndex {
   final Map<String, List<Granth>> _byLeaf;
   final Map<String, Placement> placements;
 
-  factory ShelfIndex.build(Structure structure, List<Granth> granths) {
+  /// [overrides] (remote config: granth id → leaf key) win over everything else; [hidden] granths
+  /// are dropped after placement.
+  factory ShelfIndex.build(Structure structure, List<Granth> granths, {Map<String, String> overrides = const {}, Set<String> hidden = const {}}) {
     final leaves = structure.leaves().toList();
     final byId = <String, String>{};
     for (final l in leaves) {
@@ -153,12 +172,17 @@ class ShelfIndex {
       }
     }
     final forced = {...structure.other.granthIds};
+    final leafKeys = {for (final l in leaves) l.key};
     final folded = {for (final l in leaves) l.key: (kw: [for (final k in l.leaf.keywords) _fold(k)], no: [for (final k in l.leaf.notKeywords) _fold(k)])};
     final buckets = <String, List<Granth>>{};
     final placements = <String, Placement>{};
     for (final g in granths) {
+      if (hidden.contains(g.id)) continue;
       Placement p;
-      if (byId.containsKey(g.id)) {
+      final ov = overrides[g.id];
+      if (ov != null && (leafKeys.contains(ov) || ov == kOtherId)) {
+        p = Placement(ov, 'override');
+      } else if (byId.containsKey(g.id)) {
         p = Placement(byId[g.id]!, 'id');
       } else if (forced.contains(g.id)) {
         p = const Placement(kOtherId, 'forced');
@@ -211,14 +235,14 @@ class ShelfIndex {
   List<ShelfGroup> visibleGroups(String religion) {
     final r = structure.religion(religion);
     if (r == null) return const [];
-    return [for (final g in r.groups) if (inGroup(religion, g.id).isNotEmpty) g];
+    return [for (final g in r.groups) if (g.visible && (inGroup(religion, g.id).isNotEmpty || g.comingSoon.isNotEmpty)) g];
   }
 
   /// Sub-groups of a group that hold at least one granth.
   List<ShelfGroup> visibleSubgroups(String religion, String group) {
     final g = structure.religion(religion)?.groups.where((e) => e.id == group).firstOrNull;
     if (g == null) return const [];
-    return [for (final s in g.subgroups) if (inLeaf(leafKey(religion, group, s.id)).isNotEmpty) s];
+    return [for (final s in g.subgroups) if (s.visible && (inLeaf(leafKey(religion, group, s.id)).isNotEmpty || s.comingSoon.isNotEmpty)) s];
   }
 
   /// Number of pramans in a list of granths (API `pramanCount`s).

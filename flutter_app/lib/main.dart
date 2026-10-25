@@ -10,6 +10,8 @@ import 'screens/splash_screen.dart';
 import 'services/catalog_store.dart';
 import 'services/device_profile.dart';
 import 'services/file_actions.dart';
+import 'services/analytics.dart';
+import 'services/remote_config.dart';
 import 'services/shelves.dart';
 import 'services/events.dart';
 import 'services/storage.dart';
@@ -48,6 +50,11 @@ void main() {
       debugPrint('init: structure: $e');
     }
     try {
+      await RemoteConfig.I.load().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('init: remote config: $e');
+    }
+    try {
       AppNav.I.restore();
     } catch (e) {
       debugPrint('init: restore: $e');
@@ -62,6 +69,8 @@ void main() {
       debugPrint('init: boot: $e');
     }
     runApp(GranthApp(ready: boot));
+    // Anonymous usage counts start after the first frame; they never delay the app.
+    WidgetsBinding.instance.addPostFrameCallback((_) => Analytics.I.start());
   }, (error, stack) {
     debugPrint('Uncaught: $error\n$stack');
   });

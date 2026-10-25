@@ -6,6 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:granthprabandhan/ai/ai_client.dart';
+import 'package:granthprabandhan/ai/chat_controller.dart';
+import 'package:granthprabandhan/ai/chat_store.dart';
+import 'package:granthprabandhan/ai/retriever.dart';
 import 'package:granthprabandhan/main.dart';
 import 'package:granthprabandhan/models/structure.dart';
 import 'package:granthprabandhan/screens/shelves_screen.dart';
@@ -62,7 +66,7 @@ void main() {
       expect((a.dy - b.dy).abs(), lessThan(2), reason: 'हिन्दू and इस्लाम share a row');
       expect(b.dx, greaterThan(a.dx + 120), reason: 'side by side');
       expect(c.dy, greaterThan(a.dy + 100), reason: 'सिख starts the next row');
-      expect(find.byType(FolderRow), findsNWidgets(8));
+      expect(find.byType(FolderRow), findsNWidgets(9));
       expect(t.takeException(), isNull);
     });
 
@@ -182,7 +186,7 @@ void main() {
           expect(t.takeException(), isNull, reason: '$id $h');
         }
         await open(t, '#/granths');
-        expect(find.byType(ReligionSymbol), findsNWidgets(7), reason: '$id: 6 religions + अन्य');
+        expect(find.byType(ReligionSymbol), findsNWidgets(8), reason: '$id: 7 religions + अन्य');
       });
     }
   });
@@ -191,7 +195,7 @@ void main() {
   group('religion symbols', () {
     test('one symbol per religion, in the shipped structure', () {
       final s = shippedStructure();
-      expect([for (final r in s.religions) r.icon], ['om', 'crescent', 'khanda', 'cross', 'dharma', 'ektara']);
+      expect([for (final r in s.religions) r.icon], ['om', 'crescent', 'khanda', 'cross', 'dharma', 'jain', 'kabir']);
       expect(s.other.icon, 'misc');
       expect(religionSymbolNames.toSet(), {...[for (final r in s.religions) r.icon], 'misc'});
     });
@@ -250,7 +254,7 @@ void main() {
       await surface(t, 412);
       await open(t, '#/granths');
       final names = [for (final e in find.byType(ReligionSymbol).evaluate()) (e.widget as ReligionSymbol).name];
-      expect(names, ['om', 'crescent', 'khanda', 'cross', 'dharma', 'ektara', 'misc']);
+      expect(names, ['om', 'crescent', 'khanda', 'cross', 'dharma', 'jain', 'kabir', 'misc']);
       // and the religion screen's header carries the same symbol
       await open(t, '#/granths?r=sikh');
       expect([for (final e in find.byType(ReligionSymbol).evaluate()) (e.widget as ReligionSymbol).name], contains('khanda'));
@@ -402,7 +406,12 @@ void main() {
   });
 
   // ------------------------------------------------------------------------------------
-  group('menu: तत्त्व AI से पूछे (coming soon)', () {
+  group('menu: तत्त्व AI से पूछे (the chat)', () {
+    setUp(() {
+      Retriever.I.reset();
+      ChatController.I = ChatController(client: AiClient(endpoint: 'http://x'), store: ChatStore.fresh());
+    });
+
     Future<void> openMenu(WidgetTester t) async {
       await fingerTap(t, find.byWidgetPredicate((w) => w is GIcon && w.name == 'menu'), wobble: Offset.zero);
       await realPause(t);
@@ -424,33 +433,32 @@ void main() {
       expect(t.takeException(), isNull);
     });
 
-    testWidgets('opens a themed "जल्द आ रहा है" screen with no chat box; Back goes to the dashboard', (t) async {
+    testWidgets('opens the chat (header, text box); Back goes to the dashboard', (t) async {
       await openApp(t);
       await openMenu(t);
       await fingerTap(t, find.byKey(const ValueKey('nav-sparkles')), wobble: Offset.zero);
       await settle(t, 10);
       expect(AppNav.I.hash, '#/ai');
       expect(AppNav.I.menuOpen, isFalse);
-      expect(find.text('जल्द आ रहा है'), findsOneWidget);
-      expect(find.textContaining('प्रश्न पूछ सकेंगे'), findsOneWidget);
-      expect(find.byType(TextField), findsNothing, reason: 'no fake chat');
+      expect(find.text('तत्त्व AI से पूछे'), findsWidgets);
+      expect(find.byType(TextField), findsOneWidget, reason: 'the real chat box');
       expect(t.takeException(), isNull);
       await realPause(t);
       await t.binding.handlePopRoute();
       await settle(t, 8);
       expect(AppNav.I.hash, '#/dashboard');
-      expect(find.text('जल्द आ रहा है'), findsNothing);
+      expect(find.byType(TextField), findsNothing);
     });
 
     for (final (id, title) in cardLooks) {
-      testWidgets('"$title": the coming-soon screen draws at 320 dp, text ×1.3', (t) async {
+      testWidgets('"$title": the chat screen draws at 320 dp, text ×1.3', (t) async {
         UiPrefs.I.look = id;
         await openApp(t);
         await surface(t, 320, 915);
         t.platformDispatcher.textScaleFactorTestValue = 1.3;
         addTearDown(t.platformDispatcher.clearTextScaleFactorTestValue);
         await open(t, '#/ai');
-        expect(find.text('जल्द आ रहा है'), findsOneWidget);
+        expect(find.byType(TextField), findsOneWidget);
         expect(t.takeException(), isNull);
       });
     }

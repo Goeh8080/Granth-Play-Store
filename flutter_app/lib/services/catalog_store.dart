@@ -5,7 +5,9 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
+import 'analytics.dart';
 import 'api.dart';
+import 'remote_config.dart';
 import 'events.dart';
 import 'image_cache.dart';
 import 'native_bridge.dart';
@@ -88,6 +90,35 @@ class CatalogStore extends ChangeNotifier {
   final Api _api;
   final Stream<List<ConnectivityResult>>? _connectivity;
   Catalog _catalog = Catalog.empty();
+
+  /// What the server sent, before the remote config's `hidden_granth_ids` are taken out.
+  Catalog _raw = Catalog.empty();
+  Set<String> _hidden = const {};
+
+  Catalog _view(Catalog c) => _hidden.isEmpty
+      ? c
+      : Catalog(
+          topics: c.topics,
+          granths: [for (final g in c.granths) if (!_hidden.contains(g.id)) g],
+          pramans: [for (final p in c.pramans) if (!_hidden.contains(p.granthId)) p],
+          syncedAt: c.syncedAt,
+          contentKey: c.contentKey,
+        );
+
+  void _setCatalog(Catalog c) {
+    _raw = c;
+    _catalog = _view(c);
+  }
+
+  /// Remote config: granths the admin hid vanish from every list, the search and the AI.
+  void setHidden(Set<String> hidden) {
+    if (setEquals(hidden, _hidden)) return;
+    _hidden = hidden;
+    _catalog = _view(_raw);
+    _catalogChanged();
+    notifyListeners();
+  }
+
   SyncStatus status = SyncStatus.booting;
   bool online = true;
 
@@ -179,7 +210,7 @@ class CatalogStore extends ChangeNotifier {
 
   @visibleForTesting
   void debugSetCatalog(Catalog c) {
-    _catalog = c;
+    _setCatalog(c);
     _catalogChanged(warm: false);
     status = SyncStatus.ready;
     booted = true;
@@ -225,7 +256,7 @@ class CatalogStore extends ChangeNotifier {
       // A saved file this version can't read is set aside, not lost (the fresh sync replaces it).
       if (cached == null && text != null && text.trim().isNotEmpty) unawaited(Store.I.keepCopy('catalog.json', 'unreadable'));
       if (cached != null) {
-        _catalog = cached;
+        _setCatalog(cached);
         _lastJson = cached.contentKey;
         _catalogChanged();
         status = online ? SyncStatus.ready : SyncStatus.offline;
@@ -389,6 +420,8 @@ class CatalogStore extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+    // The signed config (folders, hidden granths, banner, flags) rides along with every sync.
+    unawaited(RemoteConfig.I.refresh());
     if (!silent) {
       status = SyncStatus.syncing;
       error = null;
@@ -404,12 +437,12 @@ class CatalogStore extends ChangeNotifier {
         final file = c.fileText;
         await (file != null ? Store.I.writeText('catalog.json', file) : Store.I.writeJson('catalog.json', c.toJson()));
         _lastJson = enc;
-        _catalog = c;
+        _setCatalog(c);
         _catalogChanged();
         changed = true;
       } else {
         // Same data: keep the lists (and every screen) as they are, just refresh the time.
-        _catalog = _catalog.withSyncedAt(c.syncedAt);
+        _setCatalog(_raw.withSyncedAt(c.syncedAt));
       }
       status = SyncStatus.ready;
       error = null;
@@ -423,10 +456,12 @@ class CatalogStore extends ChangeNotifier {
         images = images.copyWith(done: savedPages, total: _all.length);
       }
       EventLog.I.log('sync', 'catalog');
+      Analytics.I.syncResult(true);
       lastSync.value = syncedAt;
       if (silent && !changed && was == (status, error)) return false;
     } catch (e) {
       debugPrint('sync failed: $e');
+      Analytics.I.syncResult(false, Analytics.kindOf(e));
       if (silent && hasData) {
         // Quiet retry in 2 minutes; nothing on screen changes.
         return false;

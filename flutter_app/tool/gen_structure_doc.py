@@ -16,25 +16,18 @@ WHY = {
     '18': 'घट रामायण: a Sant Mat text, not the Ramayana epic',
     '36': 'योगवशिष्ट: a Vedanta text, not one of the 6 शास्त्र and not a पुराण',
     '50': 'Rampal/Satlok book',
-    '51': 'Sikh janam-sakhi, but not Guru Granth Sahib/Dasam Granth: left for review',
     '54': 'Arya Samaj text',
-    '55': 'कबीर मंसूर: could be Kabir panth, unclear: review',
-    '59': 'जीवनी हजरत मुहम्मद: a biography, not the Quran/Hadees',
     '63': 'रैदास बानी: Ravidas, a different Sant tradition',
     '65': 'Rampal/Satlok book',
-    '67': 'Jain text',
     '68': 'dictionary',
-    '69': 'बुद्ध पर किताब, not the Tripitak/Dhammapad: बुद्ध stays empty',
     '70': 'Arya Samaj biography',
     '71': 'Arya Samaj biography',
-    '72': 'Jain text',
     '74': 'Rampal/Satlok book',
     '75': 'Ramanand: a Vaishnav Sant text: review',
     '77': 'पैंतीस अक्षरी: Sant Mat text: review',
     '81': 'Sant Mat text: review',
     '82': 'चौबीस प्रमाण: Sant Mat text: review',
     '83': 'Nath tradition',
-    '86': 'सत्य कबीर की साखी: could be कबीर → बीजक/सागर: review',
     '88': 'Radha Swami / Jaigurudev',
     '89': 'पाराशर स्मृति: a smriti, not मनुस्मृति',
     '91': 'Radha Swami text',
@@ -45,12 +38,19 @@ WHY = {
     '98': 'भविष्य मालिक पुराण: not one of the 18 पुराण: review',
     '99': 'Rampal/Satlok book',
     '100': 'गरिमा गीता की: a book about the Gita, not the Gita itself',
-    '101': 'autobiography',
     '105': 'राधा सुधा निधि: Radha Vallabh text',
     '109': 'तंत्र text',
     '110': 'अगस्त संहिता: a संहिता, not a Veda',
 }
 INFER = {
+    '51': 'Round 12: जन्म साखी (Guru Nanak): title and pramans say "नानक जी"',
+    '55': 'Round 12: कबीर मंसूर, a Kabir book by title',
+    '59': 'Round 12: जीवनी हजरत मुहम्मद → इस्लाम › जीवनी (सीरत)',
+    '67': 'Round 12: the only Jain dharm book in the API',
+    '69': 'Round 12: भगवान बुद्ध और उनका धम्म (Ambedkar) → बुद्ध',
+    '72': 'Round 12: जैन संस्कृति कोश → जैन',
+    '86': 'Round 12: सत्य कबीर की साखी → कबीर › साखी',
+    '101': 'Round 12 judgment call: "मेरी आत्मकथा" has 0 pramans and no religion in the title; placed in बुद्ध as Ambedkar\'s autobiography (his Buddhist conversion) — move to अन्य if you disagree',
     '16': 'placed by title: भागवत (पुराण)',
     '24': 'placed by title: भागवत (पुराण)',
     '102': 'placed by title: अनुराग सागर (कबीर सागर)',
@@ -121,9 +121,10 @@ w('These stay in अन्य on purpose (the reason is in the note). Move one b
 w(table(oth, WHY) + '\n')
 w('## Ambiguous / worth a second look\n')
 w('- **Placed by inference** (title implies the group, but not the exact word): ' + ', '.join(f'{k} ({G[k]["title"]})' for k in INFER) + '.')
-w('- **Left in अन्य, could move with a decision**: 18 घट रामायण, 36 योगवशिष्ट, 55 कबीर मंसूर, 86 सत्य कबीर की साखी, 89 पाराशर स्मृति, 93 गीत गोविन्द, 97/98 भविष्य मालिक पुराण, 100 गरिमा गीता की, 59 जीवनी हजरत मुहम्मद, 69 भगवान बुद्ध और उनका धम्म.')
-w('- **Empty groups** are hidden in the app (सूक्ष्मवेद, the 6 शास्त्र, हदीस, दसम ग्रंथ, त्रिपिटक, धम्मपद); '
-  'a religion with nothing (बुद्ध) is still shown, with "जल्द आ रहा है".')
+w('- **Left in अन्य, could move with a decision**: 18 घट रामायण, 36 योगवशिष्ट, 89 पाराशर स्मृति, 93 गीत गोविन्द, 97/98 भविष्य मालिक पुराण, 100 गरिमा गीता की, 109 कुलार्णवतंत्रम, 110 अगस्त संहिता, 50/65/74/95/99 (Sant Rampal books: Kabir-centred, but the titles do not say so), 63 रैदास बानी, 77 पैंतीस अक्षरी, 81/82/75 (Sant Mat / Vaishnav Sant texts), 54/70/71 (Arya Samaj).')
+w('- **Round 12 judgment call**: 101 "मेरी आत्मकथा" (0 pramans) is in बुद्ध › बौद्ध साहित्य as Ambedkar\'s autobiography; nothing in its title says Buddhism.')
+w('- **Empty groups** are hidden in the app (सूक्ष्मवेद, the 6 शास्त्र, हदीस, दसम ग्रंथ, त्रिपिटक, धम्मपद, जैन आगम). '
+  'A religion with no granth at all would still be shown with "जल्द आ रहा है"; today every religion has at least one.')
 w('- The sum of `pramanCount` in the snapshot is 822.\n')
 w('## How the app places a granth\n')
 w('1. `other.forceIds` → अन्य.\n2. Its id is in a group\'s `granthIds` → that group.\n'
@@ -135,7 +136,7 @@ w('- Every folder screen (religions, a religion, a group with sub-groups) opens 
   '**1×1 / 2×2 / 3×3** switch as the granth list. They share one saved choice (`Store.kGranthCols`), so one switch lays out the whole Granth tab; '
   'the choice survives restarts. 1×1 keeps the horizontal row; 2×2 / 3×3 use centred tiles with two-line titles (ellipsis, never overflow).\n'
   '- Each religion has a **vector symbol** painted in code (`lib/widgets/religion_symbol.dart`, no image or font files): '
-  'हिन्दू ॐ, इस्लाम ☪ (crescent + star), सिख खंडा ☬, ईसाई ✝, बुद्ध धर्मचक्र, कबीर इकतारा, अन्य (neutral four-square). '
+  'हिन्दू ॐ, इस्लाम ☪ (crescent + star), सिख खंडा ☬, ईसाई ✝, बुद्ध धर्मचक्र, जैन अहिंसा-हस्त with a wheel (round 12), कबीर चदरिया + दोहे का स्क्रॉल (round 12, replaces the इकतारा), अन्य (neutral four-square). '
   'ॐ and ☬ are outlines baked from OFL fonts by `tool/gen_symbol_paths.py` into `lib/widgets/religion_paths.dart` (~3 KB). '
   'The symbol sits on the religion\'s tone tile (`tone` + `icon` in the JSON; allowed icons: `religionSymbolNames`), so it follows every card look.\n')
 w('## Editing\n')

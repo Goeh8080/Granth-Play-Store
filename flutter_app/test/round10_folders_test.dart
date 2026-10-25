@@ -53,25 +53,25 @@ void main() {
 
   testWidgets('the shipped structure.json is a registered asset and loads through the bundle', (t) async {
     await t.runAsync(() => Shelves.load());
-    expect(Shelves.structure.religions.length, 6);
+    expect(Shelves.structure.religions.length, 7);
     Shelves.use(shippedStructure());
   });
 
   group('religions screen', () {
-    testWidgets('six religion folders in order, अन्य, सभी ग्रंथ — with real counts', (t) async {
+    testWidgets('seven religion folders in order, अन्य, सभी ग्रंथ — with real counts', (t) async {
       await openApp(t);
       await tall(t);
       await open(t, '#/granths');
-      for (final s in ['हिन्दू', 'इस्लाम', 'सिख', 'ईसाई', 'बुद्ध', 'कबीर', 'अन्य', 'सभी ग्रंथ']) {
+      for (final s in ['हिन्दू', 'इस्लाम', 'सिख', 'ईसाई', 'बुद्ध', 'जैन', 'कबीर', 'अन्य', 'सभी ग्रंथ']) {
         expect(text(s), findsOneWidget, reason: s);
       }
-      final ys = [for (final s in ['हिन्दू', 'इस्लाम', 'सिख', 'ईसाई', 'बुद्ध', 'कबीर', 'अन्य', 'सभी ग्रंथ']) t.getTopLeft(text(s)).dy];
+      final ys = [for (final s in ['हिन्दू', 'इस्लाम', 'सिख', 'ईसाई', 'बुद्ध', 'जैन', 'कबीर', 'अन्य', 'सभी ग्रंथ']) t.getTopLeft(text(s)).dy];
       // After ensureVisible the list has moved: compare order by index in the scrolled list, not screen y.
-      expect(ys.length, 8);
+      expect(ys.length, 9);
       final all = realGranths();
       expect(find.textContaining('${all.length} ग्रंथ'), findsOneWidget, reason: 'सभी ग्रंथ row');
-      expect(find.textContaining('36 ग्रंथ'), findsOneWidget, reason: 'अन्य');
-      expect(find.textContaining('जल्द आ रहा है'), findsOneWidget, reason: 'बुद्ध has nothing yet');
+      expect(find.textContaining('28 ग्रंथ'), findsOneWidget, reason: 'अन्य');
+      expect(find.textContaining('जल्द आ रहा है'), findsNothing, reason: 'बुद्ध and जैन have granths now');
       expect(find.textContaining('मालिक'), findsNothing, reason: 'no granth card on the religions screen');
       expect(t.takeException(), isNull);
     });
@@ -188,20 +188,23 @@ void main() {
       expect(text('कोई ग्रंथ नहीं'), findsOneWidget);
     });
 
-    testWidgets('बुद्ध (nothing yet) shows "जल्द आ रहा है", not an empty page', (t) async {
+    testWidgets('a religion with no granth shows "जल्द आ रहा है", not an empty page', (t) async {
+      final cat = realCatalog();
+      cat.granths.removeWhere((g) => g.id == '69' || g.id == '101');
+      CatalogStore.I.debugSetCatalog(cat);
       await openApp(t);
       await open(t, '#/granths?r=buddh');
       expect(text('जल्द आ रहा है'), findsOneWidget);
       expect(find.byType(GranthCard), findsNothing);
     });
 
-    testWidgets('अन्य holds the 36 unplaced granths as normal cards', (t) async {
+    testWidgets('अन्य holds the 28 unplaced granths as normal cards', (t) async {
       await openApp(t);
       await tall(t);
       await open(t, '#/granths?r=other');
       expect(text('अन्य'), findsWidgets);
       expect(find.byType(GranthCard, skipOffstage: false), findsAtLeastNWidgets(8));
-      expect(find.textContaining('36'), findsWidgets, reason: 'the counter pill shows the real total');
+      expect(find.textContaining('28'), findsWidgets, reason: 'the counter pill shows the real total');
     });
 
     testWidgets('a new granth from the API appears in अन्य automatically', (t) async {
@@ -211,7 +214,7 @@ void main() {
       await openApp(t);
       await tall(t);
       await open(t, '#/granths');
-      expect(find.textContaining('37 ग्रंथ'), findsOneWidget, reason: 'अन्य grew by one');
+      expect(find.textContaining('29 ग्रंथ'), findsOneWidget, reason: 'अन्य grew by one');
       await t.enterText(find.byType(TextField).first, 'अनोखा');
       await settle(t, 6);
       expect(find.byType(GranthCard), findsOneWidget, reason: 'search still reaches it');
@@ -252,11 +255,11 @@ void main() {
         await tall(t);
         for (final h in ['#/granths', '#/granths?r=hindu', '#/granths?r=hindu&g=ved', '#/granths?r=hindu&g=ved&s=rigved', '#/granths?r=hindu&g=puran', '#/granths?r=other', '#/granths?r=buddh']) {
           await open(t, h);
-          if (!h.endsWith('buddh')) expect(find.byType(GCard, skipOffstage: false), findsWidgets, reason: '$id $h');
+          expect(find.byType(GCard, skipOffstage: false), findsWidgets, reason: '$id $h');
           expect(t.takeException(), isNull, reason: '$id $h');
         }
         await open(t, '#/granths');
-        expect(find.byType(FolderRow), findsNWidgets(8), reason: '$id: 6 religions + अन्य + सभी ग्रंथ');
+        expect(find.byType(FolderRow), findsNWidgets(9), reason: '$id: 7 religions + अन्य + सभी ग्रंथ');
       });
     }
   });

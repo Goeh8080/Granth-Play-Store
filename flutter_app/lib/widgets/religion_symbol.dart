@@ -10,8 +10,9 @@ import 'religion_paths.dart';
 /// ([Tone] gradient tile, [toneColors] ink) so it follows every card look.
 ///
 /// Names: `om` (हिन्दू), `crescent` (इस्लाम — चाँद-तारा), `khanda` (सिख), `cross` (ईसाई),
-/// `dharma` (बुद्ध — धर्मचक्र), `ektara` (कबीर), `misc` (अन्य — neutral).
-const List<String> religionSymbolNames = ['om', 'crescent', 'khanda', 'cross', 'dharma', 'ektara', 'misc'];
+/// `dharma` (बुद्ध — धर्मचक्र), `jain` (जैन — अहिंसा का हाथ और चक्र), `kabir` (कबीर — झीनी चदरिया
+/// और दोहे का पत्र), `misc` (अन्य — neutral). Round 12 replaced the कबीर इकतारा with `kabir`.
+const List<String> religionSymbolNames = ['om', 'crescent', 'khanda', 'cross', 'dharma', 'jain', 'kabir', 'misc'];
 
 /// A rounded gradient tile with the symbol large inside it.
 class ReligionSymbol extends StatelessWidget {
@@ -92,8 +93,10 @@ class ReligionSymbolPainter extends CustomPainter {
         _cross(canvas);
       case 'dharma':
         _dharma(canvas);
-      case 'ektara':
-        _ektara(canvas);
+      case 'jain':
+        _jain(canvas);
+      case 'kabir':
+        _kabir(canvas);
       default:
         _misc(canvas);
     }
@@ -161,24 +164,80 @@ class ReligionSymbolPainter extends CustomPainter {
     }
   }
 
-  void _ektara(Canvas c) {
-    c.save();
-    c.translate(0.5, 0.5);
-    c.rotate(0.62);
-    c.translate(-0.5, -0.5);
-    // gourd body with a sound-hole
-    final body = Path.combine(
-      PathOperation.difference,
-      Path()..addOval(Rect.fromCenter(center: const Offset(0.5, 0.72), width: 0.36, height: 0.32)),
-      Path()..addOval(Rect.fromCircle(center: const Offset(0.5, 0.72), radius: 0.055)),
-    );
-    c.drawPath(body, _fill);
-    // neck, head and the single string beside it
-    c.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTRB(0.465, 0.14, 0.51, 0.62), const Radius.circular(0.02)), _fill);
-    c.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTRB(0.43, 0.08, 0.57, 0.17), const Radius.circular(0.03)), _fill);
-    c.drawLine(const Offset(0.55, 0.15), const Offset(0.55, 0.66), _stroke(0.014));
-    c.drawLine(const Offset(0.5, 0.62), const Offset(0.6, 0.62), _stroke(0.026));
+  /// Fills [shape] and then punches [cuts] out of it (transparent, so the tile shows through).
+  void _punched(Canvas c, void Function() shape, void Function(Paint cut) cuts) {
+    c.saveLayer(const Rect.fromLTWH(0, 0, 1, 1), Paint());
+    shape();
+    cuts(Paint()
+      ..blendMode = BlendMode.clear
+      ..isAntiAlias = true);
     c.restore();
+  }
+
+  Path _union(Iterable<Path> parts) => parts.reduce((a, b) => Path.combine(PathOperation.union, a, b));
+
+  /// जैन — the open "अहिंसा" hand with a wheel (चक्र) in the palm. Plain geometry, no logo.
+  void _jain(Canvas c) {
+    Path finger(double l, double top, double bottom) =>
+        Path()..addRRect(RRect.fromRectAndRadius(Rect.fromLTRB(l, top, l + 0.078, bottom), const Radius.circular(0.039)));
+    final thumb = (Path()..addRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset.zero, width: 0.085, height: 0.25), const Radius.circular(0.0425))))
+        .transform((Matrix4.identity()
+              ..translateByDouble(0.262, 0.585, 0, 1)
+              ..rotateZ(-0.62))
+            .storage);
+    final palm = Path()
+      ..addRRect(RRect.fromLTRBAndCorners(0.31, 0.42, 0.69, 0.82, topLeft: const Radius.circular(0.03), topRight: const Radius.circular(0.03), bottomLeft: const Radius.circular(0.14), bottomRight: const Radius.circular(0.14)));
+    final hand = _union([palm, thumb, finger(0.31, 0.2, 0.55), finger(0.41, 0.12, 0.55), finger(0.51, 0.15, 0.55), finger(0.61, 0.26, 0.55)]);
+    const wheel = Offset(0.5, 0.63);
+    _punched(c, () => c.drawPath(hand, _fill), (cut) {
+      c.drawCircle(wheel, 0.115, cut..style = PaintingStyle.stroke..strokeWidth = 0.02);
+      for (var i = 0; i < 8; i++) {
+        final a = i * math.pi / 4;
+        final d = Offset(math.cos(a), math.sin(a));
+        c.drawLine(wheel + d * 0.03, wheel + d * 0.105, cut..strokeWidth = 0.014..strokeCap = StrokeCap.round);
+      }
+      c.drawCircle(wheel, 0.026, cut..style = PaintingStyle.fill);
+    });
+  }
+
+  /// कबीर — "झीनी झीनी बीनी चदरिया": the weaver's chadar hangs from a rolled scroll that carries
+  /// the lines of a दोहा; folds and a woven border on the cloth. No instrument, no figure.
+  void _kabir(Canvas c) {
+    final scroll = _union([
+      Path()..addRRect(RRect.fromRectAndRadius(const Rect.fromLTRB(0.34, 0.13, 0.66, 0.27), const Radius.circular(0.015))),
+      Path()..addOval(Rect.fromCircle(center: const Offset(0.34, 0.2), radius: 0.07)),
+      Path()..addOval(Rect.fromCircle(center: const Offset(0.66, 0.2), radius: 0.07)),
+    ]);
+    // the chadar: narrow where it is held, wide and wavy at the hem
+    final cloth = Path()
+      ..moveTo(0.31, 0.33)
+      ..quadraticBezierTo(0.5, 0.37, 0.69, 0.33)
+      ..quadraticBezierTo(0.72, 0.57, 0.85, 0.74)
+      ..quadraticBezierTo(0.68, 0.86, 0.5, 0.77)
+      ..quadraticBezierTo(0.32, 0.68, 0.15, 0.78)
+      ..quadraticBezierTo(0.28, 0.57, 0.31, 0.33)
+      ..close();
+    _punched(c, () {
+      c.drawPath(cloth, _fill);
+      c.drawPath(scroll, _fill);
+    }, (cut) {
+      // the lines of the doha, the curl of each roll
+      c.drawLine(const Offset(0.4, 0.17), const Offset(0.6, 0.17), cut..style = PaintingStyle.stroke..strokeWidth = 0.016..strokeCap = StrokeCap.round);
+      c.drawLine(const Offset(0.4, 0.225), const Offset(0.56, 0.225), cut);
+      c.drawCircle(const Offset(0.34, 0.2), 0.025, cut..strokeWidth = 0.012);
+      c.drawCircle(const Offset(0.66, 0.2), 0.025, cut);
+      // the folds of the cloth, fanning out toward the hem, and its woven border
+      cut..strokeWidth = 0.016..strokeCap = StrokeCap.round;
+      c.drawPath(Path()..moveTo(0.41, 0.42)..quadraticBezierTo(0.36, 0.52, 0.34, 0.6), cut);
+      c.drawPath(Path()..moveTo(0.5, 0.43)..quadraticBezierTo(0.51, 0.5, 0.5, 0.58), cut);
+      c.drawPath(Path()..moveTo(0.59, 0.42)..quadraticBezierTo(0.64, 0.52, 0.67, 0.6), cut);
+      c.drawPath(
+          Path()
+            ..moveTo(0.2, 0.7)
+            ..quadraticBezierTo(0.32, 0.62, 0.5, 0.69)
+            ..quadraticBezierTo(0.66, 0.76, 0.8, 0.67),
+          cut..strokeCap = StrokeCap.butt..strokeWidth = 0.012);
+    });
   }
 
   void _misc(Canvas c) {

@@ -5,6 +5,7 @@ import '../services/file_actions.dart';
 import '../state/router.dart';
 import '../state/ui_prefs.dart';
 import '../theme/colors.dart';
+import '../widgets/announcement_banner.dart';
 import '../widgets/common.dart';
 import '../widgets/live_panel.dart';
 import '../widgets/panel.dart';
@@ -38,6 +39,7 @@ class _DashboardPanelState extends State<DashboardPanel> with LivePanel {
           child: PageHeader(tone: Tone.saffron, icon: 'landmark', title: 'Dashboard', subtitle: 'Overview of your Granth collection'),
         ),
       ),
+      const AnnouncementBanner(),
       Entry(index: 1, dx: dx, child: _DashCard(tone: Tone.saffron, icon: 'clipboard-list', count: s.topics.length, label: 'Topics', hash: '#/topics')),
       const SizedBox(height: 14),
       Entry(index: 2, dx: dx, child: _DashCard(tone: Tone.maroon, icon: 'library', count: s.granths.length, label: 'Granths', hash: '#/granths')),

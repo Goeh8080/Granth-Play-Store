@@ -11,6 +11,8 @@ import '../services/gallery_service.dart';
 import '../services/pdf_builder.dart';
 import '../services/pdf_notify.dart';
 import '../services/pdf_queue.dart';
+import '../services/remote_config.dart';
+import '../state/router.dart';
 import '../services/storage.dart';
 import '../state/motion.dart';
 import '../state/toast.dart';
@@ -476,6 +478,12 @@ class NotifHintCard extends StatelessWidget {
 /// `ng` — सेटिंग sheet (PDF style, layout, hidden card style after 5 taps on Version).
 Future<void> openSettings(BuildContext context) => showPop(context, (ctx) => const _Settings());
 
+/// Close the settings sheet, then go to a legal page (the sheet is a dialog above the page).
+void _openLegal(BuildContext context, String link) {
+  Navigator.pop(context);
+  AppNav.I.openLink(link);
+}
+
 class _Settings extends StatefulWidget {
   const _Settings();
   @override
@@ -545,6 +553,14 @@ class _SettingsState extends State<_Settings> {
           _toggle('wifi-only', 'पेज डाउनलोड सिर्फ़ WiFi पर', UiPrefs.I.wifiOnly, (v) => UiPrefs.I.wifiOnly = v),
           _toggle('keep-awake', 'पढ़ते समय स्क्रीन चालू रखें', UiPrefs.I.keepAwake, (v) => UiPrefs.I.keepAwake = v),
           const _StorageBlock(),
+          _block('कानूनी और नीतियाँ', [
+            Pill(key: const ValueKey('set-privacy'), direct: true, icon: 'shield', label: 'गोपनीयता नीति', onTap: () => _openLegal(context, '#/legal?p=privacy')),
+            Pill(key: const ValueKey('set-legal'), direct: true, icon: 'file-text', label: 'सभी नीतियाँ और शर्तें', onTap: () => _openLegal(context, '#/legal')),
+            ListenableBuilder(
+              listenable: RemoteConfig.I,
+              builder: (context, _) => Pill(key: const ValueKey('set-contacts'), direct: true, icon: 'users', label: RemoteConfig.I.contactsTitle, onTap: () => _openLegal(context, '#/legal?p=contacts')),
+            ),
+          ]),
           _block('ऐप के बारे में', [
             Pill(
               key: const ValueKey('set-share-app'),
