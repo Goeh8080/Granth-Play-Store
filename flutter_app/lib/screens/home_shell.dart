@@ -21,6 +21,7 @@ import '../theme/colors.dart';
 import '../widgets/bounded_scroll.dart';
 import '../widgets/common.dart';
 import '../widgets/pdf_sheets.dart';
+import '../services/firebase_bridge.dart';
 import 'account_screen.dart';
 import 'dashboard_screen.dart';
 import 'ai_screen.dart';
@@ -235,6 +236,7 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     Panel.page => switch (r.legalPage) {
       'account' => const AccountPage(key: ValueKey('page-account')),
       'support' when RemoteConfig.I.supportEnabled => const SupportPage(key: ValueKey('page-support')),
+      final String p when p.startsWith('settings/') => SettingsPage(key: ValueKey('page-$p'), section: p.substring(9)),
       _ => const SettingsPage(key: ValueKey('page-settings')),
     },
   };
@@ -439,7 +441,12 @@ class _Mast extends StatelessWidget {
                             const Hero(tag: 'granth-logo', child: LogoIcon()),
                             const SizedBox(width: 12),
                             Flexible(
-                              child: Text('ग्रंथ प्रबंधन', style: GText.display(size: 26, color: GColors.goldLight, height: 1.15, letterSpacing: 0.5)),
+                              // One line always (narrow phones, large text): shrinks instead of wrapping.
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text('ग्रंथ प्रबंधन', maxLines: 1, style: GText.display(size: 26, color: GColors.goldLight, height: 1.15, letterSpacing: 0.5)),
+                              ),
                             ),
                           ],
                         ),
@@ -502,6 +509,8 @@ class _Mast extends StatelessWidget {
                     ),
                     _MastBtn(icon: 'images', onTap: () => nav.go('#/gallery')),
                     const SizedBox(width: 6),
+                    const _AvatarBtn(),
+                    const SizedBox(width: 6),
                     _MastBtn(icon: 'settings', onTap: () => openSettings(context)),
                   ],
                 ),
@@ -522,6 +531,37 @@ class _Mast extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Round account button next to settings: Google photo, else initial, else a person icon.
+class _AvatarBtn extends StatelessWidget {
+  const _AvatarBtn();
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: FirebaseBridge.I,
+    builder: (context, _) {
+      final a = FirebaseBridge.I.account;
+      return Semantics(
+        button: true,
+        label: 'अकाउंट',
+        child: Pressable(
+          key: const ValueKey('mast-account'),
+          onTap: () => AppNav.I.openLink('#/account'),
+          scale: 0.9,
+          child: Container(
+            width: 44,
+            height: 44,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: GColors.gold.withValues(alpha: 0.7), width: 1.5),
+            ),
+            child: AccountAvatar(url: a?.photo ?? '', name: a == null ? '' : (a.name.isEmpty ? a.email : a.name), size: 35),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _MastBtn extends StatelessWidget {

@@ -562,16 +562,121 @@ class NotifHintCard extends StatelessWidget {
 Future<void> openSettings(BuildContext context) async => AppNav.I.openLink('#/settings');
 
 /// The settings page (sections: display, downloads, notifications, account, AI, about).
+///
+/// Since round 15 the top level is a list of folders (same tile as the admin app's settings:
+/// icon box, title, one-line hint, chevron); a folder opens `#/settings?s=<id>` and Back returns
+/// to the list. Account and Support open their own pages.
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.section});
+  final String? section;
   @override
-  Widget build(BuildContext context) => const _Settings();
+  Widget build(BuildContext context) => section == null || !settingsFolders.any((f) => f.id == section) ? const SettingsFolders() : _Settings(section!);
+}
+
+/// A settings folder: id, title, hint, icon, tone, and the link it opens.
+typedef SettingsFolder = ({String id, String title, String sub, String icon, Tone tone});
+
+const settingsFolders = <SettingsFolder>[
+  (id: 'display', title: 'डिस्प्ले', sub: 'PDF स्टाइल, लेआउट, अक्षर का आकार, एनिमेशन', icon: 'layout-grid', tone: Tone.saffron),
+  (id: 'downloads', title: 'डाउनलोड', sub: 'सिंक, WiFi, स्टोरेज और जाँच', icon: 'folder-down', tone: Tone.maroon),
+  (id: 'notify', title: 'सूचनाएँ', sub: 'आज का प्रमाण, नए प्रमाण, नए विषय', icon: 'bell', tone: Tone.gold),
+  (id: 'account', title: 'अकाउंट', sub: 'Google लॉगिन, आपके आँकड़े', icon: 'user', tone: Tone.maroon),
+  (id: 'ai', title: 'तत्त्व AI', sub: 'AI से प्रश्न पूछें', icon: 'sparkles', tone: Tone.saffron),
+  (id: 'support', title: 'सहायता', sub: 'प्रश्न / टिकट भेजें', icon: 'message-circle', tone: Tone.maroon),
+  (id: 'about', title: 'जानकारी', sub: 'नीतियाँ, संपर्क, शेयर, रीसेट, वर्शन', icon: 'info', tone: Tone.gold),
+];
+
+String settingsFolderLink(String id) => switch (id) {
+  'account' => '#/account',
+  'support' => '#/support',
+  _ => '#/settings?s=$id',
+};
+
+/// The folder list (`#/settings`).
+class SettingsFolders extends StatelessWidget {
+  const SettingsFolders({super.key});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([FirebaseBridge.I, RemoteConfig.I]),
+    builder: (context, _) => SliverPadding(
+      key: const ValueKey('settings-page'),
+      padding: const EdgeInsets.fromLTRB(2, 4, 2, 24),
+      sliver: SliverToBoxAdapter(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SheetHead(title: 'सेटिंग', onBack: AppNav.I.back, direct: true),
+            const SizedBox(height: 10),
+            for (final f in settingsFolders)
+              if (f.id != 'support' || RemoteConfig.I.supportEnabled)
+                SettingsTile(
+                  key: ValueKey('set-folder-${f.id}'),
+                  icon: f.icon,
+                  tone: f.tone,
+                  title: f.title,
+                  sub: f.id == 'account' ? (FirebaseBridge.I.account?.email ?? f.sub) : f.sub,
+                  onTap: () => AppNav.I.openLink(settingsFolderLink(f.id)),
+                ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// The admin app's `AdminTile`: card, 40px icon box, bold title + muted hint, chevron.
+class SettingsTile extends StatelessWidget {
+  const SettingsTile({super.key, required this.icon, required this.tone, required this.title, this.sub, required this.onTap});
+  final String icon;
+  final Tone tone;
+  final String title;
+  final String? sub;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: GCard(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          IconBox(tone: tone, icon: icon, size: 40, radius: 12, iconSize: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GText.sans(size: 15, weight: FontWeight.w800, color: GColors.maroon),
+                ),
+                if (sub != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    sub!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GText.sans(size: 12.5, color: GColors.muted, height: 1.35),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          const GIcon('chevron-right', size: 18, color: GColors.muted),
+        ],
+      ),
+    ),
+  );
 }
 
 void _openLegal(BuildContext context, String link) => AppNav.I.openLink(link);
 
 class _Settings extends StatefulWidget {
-  const _Settings();
+  const _Settings(this.section);
+  final String section;
   @override
   State<_Settings> createState() => _SettingsState();
 }
@@ -647,101 +752,124 @@ class _SettingsState extends State<_Settings> {
             children: [
               // Every control here taps directly (TapTarget): a finger that wobbles a little, the
               // scroll view or the app-wide pinch layer can no longer swallow the tap.
-              SheetHead(title: 'सेटिंग', onBack: AppNav.I.back, direct: true),
-              _section('display', 'डिस्प्ले और ग्रिड', 'layout-grid'),
-              _block('PDF सेटिंग', [
-                for (final o in pdfStyleOptions)
+              SheetHead(title: settingsFolders.firstWhere((f) => f.id == widget.section).title, onBack: AppNav.I.back, direct: true),
+              if (widget.section == 'display') ...[
+                _section('display', 'डिस्प्ले और ग्रिड', 'layout-grid'),
+                _block('PDF सेटिंग', [
+                  for (final o in pdfStyleOptions)
+                    Pill(
+                      key: ValueKey('set-pdf-${pdfStyleId(o.style)}'),
+                      direct: true,
+                      label: o.title,
+                      tone: UiPrefs.I.pdfStyle == o.style ? PillTone.maroon : PillTone.plain,
+                      onTap: () => UiPrefs.I.pdfStyle = o.style,
+                    ),
+                ]),
+                _block('लेआउट', [
+                  for (final n in [1, 2])
+                    Pill(key: ValueKey('set-layout-$n'), direct: true, label: '$n×$n', tone: UiPrefs.I.uiCols == n ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.setLayout(n)),
+                ]),
+                // ---- Extra settings (not in the web app), same pills and headings ----
+                _block('अक्षर का आकार', [
+                  for (final (id, title) in const [('small', 'छोटा'), ('normal', 'सामान्य'), ('large', 'बड़ा')])
+                    Pill(key: ValueKey('set-text-$id'), direct: true, label: title, tone: UiPrefs.I.textSize == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.textSize = id),
+                ]),
+                _block('एनिमेशन', [
+                  Pill(key: const ValueKey('set-anim-on'), direct: true, label: 'चालू', tone: UiPrefs.I.animations ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.animations = true),
+                  Pill(key: const ValueKey('set-anim-low'), direct: true, label: 'कम', tone: UiPrefs.I.animations ? PillTone.plain : PillTone.maroon, onTap: () => UiPrefs.I.animations = false),
+                ]),
+              ],
+              if (widget.section == 'downloads') ...[
+                _section('downloads', 'डाउनलोड और सिंक', 'folder-down'),
+                _toggle('auto-sync', 'अपने-आप सिंक (हर 2 मिनट)', UiPrefs.I.autoSync, (v) => UiPrefs.I.autoSync = v),
+                _toggle('auto-download', 'अपने-आप डाउनलोड (बंद हो तो सिर्फ़ टैप पर)', UiPrefs.I.autoDownload, (v) => UiPrefs.I.autoDownload = v),
+                _toggle('wifi-only', 'पेज डाउनलोड सिर्फ़ WiFi पर', UiPrefs.I.wifiOnly, (v) => UiPrefs.I.wifiOnly = v),
+                _toggle('keep-awake', 'पढ़ते समय स्क्रीन चालू रखें', UiPrefs.I.keepAwake, (v) => UiPrefs.I.keepAwake = v),
+                const _StorageBlock(),
+              ],
+              if (widget.section == 'notify') ...[
+                _section('notify', 'सूचनाएँ (नोटिफ़िकेशन)', 'bell'),
+                if (!RemoteConfig.I.notificationsEnabled)
+                  Padding(
+                    key: const ValueKey('set-push-off'),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text('सूचनाएँ अभी बंद हैं (एडमिन)।', style: GText.sans(size: 14, color: GColors.muted)),
+                  )
+                else
+                  for (final (t, title) in const [(PushTopics.daily, 'आज का प्रमाण'), (PushTopics.newPraman, 'नए प्रमाण'), (PushTopics.newTopic, 'नए विषय'), (PushTopics.trending, 'चर्चित विषय')])
+                    _toggle('push-$t', title, FirebaseBridge.I.subscribed(t), (v) => FirebaseBridge.I.setTopic(t, v)),
+                _block('फ़ोन की सूचना सेटिंग', [Pill(key: const ValueKey('set-notify-system'), direct: true, icon: 'settings', label: 'सूचना सेटिंग खोलें', onTap: () => PdfNotify.I.openSettings())]),
+              ],
+              if (widget.section == 'account') ...[
+                _section('account', 'अकाउंट', 'user'),
+                _block(FirebaseBridge.I.account?.email ?? 'लॉगिन नहीं है (ज़रूरी नहीं)', [
                   Pill(
-                    key: ValueKey('set-pdf-${pdfStyleId(o.style)}'),
+                    key: const ValueKey('set-account'),
                     direct: true,
-                    label: o.title,
-                    tone: UiPrefs.I.pdfStyle == o.style ? PillTone.maroon : PillTone.plain,
-                    onTap: () => UiPrefs.I.pdfStyle = o.style,
+                    icon: 'user',
+                    label: FirebaseBridge.I.signedIn ? 'मेरा अकाउंट' : 'Google से लॉगिन',
+                    onTap: () => AppNav.I.openLink('#/account'),
                   ),
-              ]),
-              _block('लेआउट', [
-                for (final n in [1, 2])
-                  Pill(key: ValueKey('set-layout-$n'), direct: true, label: '$n×$n', tone: UiPrefs.I.uiCols == n ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.setLayout(n)),
-              ]),
-              // ---- Extra settings (not in the web app), same pills and headings ----
-              _block('अक्षर का आकार', [
-                for (final (id, title) in const [('small', 'छोटा'), ('normal', 'सामान्य'), ('large', 'बड़ा')])
-                  Pill(key: ValueKey('set-text-$id'), direct: true, label: title, tone: UiPrefs.I.textSize == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.textSize = id),
-              ]),
-              _block('एनिमेशन', [
-                Pill(key: const ValueKey('set-anim-on'), direct: true, label: 'चालू', tone: UiPrefs.I.animations ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.animations = true),
-                Pill(key: const ValueKey('set-anim-low'), direct: true, label: 'कम', tone: UiPrefs.I.animations ? PillTone.plain : PillTone.maroon, onTap: () => UiPrefs.I.animations = false),
-              ]),
-              _section('downloads', 'डाउनलोड और सिंक', 'folder-down'),
-              _toggle('auto-sync', 'अपने-आप सिंक (हर 2 मिनट)', UiPrefs.I.autoSync, (v) => UiPrefs.I.autoSync = v),
-              _toggle('auto-download', 'अपने-आप डाउनलोड (बंद हो तो सिर्फ़ टैप पर)', UiPrefs.I.autoDownload, (v) => UiPrefs.I.autoDownload = v),
-              _toggle('wifi-only', 'पेज डाउनलोड सिर्फ़ WiFi पर', UiPrefs.I.wifiOnly, (v) => UiPrefs.I.wifiOnly = v),
-              _toggle('keep-awake', 'पढ़ते समय स्क्रीन चालू रखें', UiPrefs.I.keepAwake, (v) => UiPrefs.I.keepAwake = v),
-              const _StorageBlock(),
-              _section('notify', 'सूचनाएँ (नोटिफ़िकेशन)', 'bell'),
-              if (!RemoteConfig.I.notificationsEnabled)
-                Padding(
-                  key: const ValueKey('set-push-off'),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text('सूचनाएँ अभी बंद हैं (एडमिन)।', style: GText.sans(size: 14, color: GColors.muted)),
-                )
-              else
-                for (final (t, title) in const [(PushTopics.daily, 'आज का प्रमाण'), (PushTopics.newPraman, 'नए प्रमाण'), (PushTopics.newTopic, 'नए विषय'), (PushTopics.trending, 'चर्चित विषय')])
-                  _toggle('push-$t', title, FirebaseBridge.I.subscribed(t), (v) => FirebaseBridge.I.setTopic(t, v)),
-              _block('फ़ोन की सूचना सेटिंग', [Pill(key: const ValueKey('set-notify-system'), direct: true, icon: 'settings', label: 'सूचना सेटिंग खोलें', onTap: () => PdfNotify.I.openSettings())]),
-              _section('account', 'अकाउंट', 'user'),
-              _block(FirebaseBridge.I.account?.email ?? 'लॉगिन नहीं है (ज़रूरी नहीं)', [
-                Pill(key: const ValueKey('set-account'), direct: true, icon: 'user', label: FirebaseBridge.I.signedIn ? 'मेरा अकाउंट' : 'Google से लॉगिन', onTap: () => AppNav.I.openLink('#/account')),
-                if (RemoteConfig.I.supportEnabled) Pill(key: const ValueKey('set-support'), direct: true, icon: 'message-circle', label: 'सहायता / टिकट', onTap: () => AppNav.I.openLink('#/support')),
-              ]),
-              _section('ai', 'तत्त्व AI', 'sparkles'),
-              _block(RemoteConfig.I.aiEnabled ? 'AI चालू है' : 'AI अभी बंद है (एडमिन)', [
-                if (RemoteConfig.I.aiEnabled) Pill(key: const ValueKey('set-ai-open'), direct: true, icon: 'sparkles', label: 'तत्त्व AI से पूछें', onTap: () => AppNav.I.openLink('#/ai')),
-              ]),
-              _section('about', 'जानकारी', 'info'),
-              _block('कानूनी और नीतियाँ', [
-                Pill(key: const ValueKey('set-privacy'), direct: true, icon: 'shield', label: 'गोपनीयता नीति', onTap: () => _openLegal(context, '#/legal?p=privacy')),
-                Pill(key: const ValueKey('set-legal'), direct: true, icon: 'file-text', label: 'सभी नीतियाँ और शर्तें', onTap: () => _openLegal(context, '#/legal')),
-                ListenableBuilder(
-                  listenable: RemoteConfig.I,
-                  builder: (context, _) =>
-                      Pill(key: const ValueKey('set-contacts'), direct: true, icon: 'users', label: RemoteConfig.I.contactsTitle, onTap: () => _openLegal(context, '#/legal?p=contacts')),
-                ),
-              ]),
-              _block('ऐप के बारे में', [
-                Pill(
-                  key: const ValueKey('set-share-app'),
-                  direct: true,
-                  icon: 'share-2',
-                  label: 'ऐप शेयर करें',
-                  onTap: () => FileActions.shareText('ग्रंथ प्रबंधन — सत ग्रंथों के प्रमाण', kPlayStoreUrl),
-                ),
-                Pill(key: const ValueKey('set-reset'), direct: true, label: 'सेटिंग रीसेट करें', onTap: () => _reset(context)),
-              ]),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TapTarget(
-                  key: const ValueKey('set-version'),
-                  onTap: () => setState(() {
-                    _taps++;
-                    if (_taps >= 5) _looks = true;
-                  }),
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 8, bottom: 8),
-                    child: Text('Version $_version', style: GText.sans(size: 12, color: GColors.muted)),
+                  if (RemoteConfig.I.supportEnabled)
+                    Pill(key: const ValueKey('set-support'), direct: true, icon: 'message-circle', label: 'सहायता / टिकट', onTap: () => AppNav.I.openLink('#/support')),
+                ]),
+              ],
+              if (widget.section == 'ai') ...[
+                _section('ai', 'तत्त्व AI', 'sparkles'),
+                _block(RemoteConfig.I.aiEnabled ? 'AI चालू है' : 'AI अभी बंद है (एडमिन)', [
+                  if (RemoteConfig.I.aiEnabled) Pill(key: const ValueKey('set-ai-open'), direct: true, icon: 'sparkles', label: 'तत्त्व AI से पूछें', onTap: () => AppNav.I.openLink('#/ai')),
+                ]),
+              ],
+              if (widget.section == 'support') ...[
+                _section('support', 'सहायता', 'message-circle'),
+                _block('प्रश्न या समस्या', [Pill(key: const ValueKey('set-support'), direct: true, icon: 'message-circle', label: 'सहायता / टिकट', onTap: () => AppNav.I.openLink('#/support'))]),
+              ],
+              if (widget.section == 'about') ...[
+                _section('about', 'जानकारी', 'info'),
+                _block('कानूनी और नीतियाँ', [
+                  Pill(key: const ValueKey('set-privacy'), direct: true, icon: 'shield', label: 'गोपनीयता नीति', onTap: () => _openLegal(context, '#/legal?p=privacy')),
+                  Pill(key: const ValueKey('set-legal'), direct: true, icon: 'file-text', label: 'सभी नीतियाँ और शर्तें', onTap: () => _openLegal(context, '#/legal')),
+                  ListenableBuilder(
+                    listenable: RemoteConfig.I,
+                    builder: (context, _) =>
+                        Pill(key: const ValueKey('set-contacts'), direct: true, icon: 'users', label: RemoteConfig.I.contactsTitle, onTap: () => _openLegal(context, '#/legal?p=contacts')),
+                  ),
+                ]),
+                _block('ऐप के बारे में', [
+                  Pill(
+                    key: const ValueKey('set-share-app'),
+                    direct: true,
+                    icon: 'share-2',
+                    label: 'ऐप शेयर करें',
+                    onTap: () => FileActions.shareText('ग्रंथ प्रबंधन — सत ग्रंथों के प्रमाण', kPlayStoreUrl),
+                  ),
+                  Pill(key: const ValueKey('set-reset'), direct: true, label: 'सेटिंग रीसेट करें', onTap: () => _reset(context)),
+                ]),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TapTarget(
+                    key: const ValueKey('set-version'),
+                    onTap: () => setState(() {
+                      _taps++;
+                      if (_taps >= 5) _looks = true;
+                    }),
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 8),
+                      child: Text('Version $_version', style: GText.sans(size: 12, color: GColors.muted)),
+                    ),
                   ),
                 ),
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 280),
-                curve: kRise,
-                child: _looks
-                    ? _block('कार्ड स्टाइल', [
-                        for (final (id, title) in cardLooks)
-                          Pill(key: ValueKey('set-look-$id'), direct: true, label: title, tone: UiPrefs.I.look == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.look = id),
-                      ])
-                    : const SizedBox(width: double.infinity),
-              ),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 280),
+                  curve: kRise,
+                  child: _looks
+                      ? _block('कार्ड स्टाइल', [
+                          for (final (id, title) in cardLooks)
+                            Pill(key: ValueKey('set-look-$id'), direct: true, label: title, tone: UiPrefs.I.look == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.look = id),
+                        ])
+                      : const SizedBox(width: double.infinity),
+                ),
+              ],
             ],
           ),
         ),

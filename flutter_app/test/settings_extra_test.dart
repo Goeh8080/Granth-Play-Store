@@ -20,7 +20,7 @@ import 'helpers.dart';
 import 'links_grid_test.dart' show settle;
 import 'offline_test.dart' show FakeNet, pictureCatalog;
 import 'round3_test.dart' show FakeApi;
-import 'round5_test.dart' show fingerTap, openApp, openSettings, realPause;
+import 'round5_test.dart' show fingerTap, openApp, openFolder, openSettings, realPause;
 
 const _native = MethodChannel('com.wnm.granthprabandhan/downloads');
 const _share = MethodChannel('dev.fluttercommunity.plus/share');
@@ -63,8 +63,11 @@ void main() {
     double y(String key) => t.getTopLeft(find.byKey(ValueKey(key))).dy;
     expect(y('set-pdf-fill90'), lessThan(y('set-layout-1')));
     expect(y('set-layout-1'), lessThan(y('set-text-normal')));
-    expect(y('set-text-normal'), lessThan(y('set-version')));
-    expect(find.text('Version 1.0.0'), findsOneWidget, reason: 'from package info');
+    expect(y('set-text-normal'), lessThan(y('set-anim-on')));
+    await t.binding.handlePopRoute();
+    await settle(t, 6);
+    await openFolder(t, 'about');
+    expect(find.text('Version 1.0.0', skipOffstage: false), findsOneWidget, reason: 'from package info');
   });
 
   testWidgets('अक्षर का आकार: small / large / normal change text app-wide and are saved', (t) async {
@@ -79,6 +82,9 @@ void main() {
       expect(Store.I.getString(Store.kTextSize), id);
       expect(scaleAt(t, find.byKey(ValueKey('set-text-$id'))), closeTo(s, 0.001), reason: 'settings sheet itself');
     }
+    await fingerTap(t, find.text('पीछे'));
+    await settle(t, 6);
+    await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300))); // Back is debounced 260 ms
     await fingerTap(t, find.text('पीछे'));
     await settle(t, 6);
     expect(scaleAt(t, dash), closeTo(11.5, 0.001), reason: 'dashboard');
@@ -102,7 +108,7 @@ void main() {
     CatalogStore.I = s;
     FakeNet(s);
     await openApp(t);
-    await openSettings(t);
+    await openSettings(t, 'downloads');
     expect(UiPrefs.I.autoSync, isTrue, reason: 'default on');
     await fingerTap(t, find.byKey(const ValueKey('set-auto-sync-off')));
     await t.pump();
@@ -120,7 +126,7 @@ void main() {
     final net = FakeNet(s);
     s.debugSetNet([ConnectivityResult.mobile]);
     await openApp(t);
-    await openSettings(t);
+    await openSettings(t, 'downloads');
     expect(UiPrefs.I.wifiOnly, isFalse, reason: 'default off: downloads as before');
     await fingerTap(t, find.byKey(const ValueKey('set-wifi-only-on')));
     await t.pump();
@@ -144,7 +150,7 @@ void main() {
     s.savePages();
     await settle(t, 3);
     expect(net.calls, isEmpty);
-    await openSettings(t);
+    await openSettings(t, 'downloads');
     await fingerTap(t, find.byKey(const ValueKey('set-wifi-only-off')));
     await settle(t, 5);
     expect(net.saved.length, 11);
@@ -152,7 +158,7 @@ void main() {
 
   testWidgets('स्क्रीन चालू रखें: sends keep-screen-on to Android and is saved', (t) async {
     await openApp(t);
-    await openSettings(t);
+    await openSettings(t, 'downloads');
     expect(UiPrefs.I.keepAwake, isFalse, reason: 'default off');
     await fingerTap(t, find.byKey(const ValueKey('set-keep-awake-on')));
     await t.pump();
@@ -185,7 +191,7 @@ void main() {
     s.minManualShow = Duration.zero;
     await t.runAsync(() => File('${Store.I.imagesDir}/x.jpg').writeAsBytes(List.filled(3 << 20, 1)));
     await openApp(t);
-    await openSettings(t);
+    await openSettings(t, 'downloads');
     await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
     await settle(t, 2);
     expect(find.text('सेव पेज 0 / 11 · 3.0 MB'), findsOneWidget);
@@ -203,7 +209,7 @@ void main() {
 
   testWidgets('ऐप के बारे में: share sends the app link', (t) async {
     await openApp(t);
-    await openSettings(t);
+    await openSettings(t, 'about');
     await fingerTap(t, find.byKey(const ValueKey('set-share-app')));
     await t.pump(const Duration(milliseconds: 100));
     expect(shared, isNotEmpty);
@@ -222,7 +228,7 @@ void main() {
     UiPrefs.I.keepAwake = true;
     UiPrefs.I.setLayout(1);
     await settle(t, 2);
-    await openSettings(t);
+    await openSettings(t, 'about');
     // Cancel keeps everything.
     await fingerTap(t, find.byKey(const ValueKey('set-reset')));
     await settle(t, 5);

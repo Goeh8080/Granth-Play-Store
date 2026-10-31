@@ -38,7 +38,10 @@ class GRoute {
     if (path.startsWith('/ai')) return const GRoute(Panel.ai);
     if (path.startsWith('/legal')) return GRoute(Panel.legal, legalPage: v('p'));
     for (final p in const ['settings', 'account', 'support']) {
-      if (path.startsWith('/$p')) return GRoute(Panel.page, legalPage: p);
+      if (path.startsWith('/$p')) {
+        final s = p == 'settings' ? v('s') : null;
+        return GRoute(Panel.page, legalPage: s == null || s.isEmpty ? p : 'settings/$s');
+      }
     }
     if (path.startsWith('/topics')) return const GRoute(Panel.topics);
     if (path.startsWith('/granths')) {
@@ -143,6 +146,8 @@ class AppNav extends ChangeNotifier {
           if (r.subId != null) out.add(GRoute.folderHash(religion: r.religionId, group: r.groupId));
         }
       }
+    } else if (r.panel == Panel.page && (r.legalPage?.startsWith('settings/') ?? false)) {
+      out.add('#/settings'); // a settings folder: Back returns to the folder list
     } else if (r.panel == Panel.legal) {
       if (r.legalPage != null) out.add('#/legal');
     } else if (r.panel == Panel.pramans && (r.topicId != null || r.granthId != null) && r.pramanId == null) {

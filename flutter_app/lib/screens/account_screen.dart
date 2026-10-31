@@ -6,7 +6,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../services/catalog_store.dart';
 import '../services/firebase_bridge.dart';
+import '../services/local_stats.dart';
 import '../services/remote_config.dart';
 import '../services/support.dart';
 import '../state/router.dart';
@@ -38,7 +40,7 @@ class AccountPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([FirebaseBridge.I, RemoteConfig.I]),
+    listenable: Listenable.merge([FirebaseBridge.I, RemoteConfig.I, LocalStats.I, CatalogStore.I.lastSync]),
     builder: (context, _) {
       final fb = FirebaseBridge.I;
       final a = fb.account;
@@ -70,7 +72,7 @@ class AccountPage extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        _Avatar(url: a.photo, name: a.name.isEmpty ? a.email : a.name),
+                        AccountAvatar(url: a.photo, name: a.name.isEmpty ? a.email : a.name),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
@@ -117,6 +119,8 @@ class AccountPage extends StatelessWidget {
                 ),
         ),
         const SizedBox(height: 14),
+        const AccountStats(),
+        const SizedBox(height: 14),
         if (RemoteConfig.I.supportEnabled)
           Align(
             alignment: Alignment.centerLeft,
@@ -127,23 +131,130 @@ class AccountPage extends StatelessWidget {
   );
 }
 
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.url, required this.name});
+/// Round account picture: the Google photo, else the first letter, else a person icon.
+class AccountAvatar extends StatelessWidget {
+  const AccountAvatar({super.key, required this.url, required this.name, this.size = 52});
   final String url, name;
+  final double size;
   @override
   Widget build(BuildContext context) {
-    final letter = name.isEmpty ? '?' : String.fromCharCode(name.runes.first).toUpperCase();
-    final fallback = CircleAvatar(
-      radius: 26,
-      backgroundColor: GColors.saffron,
-      child: Text(
-        letter,
-        style: GText.sans(size: 20, weight: FontWeight.w700, color: Colors.white),
+    final fallback = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(colors: [GColors.saffron, GColors.maroon], begin: Alignment.topLeft, end: Alignment.bottomRight),
       ),
+      child: name.isEmpty
+          ? GIcon('user', size: size * 0.5, color: Colors.white)
+          : Text(
+              String.fromCharCode(name.runes.first).toUpperCase(),
+              style: GText.sans(size: size * 0.4, weight: FontWeight.w700, color: Colors.white),
+            ),
     );
     if (!url.startsWith('https://')) return fallback;
     return ClipOval(
-      child: Image.network(url, key: const ValueKey('account-photo'), width: 52, height: 52, fit: BoxFit.cover, errorBuilder: (_, _, _) => fallback),
+      child: Image.network(url, key: const ValueKey('account-photo'), width: size, height: size, fit: BoxFit.cover, errorBuilder: (_, _, _) => fallback),
+    );
+  }
+}
+
+String _when(int? ms) {
+  if (ms == null) return 'अभी नहीं';
+  final d = DateTime.fromMillisecondsSinceEpoch(ms);
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(d.day)}/${two(d.month)}/${d.year} · ${two(d.hour)}:${two(d.minute)}';
+}
+
+/// "आपके आँकड़े": counted on this phone only ([LocalStats]); nothing is fetched or sent.
+class AccountStats extends StatelessWidget {
+  const AccountStats({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final st = LocalStats.I;
+    final rows = <(String, String, String, String)>[
+      ('days', 'calendar-days', 'सक्रिय दिन', '${st.daysActive}'),
+      ('opens', 'history', 'ऐप खोला', '${st.count('app_open')}'),
+      ('granths', 'book-open', 'ग्रंथ खोले', '${st.count('granth_open')}'),
+      ('pramans', 'file-text', 'प्रमाण खोले', '${st.count('praman_open')}'),
+      ('pdf-down', 'folder-down', 'PDF डाउनलोड', '${st.count('pdf_download')}'),
+      ('pdf-gen', 'folder-plus', 'PDF बनाए', '${st.count('pdf_generate')}'),
+      ('ai', 'sparkles', 'AI से प्रश्न', '${st.count('ai_ask')}'),
+    ];
+    return FrostCard(
+      key: const ValueKey('account-stats'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('आपके आँकड़े', style: GText.script(size: 19, color: GColors.maroon)),
+          const SizedBox(height: 2),
+          Text('सिर्फ़ इसी फ़ोन पर गिने जाते हैं, कहीं भेजे नहीं जाते।', style: GText.sans(size: 12.5, color: GColors.muted)),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, c) {
+              final w = (c.maxWidth - 10) / 2;
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final (id, icon, label, value) in rows)
+                    Container(
+                      key: ValueKey('stat-$id'),
+                      width: w,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: GColors.cream,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: GColors.creamDark),
+                      ),
+                      child: Row(
+                        children: [
+                          GIcon(icon, size: 18, color: GColors.saffron),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  value,
+                                  style: GText.sans(size: 18, weight: FontWeight.w800, color: GColors.maroon),
+                                ),
+                                Text(
+                                  label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GText.sans(size: 12, color: GColors.muted),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Row(
+            key: const ValueKey('stat-sync'),
+            children: [
+              const GIcon('refresh-cw', size: 16, color: GColors.muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('आख़िरी सिंक: ${_when(CatalogStore.I.syncedAt)}', style: GText.sans(size: 13, color: GColors.brown)),
+              ),
+            ],
+          ),
+          if (st.since != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('पहली बार: ${st.since!.split('-').reversed.join('/')}', style: GText.sans(size: 12, color: GColors.muted)),
+            ),
+        ],
+      ),
     );
   }
 }

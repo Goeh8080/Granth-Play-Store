@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/home_shell.dart';
+import 'screens/login_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/catalog_store.dart';
 import 'services/device_profile.dart';
@@ -209,6 +210,6 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
       // Whole-app pinch zoom like the original WebView (viewport maximum-scale=5).
       child: AppZoom(child: child!),
     ),
-    home: widget.splash ? AnimatedSplash(ready: widget.ready, child: const HomeShell()) : const HomeShell(),
+    home: widget.splash ? AnimatedSplash(ready: widget.ready, child: const LoginGate(child: HomeShell())) : const LoginGate(child: HomeShell()),
   );
 }

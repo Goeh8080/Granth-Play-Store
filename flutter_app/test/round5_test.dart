@@ -58,10 +58,22 @@ Future<void> openApp(WidgetTester t) async {
   expect(find.byType(AppZoom), findsOneWidget, reason: 'taps go through the whole-app zoom layer');
 }
 
-Future<void> openSettings(WidgetTester t) async {
+/// Opens सेटिंग (the folder list) and then [folder] (null: stay on the list).
+Future<void> openSettings(WidgetTester t, [String? folder = 'display']) async {
   await fingerTap(t, find.byWidgetPredicate((x) => x is GIcon && x.name == 'settings'), wobble: Offset.zero);
   await settle(t, 6);
-  expect(find.byKey(const ValueKey('set-layout-1')), findsOneWidget);
+  expect(find.byKey(const ValueKey('set-folder-display')), findsOneWidget);
+  if (folder != null) await openFolder(t, folder);
+}
+
+/// From the settings folder list, opens one folder.
+Future<void> openFolder(WidgetTester t, String folder) async {
+  final f = find.byKey(ValueKey('set-folder-$folder'), skipOffstage: false);
+  await t.ensureVisible(f);
+  await settle(t, 3);
+  await fingerTap(t, f, wobble: Offset.zero);
+  await settle(t, 6);
+  expect(find.byKey(ValueKey('set-sec-$folder'), skipOffstage: false), findsOneWidget);
 }
 
 void main() {
@@ -166,6 +178,9 @@ void main() {
           expect(Store.I.getInt(k), n, reason: '$k after $n×$n');
         }
       }
+      await fingerTap(t, find.text('पीछे'));
+      await settle(t, 6);
+      await openFolder(t, 'about');
       expect(find.byKey(const ValueKey('set-look-glass')), findsNothing);
       for (var i = 0; i < 5; i++) {
         await fingerTap(t, find.byKey(const ValueKey('set-version')), wobble: const Offset(3, 9));

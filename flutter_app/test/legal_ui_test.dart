@@ -93,7 +93,7 @@ void main() {
 
   testWidgets('Settings → कानूनी और नीतियाँ: the three rows open the list, the policy and विशेष जानकार; Back goes one screen back', (t) async {
     await openApp(t);
-    await openSettings(t);
+    await openSettings(t, 'about');
     for (final (key, expectKey) in [
       ('set-privacy', 'legal-body-privacy'),
       ('set-legal', 'legal-privacy'),

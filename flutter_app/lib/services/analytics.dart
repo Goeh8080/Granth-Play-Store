@@ -12,6 +12,7 @@ import '../models/structure.dart' show kOtherId;
 import '../state/router.dart';
 import 'device_profile.dart';
 import 'remote_config.dart';
+import 'local_stats.dart';
 import 'storage.dart';
 
 /// Anonymous usage counts for the admin's dashboard (docs/AI.md → "Analytics").
@@ -82,6 +83,9 @@ class Analytics with WidgetsBindingObserver {
   /// Firebase Analytics only (primary source): mirrors every /events counter as an event.
   /// String values only; never throws into the app.
   void fb(String name, [Map<String, String?> params = const {}]) {
+    try {
+      LocalStats.I.record(name);
+    } catch (_) {}
     try {
       forward?.call(name, {for (final e in params.entries) if (e.value != null) e.key: _cutP(e.value!)});
     } catch (_) {}

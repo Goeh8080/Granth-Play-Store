@@ -132,12 +132,21 @@ void main() {
       await tester.tap(find.byWidgetPredicate((w) => w is GIcon && w.name == 'settings'));
       await settle(tester);
       expect(find.text('सेटिंग'), findsWidgets);
+      await tester.tap(find.byKey(const ValueKey('set-folder-display')));
+      await settle(tester, 4);
       await tester.tap(find.text('1×1').last);
       await settle(tester, 4);
       for (final k in [Store.kUiCols, Store.kTopicCols, Store.kGranthCols, Store.kPramanCols, Store.kGalleryCols]) {
         expect(Store.I.getInt(k), 1, reason: k);
       }
-      // Hidden card styles after 5 taps on the version.
+      // Hidden card styles after 5 taps on the version (in जानकारी).
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      await tester.ensureVisible(find.byKey(const ValueKey('set-folder-about')));
+      await settle(tester, 3);
+      await tester.tap(find.byKey(const ValueKey('set-folder-about')));
+      await settle(tester, 4);
       await tester.ensureVisible(find.textContaining('Version'));
       await settle(tester, 3);
       for (var i = 0; i < 5; i++) {
@@ -150,8 +159,12 @@ void main() {
       await tester.tap(find.text('Glassmorphism'));
       await settle(tester, 4);
       expect(Store.I.getString(Store.kLook), 'glass');
-      await tester.binding.handlePopRoute();
-      await settle(tester);
+      for (var i = 0; i < 2; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+        await tester.binding.handlePopRoute();
+        await settle(tester);
+      }
+      expect(AppNav.I.route.panel, Panel.topics);
       expect(tester.takeException(), isNull);
       expect(find.byType(IntrinsicHeight), findsNothing); // topics now 1 per row, without leaving the screen
     });

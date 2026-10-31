@@ -74,7 +74,7 @@ class _PramansPanelState extends State<PramansPanel> with LivePanel {
     }
     final rows = searchRows(_filtered, _q, CatalogStore.I.pramanDoc);
     _log.track(_q, rows.length);
-    final cols = UiPrefs.I.cols(Store.kPramanCols, allowed: const [1, 2], fallback: 2);
+    final cols = UiPrefs.I.pageCols('pramans', Store.kPramanCols);
     final dx = panelDx();
     return SliverMainAxisGroup(slivers: [
       StickyHeader(

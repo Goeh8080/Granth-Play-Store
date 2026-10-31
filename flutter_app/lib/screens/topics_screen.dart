@@ -52,7 +52,7 @@ class _TopicsPanelState extends State<TopicsPanel> with LivePanel {
       stableSort(rows, (a, b) => numericCompare(a.position, b.position));
     }
     _log.track(_q, rows.length);
-    final cols = UiPrefs.I.cols(Store.kTopicCols, allowed: const [1, 2], fallback: 2);
+    final cols = UiPrefs.I.pageCols('topics', Store.kTopicCols);
     final dx = panelDx();
     return SliverMainAxisGroup(slivers: [
       StickyHeader(

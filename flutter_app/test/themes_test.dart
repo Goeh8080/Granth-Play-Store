@@ -54,7 +54,7 @@ bool isLook(BoxDecoration d, String look) {
 int count(WidgetTester t, String look) => decos(t).where((d) => isLook(d, look)).length;
 
 Future<void> pickLook(WidgetTester t, String id) async {
-  await openSettings(t);
+  await openSettings(t, 'about');
   for (var i = 0; i < 5; i++) {
     await fingerTap(t, find.byKey(const ValueKey('set-version')), wobble: Offset.zero);
     await t.pump(const Duration(milliseconds: 60));

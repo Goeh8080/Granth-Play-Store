@@ -68,6 +68,7 @@ class ParsedConfig {
     required this.contactsTitle,
     required this.contacts,
     this.uiGrid,
+    this.uiGridPages = const {},
     this.trendingTopics = const [],
     this.dailyPraman,
   });
@@ -89,6 +90,9 @@ class ParsedConfig {
 
   /// `ui.grid` (1|2|3); null = the admin has not set it.
   final int? uiGrid;
+
+  /// `ui.grid_pages` (page → 1|2|3; pages: granths, shelves, pramans, topics, gallery, dashboard).
+  final Map<String, int> uiGridPages;
 
   /// `trending.topic_ids` (round 14, optional): topic ids to show as "चर्चित विषय"; empty = hidden.
   final List<String> trendingTopics;
@@ -364,6 +368,7 @@ ParsedConfig? parseConfig(String text, {int cachedVersion = 0, int appBuild = kB
       contactsTitle: ct.isNotEmpty && ct.length <= 60 ? ct : kContactsTitle,
       contacts: parseContacts(j['contacts']),
       uiGrid: _parseGrid(_map(j['ui'])),
+      uiGridPages: parseGridPages(_map(j['ui'])),
       trendingTopics: _parseTrending(_map(j['trending'])),
       dailyPraman: _parseDaily(_map(j['daily_praman'])),
     );
@@ -378,6 +383,19 @@ int? _parseGrid(Map<String, dynamic>? ui) {
   final g = ui?['grid'];
   if (g is! num || !g.isFinite) return null;
   return g.round().clamp(1, 3);
+}
+
+/// Pages the admin can set a grid for in `ui.grid_pages`.
+const kGridPages = {'granths', 'shelves', 'pramans', 'topics', 'gallery', 'dashboard'};
+
+/// `ui.grid_pages`: `{page: 1|2|3}`; unknown pages and non-numbers are dropped, values clamped to 1..3.
+Map<String, int> parseGridPages(Map<String, dynamic>? ui) {
+  final m = ui?['grid_pages'];
+  if (m is! Map) return const {};
+  return {
+    for (final e in m.entries)
+      if (e.key is String && kGridPages.contains(e.key) && e.value is num && const [1, 2, 3].contains(e.value)) e.key as String: (e.value as num).toInt(),
+  };
 }
 
 String _normEtag(String? e) => (e ?? '').trim().replaceFirst(RegExp(r'^W/'), '');
@@ -419,6 +437,12 @@ class RemoteConfig extends ChangeNotifier {
 
   /// The admin's default grid columns (`ui.grid`), null = not set.
   int? uiGrid;
+
+  /// `ui.grid_pages` (see [ParsedConfig.uiGridPages]).
+  Map<String, int> uiGridPages = const {};
+
+  /// The admin's grid for [page]: `ui.grid_pages[page]`, else `ui.grid`, else null (local default).
+  int? gridFor(String page) => uiGridPages[page] ?? uiGrid;
 
   /// Round 14 optional fields (see [ParsedConfig]).
   List<String> trendingTopics = const [];
@@ -525,8 +549,9 @@ class RemoteConfig extends ChangeNotifier {
     aiEndpoint = p.aiEndpoint;
     contactsTitle = p.contactsTitle;
     contacts = p.contacts ?? kSeedContacts;
-    final gridChanged = uiGrid != p.uiGrid;
+    final gridChanged = uiGrid != p.uiGrid || !mapEquals(uiGridPages, p.uiGridPages);
     uiGrid = p.uiGrid;
+    uiGridPages = p.uiGridPages;
     trendingTopics = p.trendingTopics;
     dailyPraman = p.dailyPraman;
     Shelves.useRemote(p.structure, p.overrides);
@@ -558,6 +583,7 @@ class RemoteConfig extends ChangeNotifier {
     contactsTitle = kContactsTitle;
     contacts = kSeedContacts;
     uiGrid = null;
+    uiGridPages = const {};
     trendingTopics = const [];
     dailyPraman = null;
     lastResult = 'none';

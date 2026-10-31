@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:granthprabandhan/screens/login_screen.dart';
+import 'package:granthprabandhan/services/local_stats.dart';
 import 'package:granthprabandhan/models/models.dart';
 import 'package:granthprabandhan/services/catalog_store.dart';
 import 'package:granthprabandhan/models/structure.dart';
@@ -39,6 +41,8 @@ Future<void> setUpApp() async {
   AppNav.I = AppNav();
   Places.forgetLive(); // the search text of a list is remembered in memory for the session
   ImageSizes.I.clear();
+  LocalStats.I.debugReset();
+  LoginGate.enabled = false;
   final store = CatalogStore(connectivity: const Stream.empty());
   CatalogStore.I = store;
   store.debugSetCatalog(sampleCatalog());

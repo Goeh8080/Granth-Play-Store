@@ -69,7 +69,7 @@ class PageHeader extends StatelessWidget {
           Text(subtitle, style: GText.sans(size: 13, color: GColors.muted, height: 1.5)),
         ]),
       ),
-      if (trailing != null) ...[const SizedBox(width: 10), trailing!],
+      if (trailing != null) ...[const SizedBox(width: 10), Flexible(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: trailing!))],
     ]);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       titleRow,

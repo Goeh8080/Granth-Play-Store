@@ -33,7 +33,13 @@ class Api implements HttpClientAdapter {
       bodies.add(null);
     }
     final (code, body) = replies.isEmpty ? (200, <String, Object>{}) : replies.removeAt(0);
-    return ResponseBody.fromString(jsonEncode(body), code, headers: {Headers.contentTypeHeader: ['application/json']});
+    return ResponseBody.fromString(
+      jsonEncode(body),
+      code,
+      headers: {
+        Headers.contentTypeHeader: ['application/json'],
+      },
+    );
   }
 
   @override
@@ -61,14 +67,28 @@ void main() {
     test('create → 201, then mine lists tickets with the IST token label; reply and ack use the exact shapes', () async {
       final api = Api([
         (201, {'id': 12, 'token': 3, 'date': '2026-10-31', 'status': 'open', 'created_at': '2026-10-31T09:35:21Z'}),
-        (200, {
-          'items': [
-            {'id': 12, 'token': 3, 'date': '2026-10-31', 'subject': 'PDF', 'message': 'नहीं खुलती', 'status': 'open', 'has_new_reply': true,
-             'messages': [{'id': 1, 'from': 'user', 'text': 'नहीं खुलती', 'at': 'x'}, {'id': 2, 'from': 'admin', 'text': 'देखते हैं', 'at': 'y'}]},
-          ],
-          'count': 1,
-          'unread': 1,
-        }),
+        (
+          200,
+          {
+            'items': [
+              {
+                'id': 12,
+                'token': 3,
+                'date': '2026-10-31',
+                'subject': 'PDF',
+                'message': 'नहीं खुलती',
+                'status': 'open',
+                'has_new_reply': true,
+                'messages': [
+                  {'id': 1, 'from': 'user', 'text': 'नहीं खुलती', 'at': 'x'},
+                  {'id': 2, 'from': 'admin', 'text': 'देखते हैं', 'at': 'y'},
+                ],
+              },
+            ],
+            'count': 1,
+            'unread': 1,
+          },
+        ),
         (201, {'ok': true, 'id': 3, 'at': 'z'}),
         (200, {'items': [], 'count': 0, 'unread': 0}),
         (200, {'ok': true, 'updated': 1}),
@@ -97,7 +117,10 @@ void main() {
       await s.ack([12]);
       final ackAt = api.seen.indexWhere((o) => o.path.endsWith('/support/tickets/ack'));
       expect(ackAt, greaterThan(0));
-      expect(api.bodies[ackAt], {'iid': 'a' * 32, 'ids': [12]});
+      expect(api.bodies[ackAt], {
+        'iid': 'a' * 32,
+        'ids': [12],
+      });
     });
 
     test('errors read in Hindi: 429 limit, 409 closed, 503 unavailable, no network', () {
@@ -185,17 +208,33 @@ void main() {
       await settle(t);
       expect(AppNav.I.route.panel, Panel.page);
       expect(find.byKey(const ValueKey('settings-page'), skipOffstage: false), findsOneWidget);
-      for (final s in ['display', 'downloads', 'notify', 'account', 'ai', 'about']) {
-        expect(find.byKey(ValueKey('set-sec-$s'), skipOffstage: false), findsOneWidget, reason: s);
-      }
-      for (final p in ['daily', 'new_praman', 'new_topic', 'trending']) {
-        expect(find.byKey(ValueKey('set-push-$p-on'), skipOffstage: false), findsOneWidget, reason: p);
+      for (final s in ['display', 'downloads', 'notify', 'account', 'ai', 'support', 'about']) {
+        expect(find.byKey(ValueKey('set-folder-$s'), skipOffstage: false), findsOneWidget, reason: s);
       }
       expect(t.takeException(), isNull);
+      // Every folder opens its own sub-page; Back returns to the folder list.
+      for (final s in ['display', 'downloads', 'notify', 'ai', 'about']) {
+        await t.ensureVisible(find.byKey(ValueKey('set-folder-$s'), skipOffstage: false));
+        await settle(t, 3);
+        await t.tap(find.byKey(ValueKey('set-folder-$s'), skipOffstage: false));
+        await settle(t);
+        expect(AppNav.I.route.legalPage, 'settings/$s');
+        expect(find.byKey(ValueKey('set-sec-$s'), skipOffstage: false), findsOneWidget, reason: s);
+        if (s == 'notify') {
+          for (final p in ['daily', 'new_praman', 'new_topic', 'trending']) {
+            expect(find.byKey(ValueKey('set-push-$p-on'), skipOffstage: false), findsOneWidget, reason: p);
+          }
+        }
+        expect(t.takeException(), isNull, reason: s);
+        await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+        await t.binding.handlePopRoute();
+        await settle(t);
+        expect(find.byKey(const ValueKey('set-folder-display'), skipOffstage: false), findsOneWidget, reason: 'Back from $s: the folder list');
+      }
 
-      await t.ensureVisible(find.byKey(const ValueKey('set-account'), skipOffstage: false));
+      await t.ensureVisible(find.byKey(const ValueKey('set-folder-account'), skipOffstage: false));
       await settle(t, 4);
-      await t.tap(find.byKey(const ValueKey('set-account'), skipOffstage: false));
+      await t.tap(find.byKey(const ValueKey('set-folder-account'), skipOffstage: false));
       await settle(t);
       expect(find.byKey(const ValueKey('account-page'), skipOffstage: false), findsOneWidget);
       expect(find.byKey(const ValueKey('account-google'), skipOffstage: false), findsOneWidget, reason: 'signed out: optional login button');

@@ -49,8 +49,14 @@ class UiPrefs extends ChangeNotifier {
   int get granthCols => cols(
     Store.kGranthCols,
     allowed: const [1, 2, 3],
-    fallback: RemoteConfig.I.uiGrid ?? 2,
+    fallback: RemoteConfig.I.gridFor('granths') ?? 2,
   );
+
+  /// Folder (shelves) grid: same user choice as the granth grid; admin default `grid_pages.shelves`.
+  int get shelfCols => cols(Store.kGranthCols, allowed: const [1, 2, 3], fallback: RemoteConfig.I.gridFor('shelves') ?? 2);
+
+  /// Topic / praman / gallery grids: the user's choice (1|2), else the admin's per-page grid, else 2.
+  int pageCols(String page, String key) => cols(key, allowed: const [1, 2], fallback: RemoteConfig.I.gridFor(page) ?? 2);
 
   /// The signed config changed `ui.grid`: grids that still follow the default redraw.
   void remoteChanged() => notifyListeners();

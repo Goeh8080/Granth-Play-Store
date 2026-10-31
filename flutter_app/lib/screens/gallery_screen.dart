@@ -93,7 +93,7 @@ class _GalleryPanelState extends State<GalleryPanel> with LivePanel {
 
   @override
   Widget build(BuildContext context) {
-    final cols = UiPrefs.I.cols(Store.kGalleryCols, allowed: const [1, 2], fallback: 2);
+    final cols = UiPrefs.I.pageCols('gallery', Store.kGalleryCols);
     final rows = searchFields(
       _items.where((e) => (_folder.isEmpty || e.folderId == _folder) && e.kind == _tab).toList(),
       _q,
