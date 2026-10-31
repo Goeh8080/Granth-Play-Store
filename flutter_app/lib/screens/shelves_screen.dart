@@ -87,8 +87,9 @@ Tone _tone(String t) => switch (t) {
 String _count(int granths, int pramans) => pramans > 0 ? '$granths ग्रंथ • $pramans प्रमाण' : '$granths ग्रंथ';
 
 /// The folder grid uses the same persisted 1×1 / 2×2 / 3×3 choice as the granth cards
-/// (`Store.kGranthCols`, default 2×2), so one switch lays out the whole Granth tab.
-int folderCols() => UiPrefs.I.cols(Store.kGranthCols, allowed: const [1, 2, 3], fallback: 2);
+/// (`Store.kGranthCols`; until the user chooses: the admin's `ui.grid`, else 2×2), so one switch
+/// lays out the whole Granth tab.
+int folderCols() => UiPrefs.I.granthCols;
 
 /// The size of a folder's picture for a column count: big and clear in 2×2.
 double folderPicSize(int cols) => switch (cols) {

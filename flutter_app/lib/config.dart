@@ -32,6 +32,12 @@ const String kAppFull = '1.0.0+1';
 const String kConfigUrl = String.fromEnvironment('CONFIG_URL', defaultValue: 'https://granth-admin.vedpuran8090.workers.dev/config.json');
 const String kEventsUrl = String.fromEnvironment('EVENTS_URL', defaultValue: 'https://granth-admin.vedpuran8090.workers.dev/events');
 
+/// Base of the admin server's public AI endpoints (`/ai/knowledge.json`, `/ai/questions`, `/ai/answers`).
+const String kAdminBase = String.fromEnvironment(
+  'ADMIN_BASE',
+  defaultValue: 'https://granth-admin.vedpuran8090.workers.dev',
+);
+
 /// The permanent app key: an *identifier*, not a secret (it only tags genuine-app traffic so the
 /// admin dashboard can split verified / unverified installs). It is never kept in the repository:
 /// it is compiled in at build time with `--dart-define=APP_KEY=…` (or `--dart-define-from-file`).

@@ -15,29 +15,40 @@ const int kMaxMessageChars = 8000;
 const int kTitleChars = 48;
 
 class ChatMsg {
-  const ChatMsg({required this.role, required this.text, this.cited = const [], this.at = 0});
-  final String role; // 'user' | 'assistant'
+  const ChatMsg({required this.role, required this.text, this.cited = const [], this.at = 0, this.ref, this.ask});
+
+  /// 'user' | 'assistant' | 'admin' (a reply from the admin; never sent to the AI as history).
+  final String role;
   final String text;
+
+  /// Admin messages: `<answer id>@<answered_at>`, the dedupe key for repeated polls.
+  final String? ref;
+
+  /// Admin messages: the user's question this answers.
+  final String? ask;
 
   /// Praman ids the answer cited (assistant messages only).
   final List<int> cited;
   final int at;
 
   bool get isUser => role == 'user';
+  bool get isAdmin => role == 'admin';
 
-  Map<String, Object> toJson() => {'role': role, 'text': text, if (cited.isNotEmpty) 'cited': cited, 'at': at};
+  Map<String, Object> toJson() => {'role': role, 'text': text, if (cited.isNotEmpty) 'cited': cited, 'at': at, 'ref': ?ref, 'ask': ?ask};
 
   static ChatMsg? fromJson(Object? j) {
     if (j is! Map) return null;
     final role = j['role'];
     final text = j['text'];
-    if ((role != 'user' && role != 'assistant') || text is! String) return null;
+    if ((role != 'user' && role != 'assistant' && role != 'admin') || text is! String) return null;
     final c = j['cited'];
     return ChatMsg(
       role: role as String,
       text: text.length > kMaxMessageChars ? text.substring(0, kMaxMessageChars) : text,
       cited: [if (c is List) for (final e in c) if (e is int) e],
       at: j['at'] is int ? j['at'] as int : 0,
+      ref: j['ref'] is String ? j['ref'] as String : null,
+      ask: j['ask'] is String ? j['ask'] as String : null,
     );
   }
 }

@@ -173,6 +173,34 @@ class PdfService : Service() {
             } catch (_: Exception) {}
         }
 
+        /** Admin's answer to the user's question (round 13): one notification, replaced by the next. */
+        const val CH_ANSWER = "admin_answer_v1"
+        private const val ANSWER_ID = 4713
+
+        fun answerNotice(ctx: Context, title: String, text: String) {
+            val app = ctx.applicationContext
+            try {
+                if (Build.VERSION.SDK_INT >= 26) {
+                    val nm0 = app.getSystemService(NotificationManager::class.java) ?: return
+                    nm0.createNotificationChannel(NotificationChannel(CH_ANSWER, "admin का उत्तर", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                        description = "आपके प्रश्न का उत्तर आने पर सूचना"
+                    })
+                }
+                val n = builder(app, CH_ANSWER)
+                    .setSmallIcon(R.drawable.ic_stat_granth)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setStyle(Notification.BigTextStyle().bigText(text))
+                    .setCategory(Notification.CATEGORY_MESSAGE)
+                    .setAutoCancel(true)
+                    .setContentIntent(openApp(app))
+                    .build()
+                (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(ANSWER_ID, n)
+            } catch (e: Exception) {
+                Log.w(TAG, "answer notify: $e")
+            }
+        }
+
         /**
          * Round 8: the ONE notification for a whole run of PDFs, posted once when the last one
          * ends ("PDF तैयार" / "50 PDF तैयार" / "48 तैयार, 2 नहीं बनीं"). Fixed id, so it is replaced

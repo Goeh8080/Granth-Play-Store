@@ -11,6 +11,7 @@ import 'catalog_store.dart';
 import 'ed25519.dart';
 import 'shelves.dart';
 import 'storage.dart';
+import '../state/ui_prefs.dart';
 
 /// One person on the "विशेष जानकार" page.
 class Contact {
@@ -33,7 +34,10 @@ const List<Contact> kSeedContacts = [
 const String kContactsTitle = 'विशेष जानकार';
 
 class Announcement {
-  const Announcement({required this.id, required this.text, this.level = 'info', this.expiresAt});
+  const Announcement({required this.id, required this.text, this.level = 'info', this.expiresAt, this.pinned = false});
+
+  /// `announcement.pinned == true`: no close button, stays until the admin removes it.
+  final bool pinned;
   final String id;
   final String text;
 
@@ -57,6 +61,7 @@ class ParsedConfig {
     required this.aiEndpoint,
     required this.contactsTitle,
     required this.contacts,
+    this.uiGrid,
   });
   final int version;
   final Structure? structure;
@@ -69,6 +74,9 @@ class ParsedConfig {
   final String? aiEndpoint;
   final String contactsTitle;
   final List<Contact>? contacts;
+
+  /// `ui.grid` (1|2|3); null = the admin has not set it.
+  final int? uiGrid;
 }
 
 const _religionIcons = {'om', 'crescent', 'khanda', 'cross', 'dharma', 'jain', 'kabir', 'misc'};
@@ -244,6 +252,7 @@ ParsedConfig? parseConfig(String text, {int cachedVersion = 0, int appBuild = kB
           text: t,
           level: const {'info', 'warn', 'critical'}.contains(lv) ? lv : 'info',
           expiresAt: a['expires_at'] is String ? DateTime.tryParse(a['expires_at'] as String)?.toUtc() : null,
+          pinned: a['pinned'] == true,
         );
       }
     }
@@ -269,10 +278,19 @@ ParsedConfig? parseConfig(String text, {int cachedVersion = 0, int appBuild = kB
       aiEndpoint: ai,
       contactsTitle: ct.isNotEmpty && ct.length <= 60 ? ct : kContactsTitle,
       contacts: parseContacts(j['contacts']),
+      uiGrid: _parseGrid(_map(j['ui'])),
     );
   } catch (e) {
     return fail('error: $e');
   }
+}
+
+/// `ui.grid`: an integer 1..3 (a whole double like 2.0 counts, out of range is clamped); anything
+/// else is "not set".
+int? _parseGrid(Map<String, dynamic>? ui) {
+  final g = ui?['grid'];
+  if (g is! num || !g.isFinite) return null;
+  return g.round().clamp(1, 3);
 }
 
 String _normEtag(String? e) => (e ?? '').trim().replaceFirst(RegExp(r'^W/'), '');
@@ -311,6 +329,9 @@ class RemoteConfig extends ChangeNotifier {
   String contactsTitle = kContactsTitle;
   List<Contact> contacts = kSeedContacts;
 
+  /// The admin's default grid columns (`ui.grid`), null = not set.
+  int? uiGrid;
+
   /// Last refresh outcome, for tests/diagnostics: `updated`, `unchanged`, `ignored:<why>`, `failed`.
   String lastResult = 'none';
 
@@ -323,12 +344,13 @@ class RemoteConfig extends ChangeNotifier {
   Announcement? get banner {
     final a = announcement;
     if (a == null || a.expired) return null;
+    if (a.pinned) return a; // cannot be dismissed
     return Store.I.getString(kDismissed) == a.id ? null : a;
   }
 
   Future<void> dismissBanner() async {
     final a = announcement;
-    if (a == null) return;
+    if (a == null || a.pinned) return;
     await Store.I.setString(kDismissed, a.id);
     notifyListeners();
   }
@@ -409,8 +431,11 @@ class RemoteConfig extends ChangeNotifier {
     aiEndpoint = p.aiEndpoint;
     contactsTitle = p.contactsTitle;
     contacts = p.contacts ?? kSeedContacts;
+    final gridChanged = uiGrid != p.uiGrid;
+    uiGrid = p.uiGrid;
     Shelves.useRemote(p.structure, p.overrides);
     CatalogStore.I.setHidden(p.hidden);
+    if (gridChanged) UiPrefs.I.remoteChanged();
     if (notify) notifyListeners();
   }
 
@@ -430,6 +455,7 @@ class RemoteConfig extends ChangeNotifier {
     aiEndpoint = null;
     contactsTitle = kContactsTitle;
     contacts = kSeedContacts;
+    uiGrid = null;
     lastResult = 'none';
     _cachedBody = null;
     Shelves.useRemote(null, const {});

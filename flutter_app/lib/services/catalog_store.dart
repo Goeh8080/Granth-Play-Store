@@ -5,6 +5,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
+import '../ai/extra_sources.dart';
+import 'admin_sync.dart';
 import 'analytics.dart';
 import 'api.dart';
 import 'remote_config.dart';
@@ -383,6 +385,9 @@ class CatalogStore extends ChangeNotifier {
     _foreground = true;
     if (now.difference(_lastResume).inMilliseconds < 3000) return;
     _lastResume = now;
+    unawaited(
+      AdminSync.I.poll(force: true),
+    ); // answers wait for the user: check on every return
     final away = _pausedAt == null ? Duration.zero : now.difference(_pausedAt!);
     _pausedAt = null;
     final stale = _lastSyncAt == null || now.difference(_lastSyncAt!) > const Duration(minutes: 2);
@@ -422,6 +427,9 @@ class CatalogStore extends ChangeNotifier {
     }
     // The signed config (folders, hidden granths, banner, flags) rides along with every sync.
     unawaited(RemoteConfig.I.refresh());
+    // Round 13, same cycle: the admin's key notes (ETag) and the answers to the user's questions.
+    unawaited(AdminKnowledge.I.refresh());
+    unawaited(AdminSync.I.poll());
     if (!silent) {
       status = SyncStatus.syncing;
       error = null;

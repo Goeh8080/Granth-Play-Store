@@ -54,3 +54,11 @@ Every `POST /events` also carries the **permanent app key** as the HTTP header `
 ## Tests
 
 `test/ai_*_test.dart`, `test/remote_config_test.dart` (signed fixtures from a throwaway key, see `tool/gen_test_configs.py`; `live_config.json` is a real signed copy), `test/analytics_test.dart`, `test/legal_ui_test.dart`.
+
+## Round 13: ask the admin, admin answers, admin notes, ज्ञान चर्चा
+
+- **Cannot-answer rule** (`lib/ai/cannot_answer.dart`): the AI "cannot answer" when it cited no real source (no catalog praman, admin note or topic), or its text contains a refusal phrase ("उत्तर नहीं मिला", …) and it did not cite an admin note. Errors (offline/429) keep their own retry card.
+- Then the chat asks **"क्या आप यह प्रश्न admin को भेजना चाहेंगे?"** (हाँ/नहीं). हाँ → `POST /ai/questions` `{iid, question, lang:"hi"}` with the analytics install id (+ `X-App-Key` when built with one). 5/day per install is also counted on the device. Hindi messages for 202 (sent/duplicate), 429, 400, offline, unavailable.
+- **Answers**: `GET /ai/answers?iid=` runs in the ~2 min sync cycle and on start/resume (throttled ~100 s, 429 → ~30 min back-off). Each answer is stored in the chat it was asked from (or a new chat) as role `admin` ("admin का संदेश आया"), deduped by `id@answered_at`; `POST /ai/answers/ack` only after it is saved. A local notification "आपका उत्तर आ गया है" goes through the existing native channel (`answerNotice` → `PdfService`, Android 13 permission asked the same way as for PDFs, after a question is sent). Admin messages are never sent to the AI as history.
+- **Knowledge**: `GET /ai/knowledge.json` (ETag + disk copy). The best-matching notes (title = question, text = answer) and catalog topics join the normal `/ask` candidates, ≤12 in total, text ≤500 chars. Ids cannot clash with pramans: notes `1000000000+id`, topics `1500000000+id`. The granth-ai Worker needed no change (it accepts any integer id).
+- **ज्ञान चर्चा** (pill in the AI header). Assumptions, kept minimal: it picks a random admin note (else a random praman topic), posts the question in the chat, the user thinks or types their own answer, then "उत्तर और प्रमाण देखें" shows the answer plus the praman citations (the granths that hold them) found by the local retriever. No scoring of the user's answer.

@@ -5,7 +5,7 @@ import '../theme/colors.dart';
 import 'common.dart';
 
 /// The admin's announcement (remote config), shown on the dashboard. Dismissible: the same
-/// announcement id does not come back; a new id shows again. Nothing is shown when there is none.
+/// announcement id does not come back; a new id shows again. A pinned one has no close button. Nothing is shown when there is none.
 class AnnouncementBanner extends StatelessWidget {
   const AnnouncementBanner({super.key});
 
@@ -30,6 +30,9 @@ class AnnouncementBanner extends StatelessWidget {
                 Padding(padding: const EdgeInsets.only(top: 2), child: GIcon(icon, size: 20, color: fg)),
                 const SizedBox(width: 10),
                 Expanded(child: Text(a.text, style: GText.sans(size: 14.5, weight: FontWeight.w600, color: fg, height: 1.45))),
+                if (a.pinned)
+                  const SizedBox(width: 8)
+                else
                 Semantics(
                   button: true,
                   label: 'बंद करें',

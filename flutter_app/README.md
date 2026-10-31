@@ -94,3 +94,5 @@ storeFile=/path/to/keystore
 - The admin/editor screens of the web bundle (`granth-admin` IndexedDB drafts) are not ported. They were empty in the APK build.
 - The YouTube player is an embedded WebView iframe. Some videos may refuse to play when embedded.
 - Storage permission is asked only when it is needed, and only on Android 9 and older.
+
+**Round 13:** ask the admin when the AI cannot answer, admin answers in the chat with a notification, admin knowledge notes as AI sources, ज्ञान चर्चा, signed `ui.grid` and pinned announcements. Details: docs/AI.md, docs/PARITY.md.

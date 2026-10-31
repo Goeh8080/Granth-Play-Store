@@ -144,7 +144,7 @@ class _AiPanelState extends State<AiPanel> {
       listenable: c,
       builder: (context, _) {
         final msgs = c.messages;
-        final lastAi = msgs.lastIndexWhere((m) => !m.isUser);
+        final lastAi = msgs.lastIndexWhere((m) => !m.isUser && !m.isAdmin);
         return SliverMainAxisGroup(slivers: [
           SliverToBoxAdapter(
             child: Entry(
@@ -159,6 +159,7 @@ class _AiPanelState extends State<AiPanel> {
                   subtitle: 'अपना प्रश्न पूछिए, प्रमाण पाइए',
                   tools: Wrap(spacing: 8, runSpacing: 8, children: [
                     Pill(key: const ValueKey('ai-history'), icon: 'history', label: 'पुरानी बातचीत', fontSize: 13, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), onTap: () => openChatHistory(context)),
+                    Pill(key: const ValueKey('ai-gyan'), icon: 'book-open', label: 'ज्ञान चर्चा', fontSize: 13, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), onTap: c.sending ? null : _gyan),
                     Pill(key: const ValueKey('ai-new'), icon: 'plus', label: 'नई चैट', tone: PillTone.maroon, fontSize: 13, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), onTap: msgs.isEmpty ? null : c.newChat),
                   ]),
                 ),
@@ -176,6 +177,8 @@ class _AiPanelState extends State<AiPanel> {
                   padding: const EdgeInsets.only(bottom: 14),
                   child: m.isUser
                       ? UserBubble(m.text)
+                      : m.isAdmin
+                      ? AdminBubble(m)
                       : AnswerBubble(
                           key: i == lastAi ? _lastAnswer : ValueKey('ans-${c.current?.id}-$i'),
                           msg: m,
@@ -197,10 +200,23 @@ class _AiPanelState extends State<AiPanel> {
                         : const SizedBox(width: double.infinity),
               ),
             ),
+          if (msgs.isNotEmpty && !c.sending && c.offer != null && c.offer!.convId == c.current?.id)
+            SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.only(bottom: 14), child: AskAdminCard(offer: c.offer!, onYes: c.askAdmin, onNo: c.declineOffer))),
+          if (c.gyan != null && c.gyan!.convId == c.current?.id)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: SheetButton(key: const ValueKey('gyan-reveal'), label: 'उत्तर और प्रमाण देखें', icon: 'eye', primary: true, onTap: c.revealGyan),
+              ),
+            ),
         ]);
       },
     );
   }
+}
+
+Future<void> _gyan() async {
+  if (!await ChatController.I.startGyan()) Toast.show('अभी चर्चा के लिए कोई प्रश्न नहीं है');
 }
 
 /// Sends [q] unless the catalog is not there yet (the answer must rest on granth data).
@@ -468,6 +484,54 @@ class _ThinkingBubbleState extends State<ThinkingBubble> with SingleTickerProvid
           ),
         ),
       ]);
+}
+
+/// A message from the admin (an answer to a question the user sent), shown apart from AI answers.
+class AdminBubble extends StatelessWidget {
+  const AdminBubble(this.msg, {super.key});
+  final ChatMsg msg;
+
+  @override
+  Widget build(BuildContext context) => GCard(
+        key: const ValueKey('admin-msg'),
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('admin का संदेश आया', style: GText.sans(size: 13, weight: FontWeight.w700, color: GColors.maroon)),
+          if (msg.ask != null) ...[
+            const SizedBox(height: 4),
+            Text('आपका प्रश्न: ${msg.ask}', style: GText.sans(size: 12.5, color: GColors.muted, height: 1.5)),
+          ],
+          const SizedBox(height: 8),
+          SelectableText(msg.text, style: GText.sans(size: 15, color: GColors.brown, height: 1.6)),
+        ]),
+      );
+}
+
+/// "क्या आप यह प्रश्न admin को भेजना चाहेंगे?" with हाँ / नहीं.
+class AskAdminCard extends StatelessWidget {
+  const AskAdminCard({super.key, required this.offer, required this.onYes, required this.onNo});
+  final AdminOffer offer;
+  final VoidCallback onYes;
+  final VoidCallback onNo;
+
+  @override
+  Widget build(BuildContext context) => GCard(
+        key: const ValueKey('ask-admin'),
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('क्या आप यह प्रश्न admin को भेजना चाहेंगे?', style: GText.sans(size: 15, weight: FontWeight.w600, color: GColors.brown, height: 1.5)),
+          if (offer.message != null) ...[
+            const SizedBox(height: 6),
+            Text(offer.message!, style: GText.sans(size: 13, color: GColors.muted, height: 1.5)),
+          ],
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (offer.canRetry)
+              SheetButton(key: const ValueKey('ask-admin-yes'), label: offer.sending ? 'भेज रहे हैं…' : 'हाँ', icon: 'send', primary: true, enabled: !offer.sending, onTap: onYes),
+            SheetButton(key: const ValueKey('ask-admin-no'), label: 'नहीं', icon: 'x', onTap: onNo),
+          ]),
+        ]),
+      );
 }
 
 class _ErrorCard extends StatelessWidget {

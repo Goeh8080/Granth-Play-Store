@@ -60,5 +60,10 @@ n['hidden_granth_ids'] = []; n['announcement'] = {'enabled': False, 'text': '', 
 write('flags_off', sign(n))
 w = copy.deepcopy(v); w['version'] = 7; w['endpoints']['ai'] = 'http://insecure.test'; del w['contacts']
 write('no_contacts_http_ai', sign(w))
+u = copy.deepcopy(v); u['version'] = 8; u['ui'] = {'grid': 1, 'future_key': 1}
+u['announcement'] = {'enabled': True, 'text': 'यह सूचना हटाई नहीं जा सकती', 'id': 'pin1', 'level': 'info', 'pinned': True}
+write('ui_pinned', sign(u))
+b = copy.deepcopy(v); b['version'] = 9; b['ui'] = {'grid': 9}; b['announcement']['pinned'] = 'yes'
+write('ui_bad', sign(b))
 nosig = copy.deepcopy(v); write('no_sig', nosig)
 print('ok')

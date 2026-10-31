@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../services/catalog_store.dart';
 import '../services/native_bridge.dart';
 import '../services/pdf_builder.dart';
+import '../services/remote_config.dart';
 import '../services/storage.dart';
 
 /// Card looks from the hidden "कार्ड स्टाइल" setting (`granth-look`).
@@ -41,6 +42,18 @@ class UiPrefs extends ChangeNotifier {
     Store.I.setString(key, '$v');
     notifyListeners();
   }
+
+  /// Columns of the folder (shelves) and granth grids: the user's own choice (the switch on the
+  /// screen, or settings → layout) always wins; until they choose, the admin's `ui.grid` from the
+  /// signed config; without either, 2.
+  int get granthCols => cols(
+    Store.kGranthCols,
+    allowed: const [1, 2, 3],
+    fallback: RemoteConfig.I.uiGrid ?? 2,
+  );
+
+  /// The signed config changed `ui.grid`: grids that still follow the default redraw.
+  void remoteChanged() => notifyListeners();
 
   int get uiCols => cols(Store.kUiCols, allowed: const [1, 2], fallback: 2);
 

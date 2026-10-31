@@ -201,3 +201,7 @@ ashok's API has no religion field (330 topics, 104 granths, 822 `pramanCount` in
 60. **Tests.** `remote_config_test` (15, signed mock configs from a throwaway key), `analytics_test` (16, incl. the `X-App-Key` header present / omitted / failures), `legal_ui_test` (15; every legal page and the contacts page at 320 dp, text ×1.3, in all 8 card looks without overflow), AI client/controller/UI/retrieval tests. Previews: `PREVIEW_DIR=/workspace flutter test test/preview_screens_test.dart`.
 61. **App key.** Analytics POSTs carry the permanent app identifier as `X-App-Key` (plus `app_version` / `build` in the body), compiled in from `--dart-define APP_KEY` (empty = header omitted). Never rotated; identifier, not a secret; not in the repo. See [AI.md](AI.md#app-key-x-app-key).
 62. Not changed: PDF engine, sync / offline, notification, highlighter, the exit system (exit only from the dashboard confirm card; Back goes one screen back). Version stays 1.0.0 (1).
+
+## Round 13
+- AI: ask-the-admin offer, admin answers in the chat + notification, admin notes/topics as extra candidates, ज्ञान चर्चा (see docs/AI.md).
+- Signed config: `ui.grid` (1|2|3) is the default columns of the Granth tab (folders + granth cards). The user's own grid choice (the switch, saved in `granth-cols`) always wins. `announcement.pinned: true` shows the banner without a close button (cannot be dismissed). Both are read only from the Ed25519-verified config.

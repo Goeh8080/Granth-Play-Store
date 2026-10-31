@@ -167,6 +167,10 @@ class MainActivity : FlutterActivity() {
                     )
                     result.success(null)
                 }
+                "answerNotice" -> {
+                    PdfService.answerNotice(applicationContext, call.argument<String>("title") ?: "", call.argument<String>("text") ?: "")
+                    result.success(null)
+                }
                 "notifState" -> result.success(notifState())
                 "askNotifications" -> {
                     // Real runtime request (Android 13+); the answer comes back in
