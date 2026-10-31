@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
@@ -9,9 +10,12 @@ import 'package:flutter/services.dart';
 import '../ai/ai_client.dart';
 import '../ai/chat_controller.dart';
 import '../ai/chat_store.dart';
+import '../ai/sanitize.dart';
 import '../models/models.dart';
 import '../services/analytics.dart';
+import '../services/ai_feedback.dart';
 import '../services/api.dart';
+import '../services/card_pdf.dart';
 import '../services/catalog_store.dart';
 import '../services/file_actions.dart';
 import '../state/places.dart';
@@ -184,6 +188,7 @@ class _AiPanelState extends State<AiPanel> {
                           msg: m,
                           question: i > 0 ? msgs[i - 1].text : '',
                           find: _find,
+                          chatId: c.current?.id ?? '',
                         ),
                 );
               },
@@ -315,13 +320,27 @@ class _Avatar extends StatelessWidget {
   Widget build(BuildContext context) => const Padding(padding: EdgeInsets.only(top: 2), child: IconBox(tone: Tone.saffron, icon: 'sparkles', size: 32, radius: 10, iconSize: 17));
 }
 
-class AnswerBubble extends StatelessWidget {
-  const AnswerBubble({super.key, required this.msg, required this.question, required this.find});
+class AnswerBubble extends StatefulWidget {
+  const AnswerBubble({super.key, required this.msg, required this.question, required this.find, this.chatId = ''});
   final ChatMsg msg;
   final String question;
   final Praman? Function(int id) find;
+  final String chatId;
 
-  String get _plain => markdownPlain(msg.text);
+  @override
+  State<AnswerBubble> createState() => _AnswerBubbleState();
+}
+
+class _AnswerBubbleState extends State<AnswerBubble> {
+  final _card = GlobalKey();
+  bool _busy = false;
+
+  ChatMsg get msg => widget.msg;
+  String get _fkey => '${widget.chatId}-${msg.at}';
+
+  /// Never shows a raw "id-467": known ids become the praman's name, unknown ones are dropped.
+  String get _text => sanitizeAiText(msg.text, (id) => widget.find(id)?.title);
+  String get _plain => markdownPlain(_text);
 
   Future<void> _copy() async {
     await Clipboard.setData(ClipboardData(text: _plain));
@@ -329,40 +348,148 @@ class AnswerBubble extends StatelessWidget {
   }
 
   Future<void> _share() async {
-    final q = question.isEmpty ? '' : 'प्रश्न: $question\n\n';
+    final q = widget.question.isEmpty ? '' : 'प्रश्न: ${widget.question}\n\n';
     await FileActions.shareText('तत्त्व AI', '$q$_plain\n\n— तत्त्व AI, ग्रंथ प्रबंधन (AI गलती कर सकता है, मूल ग्रंथ से मिलाएँ)');
+  }
+
+  void _up() {
+    final was = AiFeedback.I.vote(_fkey) == 1;
+    AiFeedback.I.up(_fkey);
+    if (!was) Toast.show('धन्यवाद! आपकी राय दर्ज हो गई');
+  }
+
+  Future<void> _down() async {
+    if (AiFeedback.I.vote(_fkey) == -1) return Toast.show('यह उत्तर पहले ही admin को भेजा जा चुका है');
+    final reason = await showPop<String>(context, (ctx) => const AiReasonCard(), blurFocus: true);
+    if (reason == null) return; // closed: nothing sent
+    unawaited(AiFeedback.I.down(_fkey, question: widget.question, answer: _plain, reason: reason, chat: widget.chatId));
+    Toast.show('धन्यवाद! यह उत्तर admin को जाँच के लिए भेजा जा रहा है');
+  }
+
+  Future<void> _cardPdf() async {
+    if (_busy) return;
+    final how = await showPop<String>(context, (ctx) => const CardPdfChoice());
+    if (how == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final f = await CardPdf.build(_card, CardPdf.fileName(widget.question.isEmpty ? 'तत्त्व AI उत्तर' : widget.question));
+      if (f == null) return Toast.show('कार्ड PDF नहीं बन सका');
+      if (how == 'save') {
+        Toast.show(await CardPdf.save(f) ? 'कार्ड PDF सेव हो गई' : 'सेव नहीं हो सका');
+      } else {
+        await CardPdf.share(f);
+      }
+    } catch (_) {
+      Toast.show('कार्ड PDF नहीं बन सका');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cited = [for (final id in msg.cited) ?find(id)];
+    final cited = [for (final id in msg.cited) ?widget.find(id)];
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const _Avatar(),
       const SizedBox(width: 8),
       Expanded(
-        child: GCard(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            // Long-press selects a word and shows Copy; handles extend the selection.
-            SelectionArea(child: LightMarkdown(msg.text, size: 15.5)),
-            if (cited.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text('आधार प्रमाण', style: GText.sans(size: 12.5, weight: FontWeight.w700, color: GColors.brown)),
-              const SizedBox(height: 6),
-              _Citations(cited),
-              for (final p in cited.take(2)) Padding(padding: const EdgeInsets.only(top: 8), child: PramanPreview(p)),
-            ],
-            const SizedBox(height: 8),
-            Row(children: [
-              Pill(key: const ValueKey('ai-copy'), icon: 'copy', label: 'कॉपी', onTap: _copy),
-              const SizedBox(width: 8),
-              Pill(key: const ValueKey('ai-share'), icon: 'share-2', label: 'शेयर', onTap: _share),
+        child: RepaintBoundary(
+          key: _card,
+          child: GCard(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              // Long-press selects a word and shows Copy; handles extend the selection.
+              SelectionArea(child: LightMarkdown(_text, size: 15.5)),
+              if (cited.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text('आधार प्रमाण', style: GText.sans(size: 12.5, weight: FontWeight.w700, color: GColors.brown)),
+                const SizedBox(height: 6),
+                _Citations(cited),
+                for (final p in cited.take(2)) Padding(padding: const EdgeInsets.only(top: 8), child: PramanPreview(p)),
+              ],
+              const SizedBox(height: 8),
+              ListenableBuilder(
+                listenable: AiFeedback.I,
+                builder: (context, _) {
+                  final v = AiFeedback.I.vote(_fkey);
+                  return Wrap(spacing: 8, runSpacing: 8, children: [
+                    Pill(key: const ValueKey('ai-up'), icon: 'thumbs-up', label: v == 1 ? 'पसंद ✓' : 'पसंद', tone: v == 1 ? PillTone.topic : PillTone.plain, onTap: _up),
+                    Pill(key: const ValueKey('ai-down'), icon: 'thumbs-down', label: v == -1 ? 'भेजा ✓' : 'गलत', tone: v == -1 ? PillTone.topic : PillTone.plain, onTap: _down),
+                    Pill(key: const ValueKey('ai-share'), icon: 'share-2', label: 'शेयर', onTap: _share),
+                    Pill(key: const ValueKey('ai-copy'), icon: 'copy', label: 'कॉपी', onTap: _copy),
+                    Pill(key: const ValueKey('ai-card-pdf'), icon: 'file-text', label: _busy ? 'बन रही…' : 'कार्ड PDF', onTap: _cardPdf),
+                  ]);
+                },
+              ),
             ]),
-          ]),
+          ),
         ),
       ),
     ]);
   }
+}
+
+/// 👎: an optional reason, then Send. Pops the reason ('' when empty), or null when closed.
+class AiReasonCard extends StatefulWidget {
+  const AiReasonCard({super.key});
+  @override
+  State<AiReasonCard> createState() => _AiReasonCardState();
+}
+
+class _AiReasonCardState extends State<AiReasonCard> {
+  final _c = TextEditingController();
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FrostCard(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('इस उत्तर में क्या गलत है?', style: GText.script(size: 19, color: GColors.maroon)),
+          const SizedBox(height: 4),
+          Text('यह प्रश्न और उत्तर admin को जाँच के लिए भेजा जाएगा। कारण लिखना ज़रूरी नहीं।', style: GText.sans(size: 13.5, color: GColors.muted, height: 1.45)),
+          const SizedBox(height: 10),
+          TextField(
+            key: const ValueKey('ai-reason'),
+            controller: _c,
+            maxLines: 3,
+            minLines: 2,
+            maxLength: 300,
+            style: GText.sans(size: 15),
+            decoration: InputDecoration(
+              hintText: 'कारण (वैकल्पिक)',
+              filled: true,
+              fillColor: GColors.cream,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: GColors.creamDark)),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(child: SheetButton(key: const ValueKey('ai-reason-cancel'), label: 'रहने दें', onTap: () => Navigator.pop(context))),
+            const SizedBox(width: 10),
+            Expanded(child: SheetButton(key: const ValueKey('ai-reason-send'), label: 'भेजें', primary: true, onTap: () => Navigator.pop(context, _c.text.trim()))),
+          ]),
+        ]),
+      );
+}
+
+/// Card PDF: share it or save it to the phone. Pops 'share' / 'save', or null.
+class CardPdfChoice extends StatelessWidget {
+  const CardPdfChoice({super.key});
+  @override
+  Widget build(BuildContext context) => FrostCard(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('कार्ड PDF', style: GText.script(size: 19, color: GColors.maroon)),
+          const SizedBox(height: 4),
+          Text('यह कार्ड जैसा ऐप में दिखता है, वैसा ही PDF बनेगा।', style: GText.sans(size: 13.5, color: GColors.muted, height: 1.45)),
+          const SizedBox(height: 12),
+          SheetButton(key: const ValueKey('card-pdf-share'), icon: 'share-2', label: 'शेयर करें', primary: true, onTap: () => Navigator.pop(context, 'share')),
+          const SizedBox(height: 8),
+          SheetButton(key: const ValueKey('card-pdf-save'), icon: 'folder-down', label: 'फ़ोन में सेव करें', onTap: () => Navigator.pop(context, 'save')),
+        ]),
+      );
 }
 
 void openPraman(Praman p) {

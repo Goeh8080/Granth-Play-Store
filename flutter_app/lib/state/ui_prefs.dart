@@ -106,6 +106,16 @@ class UiPrefs extends ChangeNotifier {
     if (!v && s.hasData && s.savedPages < s.allPages) s.savePages();
   }
 
+  /// Background downloads (pages for offline use, PDFs re-made by themselves when the net is
+  /// back). Default on. Off: pages and PDFs download only when the user taps.
+  bool get autoDownload => _flag(Store.kAutoDownload, true);
+  set autoDownload(bool v) {
+    Store.I.setString(Store.kAutoDownload, v ? '1' : '0');
+    notifyListeners();
+    final s = CatalogStore.I;
+    if (v && s.hasData && s.savedPages < s.allPages) s.savePages();
+  }
+
   /// The 2-minute / on-resume refresh (default on).
   bool get autoSync => _flag(Store.kAutoSync, true);
   set autoSync(bool v) {
@@ -134,7 +144,7 @@ class UiPrefs extends ChangeNotifier {
   /// pages, gallery and PDFs are never touched.
   static const settingKeys = [
     Store.kLook, Store.kUiCols, Store.kTopicCols, Store.kGranthCols, Store.kPramanCols, Store.kGalleryCols, //
-    Store.kPdfStyle, Store.kTextSize, Store.kWifiOnly, Store.kAutoSync, Store.kKeepAwake, Store.kAnimations,
+    Store.kPdfStyle, Store.kTextSize, Store.kWifiOnly, Store.kAutoDownload, Store.kAutoSync, Store.kKeepAwake, Store.kAnimations,
   ];
   Future<void> resetAll() async {
     for (final k in settingKeys) {

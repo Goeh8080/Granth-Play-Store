@@ -9,6 +9,7 @@ import '../widgets/announcement_banner.dart';
 import '../widgets/common.dart';
 import '../widgets/live_panel.dart';
 import '../widgets/panel.dart';
+import '../widgets/today_card.dart';
 
 /// `wh` — Dashboard.
 class DashboardPanel extends StatefulWidget {
@@ -40,6 +41,7 @@ class _DashboardPanelState extends State<DashboardPanel> with LivePanel {
         ),
       ),
       const AnnouncementBanner(),
+      Entry(index: 1, dx: dx, child: const Padding(padding: EdgeInsets.only(bottom: 14), child: TodayCard())),
       Entry(index: 1, dx: dx, child: _DashCard(tone: Tone.saffron, icon: 'clipboard-list', count: s.topics.length, label: 'Topics', hash: '#/topics')),
       const SizedBox(height: 14),
       Entry(index: 2, dx: dx, child: _DashCard(tone: Tone.maroon, icon: 'library', count: s.granths.length, label: 'Granths', hash: '#/granths')),

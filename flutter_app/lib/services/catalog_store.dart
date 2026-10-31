@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import '../ai/extra_sources.dart';
 import 'admin_sync.dart';
+import 'ai_feedback.dart';
 import 'analytics.dart';
 import 'api.dart';
 import 'remote_config.dart';
@@ -341,6 +342,7 @@ class CatalogStore extends ChangeNotifier {
   @visibleForTesting
   bool Function() autoSyncOn = () => Store.I.getString(Store.kAutoSync) != '0';
   bool _wifiOnly() => Store.I.getString(Store.kWifiOnly) == '1';
+  static bool autoDownloadOn() => Store.I.getString(Store.kAutoDownload) != '0';
 
   /// For tests: pretend the phone is on these networks.
   @visibleForTesting
@@ -430,6 +432,7 @@ class CatalogStore extends ChangeNotifier {
     // Round 13, same cycle: the admin's key notes (ETag) and the answers to the user's questions.
     unawaited(AdminKnowledge.I.refresh());
     unawaited(AdminSync.I.poll());
+    unawaited(AiFeedback.I.flush());
     if (!silent) {
       status = SyncStatus.syncing;
       error = null;
@@ -641,7 +644,7 @@ class CatalogStore extends ChangeNotifier {
   void savePages({bool verify = false, bool manual = false}) {
     // Settings → "सिर्फ़ WiFi पर डाउनलोड": background downloads wait for WiFi. A tap on
     // सिंक (manual) is the user's own choice and always runs.
-    if (!manual && _wifiOnly() && !onWifi) {
+    if (!manual && (!autoDownloadOn() || (_wifiOnly() && !onWifi))) {
       _images = _images.copyWith(running: false);
       return;
     }
@@ -813,7 +816,7 @@ class CatalogStore extends ChangeNotifier {
   /// check — they have new names in the lists. Quiet: nothing shows unless pages re-download.
   Future<int> revalidate({bool force = false}) async {
     if (_revalidating || !online || !hasData || _saveActive) return 0;
-    if (_wifiOnly() && !onWifi) return 0;
+    if ((_wifiOnly() && !onWifi) || !autoDownloadOn()) return 0;
     final last = int.tryParse(Store.I.getString(kRevalidatedAt) ?? '');
     final now = DateTime.now().millisecondsSinceEpoch;
     if (!force && last != null && now - last < revalidateEvery.inMilliseconds) return 0;

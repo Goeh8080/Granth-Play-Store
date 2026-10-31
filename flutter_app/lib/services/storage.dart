@@ -33,6 +33,7 @@ class Store {
   // Extra settings (not in the web app). Stored as text like the others.
   static const kTextSize = 'granth-text-size';
   static const kWifiOnly = 'granth-wifi-only';
+  static const kAutoDownload = 'granth-auto-download';
   static const kAutoSync = 'granth-auto-sync';
   static const kKeepAwake = 'granth-keep-awake';
   /// Round 8: "एनिमेशन" चालू ('1', default) / कम ('0') — the decorative entrance animations.

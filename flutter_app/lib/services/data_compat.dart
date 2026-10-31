@@ -41,7 +41,7 @@ class DataCompat {
   /// Settings that are stored as text (kept identical to the original web app's keys).
   static const List<String> textKeys = [
     Store.kTopicCols, Store.kGranthCols, Store.kPramanCols, Store.kGalleryCols, Store.kUiCols,
-    Store.kPdfStyle, Store.kLook, Store.kTextSize, Store.kWifiOnly, Store.kAutoSync, Store.kKeepAwake,
+    Store.kPdfStyle, Store.kLook, Store.kTextSize, Store.kWifiOnly, Store.kAutoSync, Store.kAutoDownload, Store.kKeepAwake,
     Store.kHash, Store.kOfflineIds, Store.kDevice, Store.kNotifAsked, Store.kNotifHint,
     Store.kAnimations,
   ];

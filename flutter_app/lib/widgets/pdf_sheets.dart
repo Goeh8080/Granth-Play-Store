@@ -550,6 +550,7 @@ class _SettingsState extends State<_Settings> {
             Pill(key: const ValueKey('set-anim-low'), direct: true, label: 'कम', tone: UiPrefs.I.animations ? PillTone.plain : PillTone.maroon, onTap: () => UiPrefs.I.animations = false),
           ]),
           _toggle('auto-sync', 'अपने-आप सिंक (हर 2 मिनट)', UiPrefs.I.autoSync, (v) => UiPrefs.I.autoSync = v),
+          _toggle('auto-download', 'अपने-आप डाउनलोड (बंद हो तो सिर्फ़ टैप पर)', UiPrefs.I.autoDownload, (v) => UiPrefs.I.autoDownload = v),
           _toggle('wifi-only', 'पेज डाउनलोड सिर्फ़ WiFi पर', UiPrefs.I.wifiOnly, (v) => UiPrefs.I.wifiOnly = v),
           _toggle('keep-awake', 'पढ़ते समय स्क्रीन चालू रखें', UiPrefs.I.keepAwake, (v) => UiPrefs.I.keepAwake = v),
           const _StorageBlock(),

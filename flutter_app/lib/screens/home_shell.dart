@@ -27,6 +27,7 @@ import 'gallery_screen.dart';
 import 'shelves_screen.dart';
 import 'pramans_screen.dart';
 import 'topics_screen.dart';
+import '../widgets/today_card.dart';
 
 /// `cg` — the app root: mast, stats bar, hamburger nav, sync strip, panel, to-top, toast.
 class HomeShell extends StatefulWidget {
@@ -218,6 +219,10 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
     nav.back();
   }
 
+  /// The floating "Ask Tatv AI" button: everywhere except the AI chat (it has its own composer),
+  /// and not when the admin has turned AI off.
+  bool _fabShown(GRoute r) => r.panel != Panel.ai && RemoteConfig.I.aiEnabled && !_deckOpen;
+
   Widget _panel(GRoute r) => switch (r.panel) {
         Panel.dashboard => const DashboardPanel(),
         Panel.topics => const TopicsPanel(),
@@ -287,7 +292,8 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
               _ScrollRail(controller: _scroll),
               Positioned(
                 right: 48,
-                bottom: 36,
+                // Round 14: sits above the floating "Ask Tatv AI" button when that is shown.
+                bottom: _fabShown(r) ? 104 : 36,
                 child: ValueListenableBuilder<bool>(
                   valueListenable: _showTop,
                   builder: (context, show, _) => AnimatedSlide(
@@ -315,6 +321,29 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
                   ),
                 ),
               ),
+              // Round 14: floating "Ask Tatv AI" on every screen except the AI chat itself.
+              if (_fabShown(r))
+                Positioned(
+                  right: 16,
+                  bottom: 36,
+                  child: Pressable(
+                    key: const ValueKey('ask-ai-fab'),
+                    onTap: () => AppNav.I.openLink('#/ai'),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(colors: [GColors.saffron, GColors.saffronDark]),
+                        borderRadius: BorderRadius.circular(28),
+                        boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.28), blurRadius: 12, offset: const Offset(0, 4))],
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const GIcon('sparkles', size: 18, color: GColors.paper),
+                        const SizedBox(width: 6),
+                        Text('Ask Tatv AI', style: GText.sans(size: 14.5, weight: FontWeight.w700, color: GColors.paper)),
+                      ]),
+                    ),
+                  ),
+                ),
               // ashok's PDF deck: a centred modal over a scrim (it also covers the header).
               if (_deckOpen && PdfQueue.I.jobs.isNotEmpty) Positioned.fill(child: PdfDeckLayer(key: const ValueKey('pdf-deck-layer'), selected: _deckSel, onClose: _closeDeck)),
               const _ToastLayer(),
@@ -632,6 +661,8 @@ class _NavMenu extends StatelessWidget {
     ('sparkles', 'तत्त्व AI से पूछे', '#/ai', Panel.ai),
     // Round 6: opens the Photo Highlighter (its own full-screen page, lib/highlighter/).
     ('highlighter', 'Photo Highlighter', '', null),
+    // Round 14: today's praman + trending topics (a sheet), right below the Photo Highlighter.
+    ('trending-up', 'Topic', '', null),
   ];
 
   @override
@@ -672,6 +703,10 @@ class _NavMenu extends StatelessWidget {
           return;
         }
         if (AppNav.I.menuOpen) AppNav.I.toggleMenu();
+        if (it.$1 == 'trending-up') {
+          openTodaySheet(context);
+          return;
+        }
         HighlighterLauncher.open(context);
       },
       scale: 0.98,
@@ -685,9 +720,13 @@ class _NavMenu extends StatelessWidget {
               children: [
                 GIcon(it.$1, size: 16, color: color),
                 const SizedBox(width: 8),
-                Text(
-                  it.$2.toUpperCase(),
-                  style: GText.sans(size: 14, weight: FontWeight.w600, color: color, letterSpacing: 0.6),
+                Flexible(
+                  child: Text(
+                    it.$2.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GText.sans(size: 14, weight: FontWeight.w600, color: color, letterSpacing: 0.6),
+                  ),
                 ),
               ],
             ),

@@ -14,11 +14,15 @@ import '../services/catalog_store.dart';
 import '../services/pdf_notify.dart';
 import 'ai_client.dart';
 import 'cannot_answer.dart';
+import 'sanitize.dart';
 import 'chat_store.dart';
 import 'extra_sources.dart';
 import 'retriever.dart';
 
 /// "क्या आप यह प्रश्न admin को भेजना चाहेंगे?" — shown under an answer the AI could not give.
+/// Shown when the model's reply was empty (or only ids).
+const kEmptyAnswer = 'क्षमा करें, इस प्रश्न का सीधा उत्तर नहीं मिला।';
+
 class AdminOffer {
   AdminOffer(this.convId, this.question);
   final String convId;
@@ -221,12 +225,16 @@ class ChatController extends ChangeNotifier {
           if (Retriever.I.praman(id) != null) id,
       ];
       final now = DateTime.now().millisecondsSinceEpoch;
-      c.messages.add(ChatMsg(role: 'assistant', text: a.answer.length > kMaxMessageChars ? a.answer.substring(0, kMaxMessageChars) : a.answer, cited: known, at: now));
+      // Never show raw candidate ids ("id-467"): the praman / note / topic name instead.
+      final names = {for (final x in cands) x.id: x.granth.isEmpty ? x.title : '${x.title} (${x.granth})'};
+      var text = sanitizeAiText(a.answer, (id) => names[id]);
+      if (text.isEmpty) text = kEmptyAnswer;
+      c.messages.add(ChatMsg(role: 'assistant', text: text.length > kMaxMessageChars ? text.substring(0, kMaxMessageChars) : text, cited: known, at: now));
       c.updated = now;
       sending = false;
       offer =
           aiCannotAnswer(
-            answer: a.answer,
+            answer: text,
             cited: a.cited,
             isPraman: (id) => Retriever.I.praman(id) != null,
           )

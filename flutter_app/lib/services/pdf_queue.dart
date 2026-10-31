@@ -430,6 +430,7 @@ class PdfQueue extends ChangeNotifier {
     final back = online && !_wasOnline;
     _wasOnline = online;
     if (!online) return;
+    if (!CatalogStore.autoDownloadOn()) return; // Settings → auto download off: only on tap
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final j in waiting) {
       if (back || now - (j.finishedAt ?? 0) >= onlineRetryEvery.inMilliseconds) retry(j.id);

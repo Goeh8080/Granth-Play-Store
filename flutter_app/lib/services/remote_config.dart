@@ -62,6 +62,8 @@ class ParsedConfig {
     required this.contactsTitle,
     required this.contacts,
     this.uiGrid,
+    this.trendingTopics = const [],
+    this.dailyPraman,
   });
   final int version;
   final Structure? structure;
@@ -77,6 +79,45 @@ class ParsedConfig {
 
   /// `ui.grid` (1|2|3); null = the admin has not set it.
   final int? uiGrid;
+
+  /// `trending.topic_ids` (round 14, optional): topic ids to show as "चर्चित विषय"; empty = hidden.
+  final List<String> trendingTopics;
+
+  /// `daily_praman {id, date}` (round 14, optional): the admin's pick for that UTC date.
+  final DailyPick? dailyPraman;
+}
+
+class DailyPick {
+  const DailyPick(this.id, this.date);
+  final String id;
+
+  /// `YYYY-MM-DD`; empty = valid any day.
+  final String date;
+}
+
+final _pickId = RegExp(r'^[A-Za-z0-9_-]{1,40}$');
+final _ymd = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+
+List<String> _parseTrending(Map<String, dynamic>? t) {
+  final v = t?['topic_ids'];
+  if (v is! List) return const [];
+  final out = <String>[];
+  for (final e in v) {
+    final s = e is num && e == e.truncate() ? '${e.toInt()}' : (e is String ? e.trim() : '');
+    if (_pickId.hasMatch(s) && !out.contains(s)) out.add(s);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+DailyPick? _parseDaily(Map<String, dynamic>? d) {
+  if (d == null) return null;
+  final v = d['id'];
+  final id = v is num && v == v.truncate() ? '${v.toInt()}' : (v is String ? v.trim() : '');
+  if (!_pickId.hasMatch(id)) return null;
+  final date = d['date'] is String ? (d['date'] as String).trim() : '';
+  if (date.isNotEmpty && !_ymd.hasMatch(date)) return null;
+  return DailyPick(id, date);
 }
 
 const _religionIcons = {'om', 'crescent', 'khanda', 'cross', 'dharma', 'jain', 'kabir', 'misc'};
@@ -279,6 +320,8 @@ ParsedConfig? parseConfig(String text, {int cachedVersion = 0, int appBuild = kB
       contactsTitle: ct.isNotEmpty && ct.length <= 60 ? ct : kContactsTitle,
       contacts: parseContacts(j['contacts']),
       uiGrid: _parseGrid(_map(j['ui'])),
+      trendingTopics: _parseTrending(_map(j['trending'])),
+      dailyPraman: _parseDaily(_map(j['daily_praman'])),
     );
   } catch (e) {
     return fail('error: $e');
@@ -331,6 +374,10 @@ class RemoteConfig extends ChangeNotifier {
 
   /// The admin's default grid columns (`ui.grid`), null = not set.
   int? uiGrid;
+
+  /// Round 14 optional fields (see [ParsedConfig]).
+  List<String> trendingTopics = const [];
+  DailyPick? dailyPraman;
 
   /// Last refresh outcome, for tests/diagnostics: `updated`, `unchanged`, `ignored:<why>`, `failed`.
   String lastResult = 'none';
@@ -433,6 +480,8 @@ class RemoteConfig extends ChangeNotifier {
     contacts = p.contacts ?? kSeedContacts;
     final gridChanged = uiGrid != p.uiGrid;
     uiGrid = p.uiGrid;
+    trendingTopics = p.trendingTopics;
+    dailyPraman = p.dailyPraman;
     Shelves.useRemote(p.structure, p.overrides);
     CatalogStore.I.setHidden(p.hidden);
     if (gridChanged) UiPrefs.I.remoteChanged();
@@ -456,6 +505,8 @@ class RemoteConfig extends ChangeNotifier {
     contactsTitle = kContactsTitle;
     contacts = kSeedContacts;
     uiGrid = null;
+    trendingTopics = const [];
+    dailyPraman = null;
     lastResult = 'none';
     _cachedBody = null;
     Shelves.useRemote(null, const {});
