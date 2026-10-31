@@ -77,6 +77,7 @@ void main() {
     an.aiAsked();
     an.aiAnswered();
     an.aiCiteTap();
+    an.named('app_open');
     tick(5);
     await an.flush(force: true);
 
@@ -84,7 +85,10 @@ void main() {
     final b = net.bodies.single;
     expect(net.opts.single.uri.toString(), 'https://ev.test/events');
     expect(net.opts.single.headers['Content-Encoding'], 'gzip');
-    expect(b.keys.toSet(), {'v', 'batch_id', 'iid', 'app', 'app_version', 'build', 'os', 'sdk', 'cfg', 'day', 'fg_s', 'sessions', 'open', 'watch_s', 'sync', 'pdf', 'ai'});
+    expect(b.keys.toSet(), {'v', 'batch_id', 'iid', 'app', 'app_version', 'build', 'os', 'sdk', 'cfg', 'day', 'fg_s', 'sessions', 'open', 'watch_s', 'sync', 'pdf', 'ai', 'events'});
+    final ev = (b['events'] as List).cast<Map>();
+    expect(ev.every((e) => {'folder_open', 'granth_open', 'ai_answer', 'ai_fail', 'pdf_download', 'app_open'}.contains(e['name'])), isTrue);
+    expect(ev.where((e) => e['name'] == 'app_open').single['n'], 1);
     expect(b['v'], 1);
     expect(b['batch_id'], matches(RegExp(r'^[0-9A-Za-z_-]{8,64}$')));
     expect(b['iid'], matches(RegExp(r'^[0-9a-f]{32}$')));

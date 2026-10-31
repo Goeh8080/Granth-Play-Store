@@ -76,3 +76,9 @@ dependencies {
     // android.jar only has stubs of org.json; the transfer tests need the real parser.
     testImplementation("org.json:json:20240303")
 }
+
+// Firebase config is kept out of git; CI builds without it (Firebase then stays off at runtime).
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
+}

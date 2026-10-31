@@ -21,6 +21,7 @@ import '../theme/colors.dart';
 import '../widgets/bounded_scroll.dart';
 import '../widgets/common.dart';
 import '../widgets/pdf_sheets.dart';
+import 'account_screen.dart';
 import 'dashboard_screen.dart';
 import 'ai_screen.dart';
 import 'gallery_screen.dart';
@@ -224,14 +225,19 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
   bool _fabShown(GRoute r) => r.panel != Panel.ai && RemoteConfig.I.aiEnabled && !_deckOpen;
 
   Widget _panel(GRoute r) => switch (r.panel) {
-        Panel.dashboard => const DashboardPanel(),
-        Panel.topics => const TopicsPanel(),
-        Panel.granths => ShelvesPanel(route: r),
-        Panel.pramans => PramansPanel(route: r),
-        Panel.gallery => const GalleryPanel(),
-        Panel.ai => const AiPanel(),
-        Panel.legal => LegalPanel(key: ValueKey('legal-${r.legalPage}'), page: r.legalPage),
-      };
+    Panel.dashboard => const DashboardPanel(),
+    Panel.topics => const TopicsPanel(),
+    Panel.granths => ShelvesPanel(route: r),
+    Panel.pramans => PramansPanel(route: r),
+    Panel.gallery => const GalleryPanel(),
+    Panel.ai => const AiPanel(),
+    Panel.legal => LegalPanel(key: ValueKey('legal-${r.legalPage}'), page: r.legalPage),
+    Panel.page => switch (r.legalPage) {
+      'account' => const AccountPage(key: ValueKey('page-account')),
+      'support' when RemoteConfig.I.supportEnabled => const SupportPage(key: ValueKey('page-support')),
+      _ => const SettingsPage(key: ValueKey('page-settings')),
+    },
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -247,111 +253,122 @@ class _HomeShellState extends State<HomeShell> with TickerProviderStateMixin {
           backgroundColor: GColors.cream,
           // The AI chat's text box sits under the page (not over it), so the list is only as tall
           // as what is left above the keyboard and the last message is never hidden.
-          body: Column(children: [
-            Expanded(
-              child: Stack(
+          body: Column(
             children: [
-              const Positioned.fill(child: _RootBackground()),
-              ListenableBuilder(
-                listenable: Listenable.merge([CatalogStore.I, UiPrefs.I]),
-                builder: (context, _) {
-                  final s = CatalogStore.I;
-                  final total = s.topics.length + s.granths.length + s.pramans.length;
-                  return CustomScrollView(
-                    controller: _scroll,
-                    physics: const BoundedScrollPhysics(),
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: _Mast(deckOpen: _deckOpen, onDeck: () => _openDeck(0), link: _deckLink),
-                      ),
-                      SliverToBoxAdapter(child: _Hamburger(open: nav.menuOpen)),
-                      SliverToBoxAdapter(child: _NavMenu(open: nav.menuOpen)),
-                      const SliverToBoxAdapter(child: SyncStrip()),
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 72),
-                        sliver: SliverMainAxisGroup(
+              Expanded(
+                child: Stack(
+                  children: [
+                    const Positioned.fill(child: _RootBackground()),
+                    ListenableBuilder(
+                      listenable: Listenable.merge([CatalogStore.I, UiPrefs.I]),
+                      builder: (context, _) {
+                        final s = CatalogStore.I;
+                        final total = s.topics.length + s.granths.length + s.pramans.length;
+                        return CustomScrollView(
+                          controller: _scroll,
+                          physics: const BoundedScrollPhysics(),
                           slivers: [
-                            if (s.status == SyncStatus.booting && total == 0) const SliverToBoxAdapter(child: EmptyState(title: 'सेव की हुई प्रति खोली जा रही है…', spinner: true)),
-                            if (s.status == SyncStatus.syncing && total == 0) const SliverToBoxAdapter(child: EmptyState(title: 'डेटा लोड हो रहा है…', spinner: true)),
-                            if (s.error != null && s.status == SyncStatus.error && total == 0)
-                              SliverToBoxAdapter(
-                                child: EmptyState(title: 'अभी खाली है', body: s.error, actionLabel: 'फिर कोशिश करें', onAction: () => CatalogStore.I.retry()),
+                            SliverToBoxAdapter(
+                              child: _Mast(deckOpen: _deckOpen, onDeck: () => _openDeck(0), link: _deckLink),
+                            ),
+                            SliverToBoxAdapter(child: _Hamburger(open: nav.menuOpen)),
+                            SliverToBoxAdapter(child: _NavMenu(open: nav.menuOpen)),
+                            const SliverToBoxAdapter(child: SyncStrip()),
+                            SliverPadding(
+                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 72),
+                              sliver: SliverMainAxisGroup(
+                                slivers: [
+                                  if (s.status == SyncStatus.booting && total == 0) const SliverToBoxAdapter(child: EmptyState(title: 'सेव की हुई प्रति खोली जा रही है…', spinner: true)),
+                                  if (s.status == SyncStatus.syncing && total == 0) const SliverToBoxAdapter(child: EmptyState(title: 'डेटा लोड हो रहा है…', spinner: true)),
+                                  if (s.error != null && s.status == SyncStatus.error && total == 0)
+                                    SliverToBoxAdapter(
+                                      child: EmptyState(title: 'अभी खाली है', body: s.error, actionLabel: 'फिर कोशिश करें', onAction: () => CatalogStore.I.retry()),
+                                    ),
+                                  SliverFadeTransition(
+                                    key: const ValueKey('panel'),
+                                    opacity: CurvedAnimation(parent: _panelIn, curve: Curves.easeOutCubic),
+                                    sliver: KeyedSubtree(key: ValueKey(r.key), child: _panel(r)),
+                                  ),
+                                ],
                               ),
-                            SliverFadeTransition(
-                              key: const ValueKey('panel'),
-                              opacity: CurvedAnimation(parent: _panelIn, curve: Curves.easeOutCubic),
-                              sliver: KeyedSubtree(key: ValueKey(r.key), child: _panel(r)),
                             ),
                           ],
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-              _ScrollRail(controller: _scroll),
-              Positioned(
-                right: 48,
-                // Round 14: sits above the floating "Ask Tatv AI" button when that is shown.
-                bottom: _fabShown(r) ? 104 : 36,
-                child: ValueListenableBuilder<bool>(
-                  valueListenable: _showTop,
-                  builder: (context, show, _) => AnimatedSlide(
-                    offset: show ? Offset.zero : const Offset(0, 0.6),
-                    duration: const Duration(milliseconds: 240),
-                    curve: Curves.easeOutCubic,
-                    child: AnimatedOpacity(
-                      opacity: show ? 1 : 0,
-                      duration: const Duration(milliseconds: 200),
-                      child: IgnorePointer(
-                        ignoring: !show,
-                        child: Pressable(
-                          onTap: () => _scroll.animateTo(0, duration: const Duration(milliseconds: 520), curve: Curves.easeOutCubic),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            decoration: BoxDecoration(color: GColors.maroon, borderRadius: BorderRadius.circular(8)),
-                            child: Text(
-                              'Top',
-                              style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.paper),
+                        );
+                      },
+                    ),
+                    _ScrollRail(controller: _scroll),
+                    Positioned(
+                      right: 48,
+                      // Round 14: sits above the floating "Ask Tatv AI" button when that is shown.
+                      bottom: _fabShown(r) ? 104 : 36,
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _showTop,
+                        builder: (context, show, _) => AnimatedSlide(
+                          offset: show ? Offset.zero : const Offset(0, 0.6),
+                          duration: const Duration(milliseconds: 240),
+                          curve: Curves.easeOutCubic,
+                          child: AnimatedOpacity(
+                            opacity: show ? 1 : 0,
+                            duration: const Duration(milliseconds: 200),
+                            child: IgnorePointer(
+                              ignoring: !show,
+                              child: Pressable(
+                                onTap: () => _scroll.animateTo(0, duration: const Duration(milliseconds: 520), curve: Curves.easeOutCubic),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  decoration: BoxDecoration(color: GColors.maroon, borderRadius: BorderRadius.circular(8)),
+                                  child: Text(
+                                    'Top',
+                                    style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.paper),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-              ),
-              // Round 14: floating "Ask Tatv AI" on every screen except the AI chat itself.
-              if (_fabShown(r))
-                Positioned(
-                  right: 16,
-                  bottom: 36,
-                  child: Pressable(
-                    key: const ValueKey('ask-ai-fab'),
-                    onTap: () => AppNav.I.openLink('#/ai'),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [GColors.saffron, GColors.saffronDark]),
-                        borderRadius: BorderRadius.circular(28),
-                        boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.28), blurRadius: 12, offset: const Offset(0, 4))],
+                    // Round 14: floating "Ask Tatv AI" on every screen except the AI chat itself.
+                    if (_fabShown(r))
+                      Positioned(
+                        right: 16,
+                        bottom: 36,
+                        child: Pressable(
+                          key: const ValueKey('ask-ai-fab'),
+                          onTap: () => AppNav.I.openLink('#/ai'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(colors: [GColors.saffron, GColors.saffronDark]),
+                              borderRadius: BorderRadius.circular(28),
+                              boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.28), blurRadius: 12, offset: const Offset(0, 4))],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const GIcon('sparkles', size: 18, color: GColors.paper),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Ask Tatv AI',
+                                  style: GText.sans(size: 14.5, weight: FontWeight.w700, color: GColors.paper),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        const GIcon('sparkles', size: 18, color: GColors.paper),
-                        const SizedBox(width: 6),
-                        Text('Ask Tatv AI', style: GText.sans(size: 14.5, weight: FontWeight.w700, color: GColors.paper)),
-                      ]),
-                    ),
-                  ),
+                    // ashok's PDF deck: a centred modal over a scrim (it also covers the header).
+                    if (_deckOpen && PdfQueue.I.jobs.isNotEmpty)
+                      Positioned.fill(
+                        child: PdfDeckLayer(key: const ValueKey('pdf-deck-layer'), selected: _deckSel, onClose: _closeDeck),
+                      ),
+                    const _ToastLayer(),
+                  ],
                 ),
-              // ashok's PDF deck: a centred modal over a scrim (it also covers the header).
-              if (_deckOpen && PdfQueue.I.jobs.isNotEmpty) Positioned.fill(child: PdfDeckLayer(key: const ValueKey('pdf-deck-layer'), selected: _deckSel, onClose: _closeDeck)),
-              const _ToastLayer(),
-            ],
               ),
-            ),
-            if (r.panel == Panel.ai) ListenableBuilder(listenable: RemoteConfig.I, builder: (_, _) => RemoteConfig.I.aiEnabled ? const AiComposer() : const SizedBox.shrink()),
-          ]),
+              if (r.panel == Panel.ai) ListenableBuilder(listenable: RemoteConfig.I, builder: (_, _) => RemoteConfig.I.aiEnabled ? const AiComposer() : const SizedBox.shrink()),
+            ],
+          ),
         ),
       ),
     );
@@ -362,23 +379,23 @@ class _RootBackground extends StatelessWidget {
   const _RootBackground();
   @override
   Widget build(BuildContext context) => const DecoratedBox(
-        decoration: BoxDecoration(color: GColors.cream),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(center: Alignment(-0.8, -0.84), radius: 0.92, colors: [Color(0x1FE8821A), Color(0x00E8821A)]),
-              ),
-            ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(center: Alignment(0.84, 0.8), radius: 0.84, colors: [Color(0x147B1F2E), Color(0x007B1F2E)]),
-              ),
-            ),
-          ],
+    decoration: BoxDecoration(color: GColors.cream),
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(center: Alignment(-0.8, -0.84), radius: 0.92, colors: [Color(0x1FE8821A), Color(0x00E8821A)]),
+          ),
         ),
-      );
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(center: Alignment(0.84, 0.8), radius: 0.84, colors: [Color(0x147B1F2E), Color(0x007B1F2E)]),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 /// `.mast`
@@ -448,36 +465,36 @@ class _Mast extends StatelessWidget {
                                     key: _HomeShellState.arrowKey,
                                     link: link,
                                     child: Pressable(
-                                    key: const ValueKey('pdf-arrow'),
-                                    onTap: onDeck,
-                                    child: Container(
-                                      height: 44,
-                                      constraints: const BoxConstraints(minWidth: 44),
-                                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withValues(alpha: 0.16),
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: GColors.gold.withValues(alpha: 0.55)),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          AnimatedRotation(
-                                            turns: deckOpen ? 0.5 : 0,
-                                            duration: const Duration(milliseconds: 240),
-                                            child: const GIcon('chevron-down', size: 18, color: GColors.goldLight),
-                                          ),
-                                          if (h > 0) ...[
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              '$h',
-                                              style: GText.sans(size: 13, weight: FontWeight.w700, color: GColors.goldLight),
+                                      key: const ValueKey('pdf-arrow'),
+                                      onTap: onDeck,
+                                      child: Container(
+                                        height: 44,
+                                        constraints: const BoxConstraints(minWidth: 44),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(alpha: 0.16),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(color: GColors.gold.withValues(alpha: 0.55)),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            AnimatedRotation(
+                                              turns: deckOpen ? 0.5 : 0,
+                                              duration: const Duration(milliseconds: 240),
+                                              child: const GIcon('chevron-down', size: 18, color: GColors.goldLight),
                                             ),
+                                            if (h > 0) ...[
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                '$h',
+                                                style: GText.sans(size: 13, weight: FontWeight.w700, color: GColors.goldLight),
+                                              ),
+                                            ],
                                           ],
-                                        ],
+                                        ),
                                       ),
                                     ),
-                                  ),
                                   ),
                                 ),
                         );
@@ -513,20 +530,20 @@ class _MastBtn extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) => Pressable(
-        onTap: onTap,
-        scale: 0.9,
-        child: Container(
-          width: 44,
-          height: 44,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: GColors.gold.withValues(alpha: 0.45)),
-          ),
-          child: GIcon(icon, size: 20, color: GColors.goldLight),
-        ),
-      );
+    onTap: onTap,
+    scale: 0.9,
+    child: Container(
+      width: 44,
+      height: 44,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: GColors.gold.withValues(alpha: 0.45)),
+      ),
+      child: GIcon(icon, size: 20, color: GColors.goldLight),
+    ),
+  );
 }
 
 /// `.stat-item` — glows when its panel is active.
@@ -538,45 +555,49 @@ class _Stat extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) => Expanded(
-        child: Pressable(
-          onTap: onTap,
-          scale: 0.95,
-          // `.stat-item.active` glow, exactly as the original CSS:
-          //   box-shadow: 0 0 0 2px var(--color-gold),
-          //               0 0 18px color-mix(in srgb, var(--color-gold-light) 80%, transparent);
-          // A CSS box-shadow is only painted OUTSIDE the box, so the translucent tile stays
-          // clear; Flutter's BoxShadow would also paint under it, so a painter draws the ring
-          // and the glow outside the rounded rect only. It fades in/out (the original snaps).
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(end: active ? 1 : 0),
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeOutCubic,
-            builder: (context, t, child) => CustomPaint(painter: StatGlowPainter(t), child: child),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 280),
-              curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-              decoration: BoxDecoration(
-                // .stat-item: rgba(255,255,255,.06) / gold 35% border; active: gold 28% / gold-light border.
-                color: active ? GColors.gold.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: active ? GColors.goldLight : GColors.gold.withValues(alpha: 0.35)),
+    child: Pressable(
+      onTap: onTap,
+      scale: 0.95,
+      // `.stat-item.active` glow, exactly as the original CSS:
+      //   box-shadow: 0 0 0 2px var(--color-gold),
+      //               0 0 18px color-mix(in srgb, var(--color-gold-light) 80%, transparent);
+      // A CSS box-shadow is only painted OUTSIDE the box, so the translucent tile stays
+      // clear; Flutter's BoxShadow would also paint under it, so a painter draws the ring
+      // and the glow outside the rounded rect only. It fades in/out (the original snaps).
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(end: active ? 1 : 0),
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        builder: (context, t, child) => CustomPaint(painter: StatGlowPainter(t), child: child),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          decoration: BoxDecoration(
+            // .stat-item: rgba(255,255,255,.06) / gold 35% border; active: gold 28% / gold-light border.
+            color: active ? GColors.gold.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: active ? GColors.goldLight : GColors.gold.withValues(alpha: 0.35)),
+          ),
+          child: Column(
+            children: [
+              CountUp(
+                value: n,
+                memo: 'mast:$label',
+                style: GText.display(size: 22, color: GColors.goldLight, height: 1.1),
               ),
-              child: Column(
-                children: [
-                  CountUp(value: n, memo: 'mast:$label', style: GText.display(size: 22, color: GColors.goldLight, height: 1.1)),
-                  const SizedBox(height: 2),
-                  Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: GText.sans(size: 12, color: GColors.paper, height: 1.25),
-                  ),
-                ],
+              const SizedBox(height: 2),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: GText.sans(size: 12, color: GColors.paper, height: 1.25),
               ),
-            ),
+            ],
           ),
         ),
-      );
+      ),
+    ),
+  );
 }
 
 /// Outside-only ring + glow of the active header stat (see [_Stat]). [t] is 0…1.
@@ -590,10 +611,12 @@ class StatGlowPainter extends CustomPainter {
     final box = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(8));
     canvas.save();
     // Clip away the box itself: CSS never paints a box-shadow under the element.
-    canvas.clipPath(Path()
-      ..fillType = PathFillType.evenOdd
-      ..addRect((Offset.zero & size).inflate(60))
-      ..addRRect(box));
+    canvas.clipPath(
+      Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect((Offset.zero & size).inflate(60))
+        ..addRRect(box),
+    );
     // 0 0 18px gold-light 80% → Gaussian sigma = 18 / 2.
     canvas.drawRRect(
       box,
@@ -616,36 +639,36 @@ class _Hamburger extends StatelessWidget {
   final bool open;
   @override
   Widget build(BuildContext context) => Align(
-        alignment: Alignment.centerLeft,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-          child: Semantics(
-            button: true,
-            label: open ? 'मेनू बंद करें' : 'मेनू खोलें',
-            child: Pressable(
-              onTap: AppNav.I.toggleMenu,
-              child: Container(
-                width: 44,
-                height: 40,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: GColors.paper,
-                  border: Border.all(color: GColors.creamDark),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  transitionBuilder: (c, a) => RotationTransition(
-                    turns: Tween(begin: 0.75, end: 1.0).animate(a),
-                    child: FadeTransition(opacity: a, child: c),
-                  ),
-                  child: GIcon(open ? 'x' : 'menu', key: ValueKey(open), size: 22, color: GColors.maroon),
-                ),
+    alignment: Alignment.centerLeft,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Semantics(
+        button: true,
+        label: open ? 'मेनू बंद करें' : 'मेनू खोलें',
+        child: Pressable(
+          onTap: AppNav.I.toggleMenu,
+          child: Container(
+            width: 44,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: GColors.paper,
+              border: Border.all(color: GColors.creamDark),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              transitionBuilder: (c, a) => RotationTransition(
+                turns: Tween(begin: 0.75, end: 1.0).animate(a),
+                child: FadeTransition(opacity: a, child: c),
               ),
+              child: GIcon(open ? 'x' : 'menu', key: ValueKey(open), size: 22, color: GColors.maroon),
             ),
           ),
         ),
-      );
+      ),
+    ),
+  );
 }
 
 /// `nav` (phone layout) — slides open under the hamburger.
@@ -667,11 +690,14 @@ class _NavMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-      listenable: RemoteConfig.I,
-      builder: (context, _) {
-        // Remote config `ai_enabled: false` takes the AI entry out of the menu.
-        final items = [for (final it in _items) if (!(it.$4 == Panel.ai && !RemoteConfig.I.aiEnabled)) it];
-        return AnimatedSize(
+    listenable: RemoteConfig.I,
+    builder: (context, _) {
+      // Remote config `ai_enabled: false` takes the AI entry out of the menu.
+      final items = [
+        for (final it in _items)
+          if (!(it.$4 == Panel.ai && !RemoteConfig.I.aiEnabled)) it,
+      ];
+      return AnimatedSize(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic,
         alignment: Alignment.topCenter,
@@ -690,60 +716,63 @@ class _NavMenu extends StatelessWidget {
                 ),
               ),
       );
-      });
+    },
+  );
 
   Widget _navBtn((String, String, String, Panel?) it) {
     final active = it.$4 != null && AppNav.I.route.panel == it.$4;
     final color = active ? GColors.goldLight : GColors.cream.withValues(alpha: 0.68);
-    return Builder(builder: (context) => Pressable(
-      key: ValueKey('nav-${it.$1}'),
-      onTap: () {
-        if (it.$4 != null) {
-          AppNav.I.go(it.$3);
-          return;
-        }
-        if (AppNav.I.menuOpen) AppNav.I.toggleMenu();
-        if (it.$1 == 'trending-up') {
-          openTodaySheet(context);
-          return;
-        }
-        HighlighterLauncher.open(context);
-      },
-      scale: 0.98,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-            child: Row(
-              children: [
-                GIcon(it.$1, size: 16, color: color),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    it.$2.toUpperCase(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GText.sans(size: 14, weight: FontWeight.w600, color: color, letterSpacing: 0.6),
+    return Builder(
+      builder: (context) => Pressable(
+        key: ValueKey('nav-${it.$1}'),
+        onTap: () {
+          if (it.$4 != null) {
+            AppNav.I.go(it.$3);
+            return;
+          }
+          if (AppNav.I.menuOpen) AppNav.I.toggleMenu();
+          if (it.$1 == 'trending-up') {
+            openTodaySheet(context);
+            return;
+          }
+          HighlighterLauncher.open(context);
+        },
+        scale: 0.98,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              child: Row(
+                children: [
+                  GIcon(it.$1, size: 16, color: color),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      it.$2.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GText.sans(size: 14, weight: FontWeight.w600, color: color, letterSpacing: 0.6),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          if (active)
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: -2,
-              height: 2,
-              child: const DecoratedBox(
-                decoration: BoxDecoration(gradient: LinearGradient(colors: [GColors.saffron, GColors.gold])),
+                ],
               ),
             ),
-        ],
+            if (active)
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: -2,
+                height: 2,
+                child: const DecoratedBox(
+                  decoration: BoxDecoration(gradient: LinearGradient(colors: [GColors.saffron, GColors.gold])),
+                ),
+              ),
+          ],
+        ),
       ),
-    ));
+    );
   }
 }
 
@@ -775,88 +804,91 @@ class SyncStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([CatalogStore.I, CatalogStore.I.progress, CatalogStore.I.lastSync, open, UiPrefs.I]),
-        builder: (context, _) {
-          final s = CatalogStore.I;
-          final u = s.progress.value;
-          final syncing = s.status == SyncStatus.syncing;
-          final busy = syncing || (u.manual && u.running);
-          final phase = u.total > 0 ? (u.running && !(u.checking && !u.manual) ? 1 : (u.done >= u.total ? 2 : 3)) : (syncing ? 4 : 0);
-          final ce = switch (phase) {
-            1 => 'पेज सेव हो रहे हैं ${u.done}/${u.total}',
-            2 => 'सभी पेज इस डिवाइस पर सेव हैं',
-            3 => 'सेव पेज ${u.done}/${u.total}',
-            4 => 'सूची सेव हो रही है…',
-            _ => '',
-          };
-          final main = syncing
-              ? 'ऑनलाइन सिंक हो रहा है — सूची डिवाइस पर लिखी जा रही है'
-              : (s.error ?? (s.online ? 'ऑफलाइन तैयार${s.syncedAt != null ? ' · ${hiDate(s.syncedAt)}' : ''}' : 'इंटरनेट नहीं · सेव किया डेटा चल रहा है'));
-          final t = themedSurface(const BoxDecoration(color: GColors.syncStrip));
-          return Container(
-            // The strip takes the style's colour only (it is a full-width bar).
-            decoration: BoxDecoration(
-              color: t.gradient == null ? t.color : null,
-              gradient: t.gradient,
-              border: const Border(bottom: BorderSide(color: GColors.creamDark)),
+    listenable: Listenable.merge([CatalogStore.I, CatalogStore.I.progress, CatalogStore.I.lastSync, open, UiPrefs.I]),
+    builder: (context, _) {
+      final s = CatalogStore.I;
+      final u = s.progress.value;
+      final syncing = s.status == SyncStatus.syncing;
+      final busy = syncing || (u.manual && u.running);
+      final phase = u.total > 0 ? (u.running && !(u.checking && !u.manual) ? 1 : (u.done >= u.total ? 2 : 3)) : (syncing ? 4 : 0);
+      final ce = switch (phase) {
+        1 => 'पेज सेव हो रहे हैं ${u.done}/${u.total}',
+        2 => 'सभी पेज इस डिवाइस पर सेव हैं',
+        3 => 'सेव पेज ${u.done}/${u.total}',
+        4 => 'सूची सेव हो रही है…',
+        _ => '',
+      };
+      final main = syncing
+          ? 'ऑनलाइन सिंक हो रहा है — सूची डिवाइस पर लिखी जा रही है'
+          : (s.error ?? (s.online ? 'ऑफलाइन तैयार${s.syncedAt != null ? ' · ${hiDate(s.syncedAt)}' : ''}' : 'इंटरनेट नहीं · सेव किया डेटा चल रहा है'));
+      final t = themedSurface(const BoxDecoration(color: GColors.syncStrip));
+      return Container(
+        // The strip takes the style's colour only (it is a full-width bar).
+        decoration: BoxDecoration(
+          color: t.gradient == null ? t.color : null,
+          gradient: t.gradient,
+          border: const Border(bottom: BorderSide(color: GColors.creamDark)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(color: s.online ? GColors.online : GColors.maroon, shape: BoxShape.circle),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      layoutBuilder: (cur, prev) => Stack(alignment: Alignment.topLeft, children: [...prev, ?cur]),
+                      child: Text(
+                        '$main${ce.isNotEmpty ? ' · $ce' : ''}',
+                        // Cross-fades when the message changes, not on every page count.
+                        key: ValueKey('$main|$phase'),
+                        style: GText.sans(size: 13, color: GColors.brown, height: 1.4),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Pressable(
+                    key: const ValueKey('sync-card-toggle'),
+                    onTap: () => open.value = !open.value,
+                    scale: 0.9,
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: AnimatedRotation(
+                        turns: open.value ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 240),
+                        child: const GIcon('chevron-down', size: 16, color: GColors.maroon),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  _SyncButton(syncing: busy),
+                ],
+              ),
             ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(color: s.online ? GColors.online : GColors.maroon, shape: BoxShape.circle),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 220),
-                        layoutBuilder: (cur, prev) => Stack(alignment: Alignment.topLeft, children: [...prev, ?cur]),
-                        child: Text(
-                          '$main${ce.isNotEmpty ? ' · $ce' : ''}',
-                          // Cross-fades when the message changes, not on every page count.
-                          key: ValueKey('$main|$phase'),
-                          style: GText.sans(size: 13, color: GColors.brown, height: 1.4),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Pressable(
-                      key: const ValueKey('sync-card-toggle'),
-                      onTap: () => open.value = !open.value,
-                      scale: 0.9,
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: AnimatedRotation(
-                          turns: open.value ? 0.5 : 0,
-                          duration: const Duration(milliseconds: 240),
-                          child: const GIcon('chevron-down', size: 16, color: GColors.maroon),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    _SyncButton(syncing: busy),
-                  ],
-                ),
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutCubic,
-                alignment: Alignment.topCenter,
-                child: open.value ? _SyncCard(s: s) : const SizedBox(width: double.infinity),
-              ),
-            ]),
-          );
-        },
+            AnimatedSize(
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: open.value ? _SyncCard(s: s) : const SizedBox(width: double.infinity),
+            ),
+          ],
+        ),
       );
+    },
+  );
 }
 
 /// What is saved on this phone: "985 में से 985 पेज सेव", a bar, and the last sync time.
@@ -876,31 +908,39 @@ class _SyncCard extends StatelessWidget {
       key: const ValueKey('sync-card'),
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: themedSurface(BoxDecoration(
-        color: GColors.paper,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: GColors.gold.withValues(alpha: 0.6)),
-        boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.10), blurRadius: 10, offset: const Offset(0, 3))],
-      )),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(head, style: GText.sans(size: 14, weight: FontWeight.w700, color: GColors.maroon)),
-        const SizedBox(height: 6),
-        Text(total > 0 ? '$total में से $done पेज सेव' : 'पेज की सूची अभी नहीं आई', style: GText.display(size: 20, color: GColors.maroon, height: 1.2)),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(99),
-          child: LinearProgressIndicator(
-            // The number is always the real saved count; while the सिंक button's check runs,
-            // the bar shows how far the check has got.
-            value: syncing && total == 0 ? null : (total == 0 ? 0 : ((u.checking && u.manual ? u.checked : done) / total).clamp(0.0, 1.0)),
-            minHeight: 6,
-            backgroundColor: GColors.creamDark,
-            valueColor: const AlwaysStoppedAnimation(GColors.saffron),
-          ),
+      decoration: themedSurface(
+        BoxDecoration(
+          color: GColors.paper,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: GColors.gold.withValues(alpha: 0.6)),
+          boxShadow: [BoxShadow(color: GColors.brown.withValues(alpha: 0.10), blurRadius: 10, offset: const Offset(0, 3))],
         ),
-        const SizedBox(height: 8),
-        Text(s.syncedAt != null ? 'आख़िरी सिंक: ${hiDate(s.syncedAt)}' : 'अभी सिंक नहीं हुआ', style: GText.sans(size: 13, color: GColors.muted)),
-      ]),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            head,
+            style: GText.sans(size: 14, weight: FontWeight.w700, color: GColors.maroon),
+          ),
+          const SizedBox(height: 6),
+          Text(total > 0 ? '$total में से $done पेज सेव' : 'पेज की सूची अभी नहीं आई', style: GText.display(size: 20, color: GColors.maroon, height: 1.2)),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              // The number is always the real saved count; while the सिंक button's check runs,
+              // the bar shows how far the check has got.
+              value: syncing && total == 0 ? null : (total == 0 ? 0 : ((u.checking && u.manual ? u.checked : done) / total).clamp(0.0, 1.0)),
+              minHeight: 6,
+              backgroundColor: GColors.creamDark,
+              valueColor: const AlwaysStoppedAnimation(GColors.saffron),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(s.syncedAt != null ? 'आख़िरी सिंक: ${hiDate(s.syncedAt)}' : 'अभी सिंक नहीं हुआ', style: GText.sans(size: 13, color: GColors.muted)),
+        ],
+      ),
     );
   }
 }
@@ -936,32 +976,32 @@ class _SyncButtonState extends State<_SyncButton> with SingleTickerProviderState
 
   @override
   Widget build(BuildContext context) => Pressable(
-        key: const ValueKey('sync-button'),
-        // While a sync runs, a tap just opens the sync card (the original disabled the button).
-        onTap: widget.syncing ? () => SyncStrip.open.value = true : SyncStrip.tapSync,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: GColors.paper,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: GColors.maroon.withValues(alpha: 0.25)),
+    key: const ValueKey('sync-button'),
+    // While a sync runs, a tap just opens the sync card (the original disabled the button).
+    onTap: widget.syncing ? () => SyncStrip.open.value = true : SyncStrip.tapSync,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: GColors.paper,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: GColors.maroon.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          RotationTransition(
+            turns: _spin,
+            child: const GIcon('refresh-cw', size: 14, color: GColors.maroon),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RotationTransition(
-                turns: _spin,
-                child: const GIcon('refresh-cw', size: 14, color: GColors.maroon),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'सिंक',
-                style: GText.sans(size: 13, weight: FontWeight.w600, color: GColors.maroon),
-              ),
-            ],
+          const SizedBox(width: 6),
+          Text(
+            'सिंक',
+            style: GText.sans(size: 13, weight: FontWeight.w600, color: GColors.maroon),
           ),
-        ),
-      );
+        ],
+      ),
+    ),
+  );
 }
 
 /// `.toast` — slides up from the bottom.
@@ -969,45 +1009,45 @@ class _ToastLayer extends StatelessWidget {
   const _ToastLayer();
   @override
   Widget build(BuildContext context) => Positioned(
-        left: 0,
-        right: 0,
-        bottom: 24 + MediaQuery.paddingOf(context).bottom,
-        child: IgnorePointer(
-          child: ValueListenableBuilder<String?>(
-            valueListenable: Toast.message,
-            builder: (context, msg, _) => AnimatedSwitcher(
-              duration: const Duration(milliseconds: 260),
-              switchInCurve: Curves.easeOutBack,
-              switchOutCurve: Curves.easeIn,
-              transitionBuilder: (c, a) => FadeTransition(
-                opacity: a,
-                child: SlideTransition(
-                  position: Tween(begin: const Offset(0, 0.6), end: Offset.zero).animate(a),
-                  child: c,
-                ),
-              ),
-              child: msg == null
-                  ? const SizedBox.shrink()
-                  : Center(
-                      key: ValueKey('${Toast.serial}'),
-                      child: Container(
-                        constraints: BoxConstraints(maxWidth: math.min(MediaQuery.sizeOf(context).width * 0.92, 420)),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: GColors.brown,
-                          borderRadius: BorderRadius.circular(10),
-                          border: const Border(left: BorderSide(color: GColors.saffron, width: 3)),
-                        ),
-                        child: Text(
-                          msg,
-                          style: GText.sans(size: 16, weight: FontWeight.w600, color: GColors.goldLight),
-                        ),
-                      ),
-                    ),
+    left: 0,
+    right: 0,
+    bottom: 24 + MediaQuery.paddingOf(context).bottom,
+    child: IgnorePointer(
+      child: ValueListenableBuilder<String?>(
+        valueListenable: Toast.message,
+        builder: (context, msg, _) => AnimatedSwitcher(
+          duration: const Duration(milliseconds: 260),
+          switchInCurve: Curves.easeOutBack,
+          switchOutCurve: Curves.easeIn,
+          transitionBuilder: (c, a) => FadeTransition(
+            opacity: a,
+            child: SlideTransition(
+              position: Tween(begin: const Offset(0, 0.6), end: Offset.zero).animate(a),
+              child: c,
             ),
           ),
+          child: msg == null
+              ? const SizedBox.shrink()
+              : Center(
+                  key: ValueKey('${Toast.serial}'),
+                  child: Container(
+                    constraints: BoxConstraints(maxWidth: math.min(MediaQuery.sizeOf(context).width * 0.92, 420)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: GColors.brown,
+                      borderRadius: BorderRadius.circular(10),
+                      border: const Border(left: BorderSide(color: GColors.saffron, width: 3)),
+                    ),
+                    child: Text(
+                      msg,
+                      style: GText.sans(size: 16, weight: FontWeight.w600, color: GColors.goldLight),
+                    ),
+                  ),
+                ),
         ),
-      );
+      ),
+    ),
+  );
 }
 
 /// `qn` — the custom scroll rail (arrows + draggable thumb, hides after 700 ms).
@@ -1064,17 +1104,17 @@ class _ScrollRailState extends State<_ScrollRail> {
     final thumbTop = (p.pixels / max).clamp(0.0, 1.0) * (railH - thumbH);
     void page(int dir) => c.animateTo((p.pixels + dir * view * 0.82).clamp(0, max), duration: const Duration(milliseconds: 360), curve: Curves.easeOutCubic);
     Widget arrow(bool up) => GestureDetector(
-          onTap: () => page(up ? -1 : 1),
-          child: Container(
-            height: 28,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: GColors.maroon,
-              border: up ? const Border(bottom: BorderSide(color: Color(0xFFA66A3F))) : const Border(top: BorderSide(color: Color(0xFFA66A3F))),
-            ),
-            child: Icon(up ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 16, color: GColors.goldLight),
-          ),
-        );
+      onTap: () => page(up ? -1 : 1),
+      child: Container(
+        height: 28,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: GColors.maroon,
+          border: up ? const Border(bottom: BorderSide(color: Color(0xFFA66A3F))) : const Border(top: BorderSide(color: Color(0xFFA66A3F))),
+        ),
+        child: Icon(up ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 16, color: GColors.goldLight),
+      ),
+    );
     return Positioned(
       right: 4,
       top: top,

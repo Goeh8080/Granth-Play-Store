@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../services/api.dart' show kPlayStoreUrl;
 import '../services/catalog_store.dart';
 import '../services/file_actions.dart';
+import '../services/firebase_bridge.dart';
 import '../services/gallery_service.dart';
 import '../services/pdf_builder.dart';
 import '../services/pdf_notify.dart';
@@ -79,20 +80,23 @@ class _StyleSheetState extends State<_StyleSheet> {
   late PdfStyle _s = widget.initial;
   @override
   Widget build(BuildContext context) => SheetCard(
+    children: [
+      SheetHead(title: 'PDF शैली', onBack: () => Navigator.pop(context)),
+      for (final o in pdfStyleOptions) ...[StyleOption(title: o.title, hint: o.hint, on: _s == o.style, onTap: () => setState(() => _s = o.style)), const SizedBox(height: 8)],
+      const SizedBox(height: 4),
+      Row(
         children: [
-          SheetHead(title: 'PDF शैली', onBack: () => Navigator.pop(context)),
-          for (final o in pdfStyleOptions) ...[
-            StyleOption(title: o.title, hint: o.hint, on: _s == o.style, onTap: () => setState(() => _s = o.style)),
-            const SizedBox(height: 8),
-          ],
-          const SizedBox(height: 4),
-          Row(children: [
-            Expanded(child: SheetButton(label: 'पीछे', onTap: () => Navigator.pop(context))),
-            const SizedBox(width: 10),
-            Expanded(child: SheetButton(label: 'OK', primary: true, onTap: () => Navigator.pop(context, _s))),
-          ]),
+          Expanded(
+            child: SheetButton(label: 'पीछे', onTap: () => Navigator.pop(context)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: SheetButton(label: 'OK', primary: true, onTap: () => Navigator.pop(context, _s)),
+          ),
         ],
-      );
+      ),
+    ],
+  );
 }
 
 /// `.pdf-style`
@@ -104,23 +108,29 @@ class StyleOption extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) => Pressable(
-        onTap: onTap,
-        scale: 0.98,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: on ? const Color(0xFFFFF8EA) : Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: on ? GColors.gold : const Color(0xFFEAD9BC), width: on ? 2 : 1),
+    onTap: onTap,
+    scale: 0.98,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: on ? const Color(0xFFFFF8EA) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: on ? GColors.gold : const Color(0xFFEAD9BC), width: on ? 2 : 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.brown),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.brown)),
-            const SizedBox(height: 2),
-            Text(hint, style: GText.sans(size: 13, color: GColors.muted)),
-          ]),
-        ),
-      );
+          const SizedBox(height: 2),
+          Text(hint, style: GText.sans(size: 13, color: GColors.muted)),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Animated `.pdf-meter`.
@@ -129,21 +139,23 @@ class PdfMeter extends StatelessWidget {
   final int percent;
   @override
   Widget build(BuildContext context) => Container(
-        height: 8,
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(color: GColors.meterTrack, borderRadius: BorderRadius.circular(999)),
-        clipBehavior: Clip.antiAlias,
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(end: percent / 100),
-          duration: const Duration(milliseconds: 420),
-          curve: Curves.easeOutCubic,
-          builder: (context, v, _) => FractionallySizedBox(
-            alignment: Alignment.centerLeft,
-            widthFactor: v.clamp(0, 1),
-            child: const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(colors: [GColors.saffron, GColors.maroon]))),
-          ),
+    height: 8,
+    margin: const EdgeInsets.symmetric(vertical: 8),
+    decoration: BoxDecoration(color: GColors.meterTrack, borderRadius: BorderRadius.circular(999)),
+    clipBehavior: Clip.antiAlias,
+    child: TweenAnimationBuilder<double>(
+      tween: Tween(end: percent / 100),
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, _) => FractionallySizedBox(
+        alignment: Alignment.centerLeft,
+        widthFactor: v.clamp(0, 1),
+        child: const DecoratedBox(
+          decoration: BoxDecoration(gradient: LinearGradient(colors: [GColors.saffron, GColors.maroon])),
         ),
-      );
+      ),
+    ),
+  );
 }
 
 bool _sharing = false;
@@ -165,36 +177,38 @@ Future<void> _saveToGallery(BuildContext context, PdfJob j) async {
   if (j.filePath == null) return;
   if (!await confirmPop(context, 'क्या आप इस PDF को ऐप गैलरी में सेव करना चाहते हैं?\n${j.fileName}')) return;
   final bytes = await FileActionsBytes.read(j.filePath!);
-  await GalleryService.I.put(
-    id: j.galleryId,
-    kind: GalleryKind.pdf,
-    title: j.title,
-    text: j.text,
-    topic: j.topic,
-    granth: j.granth,
-    fileName: j.fileName,
-    bytes: bytes,
-    preview: j.preview,
-  );
+  await GalleryService.I.put(id: j.galleryId, kind: GalleryKind.pdf, title: j.title, text: j.text, topic: j.topic, granth: j.granth, fileName: j.fileName, bytes: bytes, preview: j.preview);
   Toast.show('ऐप गैलरी में सेव हो गया');
 }
 
 Widget _doneActions(BuildContext context, PdfJob j, VoidCallback refresh) => Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Column(children: [
-        Row(children: [
-          Expanded(child: SheetButton(label: 'PDF खोलें', primary: true, onTap: () => FileActions.open(j.filePath!, j.fileName))),
+  padding: const EdgeInsets.only(top: 12),
+  child: Column(
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: SheetButton(label: 'PDF खोलें', primary: true, onTap: () => FileActions.open(j.filePath!, j.fileName)),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: SheetButton(label: _sharing ? 'खुल रहा है…' : 'शेयर', icon: 'share-2', enabled: !_sharing, onTap: () => _share(j, refresh))),
-        ]),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: SheetButton(label: 'सेव', icon: 'folder-down', onTap: () => _saveToGallery(context, j))),
+          Expanded(
+            child: SheetButton(label: _sharing ? 'खुल रहा है…' : 'शेयर', icon: 'share-2', enabled: !_sharing, onTap: () => _share(j, refresh)),
+          ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          Expanded(
+            child: SheetButton(label: 'सेव', icon: 'folder-down', onTap: () => _saveToGallery(context, j)),
+          ),
           const SizedBox(width: 10),
           const Expanded(child: SizedBox()),
-        ]),
-      ]),
-    );
+        ],
+      ),
+    ],
+  ),
+);
 
 /// ashok's `.pdf-pop` + `.pdf-deck-center` (round 8, measured from his CSS / `Zh`): a centred modal
 /// card over a 28 % brown scrim (fade 0.22 s). It opens by itself when a new PDF starts, by the header
@@ -234,33 +248,42 @@ class _PdfDeckLayerState extends State<PdfDeckLayer> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    final shade = CurvedAnimation(parent: _c, curve: const Interval(0, 220 / 520, curve: Curves.easeOut));
+    final shade = CurvedAnimation(
+      parent: _c,
+      curve: const Interval(0, 220 / 520, curve: Curves.easeOut),
+    );
     final focus = CurvedAnimation(parent: _c, curve: kRise);
-    return Stack(children: [
-      Positioned.fill(
-        child: FadeTransition(
-          opacity: shade,
-          child: GestureDetector(
-            key: PdfDeckLayer.shadeKey,
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.onClose,
-            child: ColoredBox(color: GColors.brown.withValues(alpha: 0.28)),
-          ),
-        ),
-      ),
-      SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: BlurFocus(
-              animation: focus,
-              // Taps on the card are the card's own (the scrim is behind it).
-              child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () {}, child: PdfDeck(selected: widget.selected, onClose: widget.onClose)),
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: FadeTransition(
+            opacity: shade,
+            child: GestureDetector(
+              key: PdfDeckLayer.shadeKey,
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onClose,
+              child: ColoredBox(color: GColors.brown.withValues(alpha: 0.28)),
             ),
           ),
         ),
-      ),
-    ]);
+        SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: BlurFocus(
+                animation: focus,
+                // Taps on the card are the card's own (the scrim is behind it).
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {},
+                  child: PdfDeck(selected: widget.selected, onClose: widget.onClose),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -312,23 +335,31 @@ class _PdfDeckState extends State<PdfDeck> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([PdfQueue.I, UiPrefs.I, widget.selected]),
-        builder: (context, _) {
-          final jobs = PdfQueue.I.jobs;
-          if (jobs.isEmpty) return const SizedBox.shrink();
-          final now = DateTime.now().millisecondsSinceEpoch;
-          final at = _index(jobs);
-          final m = jobs[at];
-          final finished = jobs.where((j) => !j.active).length;
-          final done = m.phase == PdfPhase.done && m.filePath != null;
-          return KeyedSubtree(
-            key: const ValueKey('pdf-dropdown'),
-            child: FrostCard(
-              maxWidth: 440,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-                // .pdf-deck-top: n/N … %  (× removes this PDF — kept from round 7, ashok has none)
-                Row(children: [
-                  Text('${at + 1}/${jobs.length}', key: const ValueKey('pdf-pos'), style: GText.sans(size: 15, weight: FontWeight.w700)),
+    listenable: Listenable.merge([PdfQueue.I, UiPrefs.I, widget.selected]),
+    builder: (context, _) {
+      final jobs = PdfQueue.I.jobs;
+      if (jobs.isEmpty) return const SizedBox.shrink();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final at = _index(jobs);
+      final m = jobs[at];
+      final finished = jobs.where((j) => !j.active).length;
+      final done = m.phase == PdfPhase.done && m.filePath != null;
+      return KeyedSubtree(
+        key: const ValueKey('pdf-dropdown'),
+        child: FrostCard(
+          maxWidth: 440,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // .pdf-deck-top: n/N … %  (× removes this PDF — kept from round 7, ashok has none)
+              Row(
+                children: [
+                  Text(
+                    '${at + 1}/${jobs.length}',
+                    key: const ValueKey('pdf-pos'),
+                    style: GText.sans(size: 15, weight: FontWeight.w700),
+                  ),
                   const Spacer(),
                   TweenAnimationBuilder<double>(
                     tween: Tween(end: m.percent.toDouble()),
@@ -348,47 +379,79 @@ class _PdfDeckState extends State<PdfDeck> {
                       child: const GIcon('x', size: 14, color: GColors.maroon),
                     ),
                   ),
-                ]),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Text(m.title, key: const ValueKey('pdf-title'), style: GText.display(size: 22, color: GColors.maroon, height: 1.25)),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(
+                  m.title,
+                  key: const ValueKey('pdf-title'),
+                  style: GText.display(size: 22, color: GColors.maroon, height: 1.25),
                 ),
-                PdfMeter(percent: m.percent),
-                Padding(padding: const EdgeInsets.only(top: 4), child: Text(jobLine(m, now), key: const ValueKey('pdf-facts'), style: GText.sans(size: 14))),
+              ),
+              PdfMeter(percent: m.percent),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(jobLine(m, now), key: const ValueKey('pdf-facts'), style: GText.sans(size: 14)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  phaseText(m),
+                  key: const ValueKey('pdf-phase'),
+                  style: GText.sans(size: 14, color: m.phase == PdfPhase.error ? GColors.maroon : GColors.text, weight: m.phase == PdfPhase.error ? FontWeight.w700 : FontWeight.w400),
+                ),
+              ),
+              if (m.phase == PdfPhase.done && m.missingImages > 0)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Text(phaseText(m), key: const ValueKey('pdf-phase'), style: GText.sans(size: 14, color: m.phase == PdfPhase.error ? GColors.maroon : GColors.text, weight: m.phase == PdfPhase.error ? FontWeight.w700 : FontWeight.w400)),
+                  child: Text('${m.missingImages} चित्र लोड नहीं हुए — उनकी जगह खाली फ्रेम है', style: GText.sans(size: 13, color: GColors.muted)),
                 ),
-                if (m.phase == PdfPhase.done && m.missingImages > 0)
-                  Padding(padding: const EdgeInsets.only(top: 4), child: Text('${m.missingImages} चित्र लोड नहीं हुए — उनकी जगह खाली फ्रेम है', style: GText.sans(size: 13, color: GColors.muted))),
-                const SizedBox(height: 8),
-                // .pdf-deck-nav
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const SizedBox(height: 8),
+              // .pdf-deck-nav
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
                   Pill(key: const ValueKey('pdf-close'), label: 'बंद', onTap: widget.onClose),
                   Pill(key: const ValueKey('pdf-prev'), label: 'पिछला', icon: 'chevron-left', enabled: at > 0, onTap: () => _go(jobs, at - 1)),
                   Pill(key: const ValueKey('pdf-next'), label: 'अगला', trailingIcon: 'chevron-right', enabled: at < jobs.length - 1, onTap: () => _go(jobs, at + 1)),
-                ]),
-                if (m.active)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Align(alignment: Alignment.centerLeft, child: IntrinsicWidth(child: SheetButton(key: const ValueKey('pdf-stop'), label: 'रोकें', onTap: () => PdfQueue.I.cancel(m.id)))),
+                ],
+              ),
+              if (m.active)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: IntrinsicWidth(
+                      child: SheetButton(key: const ValueKey('pdf-stop'), label: 'रोकें', onTap: () => PdfQueue.I.cancel(m.id)),
+                    ),
                   ),
-                if (m.canRetry)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Align(alignment: Alignment.centerLeft, child: IntrinsicWidth(child: SheetButton(label: 'फिर कोशिश करें', icon: 'refresh-cw', onTap: () => PdfQueue.I.retry(m.id)))),
+                ),
+              if (m.canRetry)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: IntrinsicWidth(
+                      child: SheetButton(label: 'फिर कोशिश करें', icon: 'refresh-cw', onTap: () => PdfQueue.I.retry(m.id)),
+                    ),
                   ),
-                if (done) _doneActions(context, m, () => setState(() {})),
-                if (finished > 1)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Align(alignment: Alignment.centerLeft, child: Pill(key: const ValueKey('pdf-clear'), label: 'तैयार हटाएँ', onTap: PdfQueue.I.clearFinished)),
+                ),
+              if (done) _doneActions(context, m, () => setState(() {})),
+              if (finished > 1)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Pill(key: const ValueKey('pdf-clear'), label: 'तैयार हटाएँ', onTap: PdfQueue.I.clearFinished),
                   ),
-              ]),
-            ),
-          );
-        },
+                ),
+            ],
+          ),
+        ),
       );
+    },
+  );
 }
 
 /// `.pdf-done` — shown when a PDF finishes; it is also copied to Downloads automatically.
@@ -420,20 +483,30 @@ class _DoneState extends State<_Done> {
       alpha: 0.92,
       radius: 18,
       border: GColors.gold,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        Align(alignment: Alignment.centerRight, child: Pill(icon: 'x', label: 'पीछे', onTap: () => Navigator.pop(context))),
-        const SizedBox(height: 6),
-        Text(a.fileName, style: GText.display(size: 22, color: GColors.maroon, height: 1.25)),
-        const SizedBox(height: 6),
-        Text('${a.total} पृष्ठ · ${formatDuration((a.finishedAt ?? DateTime.now().millisecondsSinceEpoch) - a.startedAt)} · ${formatBytes(a.size ?? 0)}', style: GText.sans(size: 16)),
-        const SizedBox(height: 4),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 260),
-          child:
-              Text(_saved ? 'Downloads और फ़ाइल मैनेजर में सेव हो गया' : 'डिवाइस में सेव हो रहा है', key: ValueKey(_saved), style: GText.sans(size: 16, color: _saved ? GColors.online : GColors.text)),
-        ),
-        _doneActions(context, a, () => setState(() {})),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Align(
+            alignment: Alignment.centerRight,
+            child: Pill(icon: 'x', label: 'पीछे', onTap: () => Navigator.pop(context)),
+          ),
+          const SizedBox(height: 6),
+          Text(a.fileName, style: GText.display(size: 22, color: GColors.maroon, height: 1.25)),
+          const SizedBox(height: 6),
+          Text('${a.total} पृष्ठ · ${formatDuration((a.finishedAt ?? DateTime.now().millisecondsSinceEpoch) - a.startedAt)} · ${formatBytes(a.size ?? 0)}', style: GText.sans(size: 16)),
+          const SizedBox(height: 4),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 260),
+            child: Text(
+              _saved ? 'Downloads और फ़ाइल मैनेजर में सेव हो गया' : 'डिवाइस में सेव हो रहा है',
+              key: ValueKey(_saved),
+              style: GText.sans(size: 16, color: _saved ? GColors.online : GColors.text),
+            ),
+          ),
+          _doneActions(context, a, () => setState(() {})),
+        ],
+      ),
     );
   }
 }
@@ -446,18 +519,24 @@ class NotifHintCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FrostCard(
-        key: const ValueKey('notif-hint'),
-        maxWidth: 480,
-        alpha: 0.92,
-        radius: 18,
-        border: GColors.gold,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          Text('PDF की सूचना बंद है', style: GText.display(size: 22, color: GColors.maroon, height: 1.25)),
-          const SizedBox(height: 8),
-          Text('PDF बनने की प्रगति और “PDF तैयार” की सूचना देखने के लिए इस ऐप की सूचनाएँ (Notifications) चालू करें। PDF फिर भी बनती रहेगी।',
-              style: GText.sans(size: 15, color: GColors.brown, height: 1.5)),
-          const SizedBox(height: 14),
-          Row(children: [
+    key: const ValueKey('notif-hint'),
+    maxWidth: 480,
+    alpha: 0.92,
+    radius: 18,
+    border: GColors.gold,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('PDF की सूचना बंद है', style: GText.display(size: 22, color: GColors.maroon, height: 1.25)),
+        const SizedBox(height: 8),
+        Text(
+          'PDF बनने की प्रगति और “PDF तैयार” की सूचना देखने के लिए इस ऐप की सूचनाएँ (Notifications) चालू करें। PDF फिर भी बनती रहेगी।',
+          style: GText.sans(size: 15, color: GColors.brown, height: 1.5),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
             Expanded(
               child: SheetButton(
                 label: 'सेटिंग खोलें',
@@ -469,20 +548,27 @@ class NotifHintCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            Expanded(child: SheetButton(label: 'अभी नहीं', onTap: () => Navigator.pop(context))),
-          ]),
-        ]),
-      );
+            Expanded(
+              child: SheetButton(label: 'अभी नहीं', onTap: () => Navigator.pop(context)),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
 }
 
-/// `ng` — सेटिंग sheet (PDF style, layout, hidden card style after 5 taps on Version).
-Future<void> openSettings(BuildContext context) => showPop(context, (ctx) => const _Settings());
+/// सेटिंग: a full page (`#/settings`) since Round 14; Back returns to the screen it came from.
+Future<void> openSettings(BuildContext context) async => AppNav.I.openLink('#/settings');
 
-/// Close the settings sheet, then go to a legal page (the sheet is a dialog above the page).
-void _openLegal(BuildContext context, String link) {
-  Navigator.pop(context);
-  AppNav.I.openLink(link);
+/// The settings page (sections: display, downloads, notifications, account, AI, about).
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({super.key});
+  @override
+  Widget build(BuildContext context) => const _Settings();
 }
+
+void _openLegal(BuildContext context, String link) => AppNav.I.openLink(link);
 
 class _Settings extends StatefulWidget {
   const _Settings();
@@ -498,25 +584,47 @@ class _SettingsState extends State<_Settings> {
   @override
   void initState() {
     super.initState();
-    PackageInfo.fromPlatform().then((p) {
-      if (mounted && p.version.isNotEmpty) setState(() => _version = p.version);
-    }).catchError((_) {});
+    PackageInfo.fromPlatform()
+        .then((p) {
+          if (mounted && p.version.isNotEmpty) setState(() => _version = p.version);
+        })
+        .catchError((_) {});
   }
 
+  Widget _section(String id, String title, String icon) => Padding(
+    key: ValueKey('set-sec-$id'),
+    padding: const EdgeInsets.only(top: 22, bottom: 2),
+    child: Row(
+      children: [
+        GIcon(icon, size: 18, color: GColors.saffron),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(title, style: GText.display(size: 20, color: GColors.maroon, height: 1.3)),
+        ),
+      ],
+    ),
+  );
+
   Widget _block(String title, List<Widget> picks) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.maroon)),
-          const SizedBox(height: 8),
-          Wrap(spacing: 8, runSpacing: 8, children: picks),
-        ]),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.maroon),
+        ),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: picks),
+      ],
+    ),
+  );
 
   /// Two pills "चालू" / "बंद" under a heading (same look as the layout picks).
   Widget _toggle(String id, String title, bool on, ValueChanged<bool> set) => _block(title, [
-        Pill(key: ValueKey('set-$id-on'), direct: true, label: 'चालू', tone: on ? PillTone.maroon : PillTone.plain, onTap: () => set(true)),
-        Pill(key: ValueKey('set-$id-off'), direct: true, label: 'बंद', tone: on ? PillTone.plain : PillTone.maroon, onTap: () => set(false)),
-      ]);
+    Pill(key: ValueKey('set-$id-on'), direct: true, label: 'चालू', tone: on ? PillTone.maroon : PillTone.plain, onTap: () => set(true)),
+    Pill(key: ValueKey('set-$id-off'), direct: true, label: 'बंद', tone: on ? PillTone.plain : PillTone.maroon, onTap: () => set(false)),
+  ]);
 
   Future<void> _reset(BuildContext context) async {
     final ok = await confirmPop(context, 'सारी सेटिंग पहले जैसी (डिफ़ॉल्ट) हो जाएँगी। डाउनलोड किए ग्रंथ, पेज और PDF नहीं हटेंगे।');
@@ -527,77 +635,119 @@ class _SettingsState extends State<_Settings> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: UiPrefs.I,
-        builder: (context, _) => SheetCard(children: [
-          // Every control here taps directly (TapTarget): a finger that wobbles a little, the
-          // sheet's scroll view or the app-wide pinch layer can no longer swallow the tap.
-          SheetHead(title: 'सेटिंग', onBack: () => Navigator.pop(context), direct: true),
-          _block('PDF सेटिंग', [
-            for (final o in pdfStyleOptions)
-              Pill(key: ValueKey('set-pdf-${pdfStyleId(o.style)}'), direct: true, label: o.title, tone: UiPrefs.I.pdfStyle == o.style ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.pdfStyle = o.style),
-          ]),
-          _block('लेआउट', [
-            for (final n in [1, 2])
-              Pill(key: ValueKey('set-layout-$n'), direct: true, label: '$n×$n', tone: UiPrefs.I.uiCols == n ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.setLayout(n)),
-          ]),
-          // ---- Extra settings (not in the web app), same pills and headings ----
-          _block('अक्षर का आकार', [
-            for (final (id, title) in const [('small', 'छोटा'), ('normal', 'सामान्य'), ('large', 'बड़ा')])
-              Pill(key: ValueKey('set-text-$id'), direct: true, label: title, tone: UiPrefs.I.textSize == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.textSize = id),
-          ]),
-          _block('एनिमेशन', [
-            Pill(key: const ValueKey('set-anim-on'), direct: true, label: 'चालू', tone: UiPrefs.I.animations ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.animations = true),
-            Pill(key: const ValueKey('set-anim-low'), direct: true, label: 'कम', tone: UiPrefs.I.animations ? PillTone.plain : PillTone.maroon, onTap: () => UiPrefs.I.animations = false),
-          ]),
-          _toggle('auto-sync', 'अपने-आप सिंक (हर 2 मिनट)', UiPrefs.I.autoSync, (v) => UiPrefs.I.autoSync = v),
-          _toggle('auto-download', 'अपने-आप डाउनलोड (बंद हो तो सिर्फ़ टैप पर)', UiPrefs.I.autoDownload, (v) => UiPrefs.I.autoDownload = v),
-          _toggle('wifi-only', 'पेज डाउनलोड सिर्फ़ WiFi पर', UiPrefs.I.wifiOnly, (v) => UiPrefs.I.wifiOnly = v),
-          _toggle('keep-awake', 'पढ़ते समय स्क्रीन चालू रखें', UiPrefs.I.keepAwake, (v) => UiPrefs.I.keepAwake = v),
-          const _StorageBlock(),
-          _block('कानूनी और नीतियाँ', [
-            Pill(key: const ValueKey('set-privacy'), direct: true, icon: 'shield', label: 'गोपनीयता नीति', onTap: () => _openLegal(context, '#/legal?p=privacy')),
-            Pill(key: const ValueKey('set-legal'), direct: true, icon: 'file-text', label: 'सभी नीतियाँ और शर्तें', onTap: () => _openLegal(context, '#/legal')),
-            ListenableBuilder(
-              listenable: RemoteConfig.I,
-              builder: (context, _) => Pill(key: const ValueKey('set-contacts'), direct: true, icon: 'users', label: RemoteConfig.I.contactsTitle, onTap: () => _openLegal(context, '#/legal?p=contacts')),
-            ),
-          ]),
-          _block('ऐप के बारे में', [
-            Pill(
-              key: const ValueKey('set-share-app'),
-              direct: true,
-              icon: 'share-2',
-              label: 'ऐप शेयर करें',
-              onTap: () => FileActions.shareText('ग्रंथ प्रबंधन — सत ग्रंथों के प्रमाण', kPlayStoreUrl),
-            ),
-            Pill(key: const ValueKey('set-reset'), direct: true, label: 'सेटिंग रीसेट करें', onTap: () => _reset(context)),
-          ]),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TapTarget(
-              key: const ValueKey('set-version'),
-              onTap: () => setState(() {
-                _taps++;
-                if (_taps >= 5) _looks = true;
-              }),
-              child: Padding(
-                padding: const EdgeInsets.only(top: 8, bottom: 8),
-                child: Text('Version $_version', style: GText.sans(size: 12, color: GColors.muted)),
+    listenable: Listenable.merge([UiPrefs.I, FirebaseBridge.I, RemoteConfig.I]),
+    builder: (context, _) => SliverPadding(
+      key: const ValueKey('settings-page'),
+      padding: const EdgeInsets.fromLTRB(2, 4, 2, 24),
+      sliver: SliverToBoxAdapter(
+        child: GCard(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Every control here taps directly (TapTarget): a finger that wobbles a little, the
+              // scroll view or the app-wide pinch layer can no longer swallow the tap.
+              SheetHead(title: 'सेटिंग', onBack: AppNav.I.back, direct: true),
+              _section('display', 'डिस्प्ले और ग्रिड', 'layout-grid'),
+              _block('PDF सेटिंग', [
+                for (final o in pdfStyleOptions)
+                  Pill(
+                    key: ValueKey('set-pdf-${pdfStyleId(o.style)}'),
+                    direct: true,
+                    label: o.title,
+                    tone: UiPrefs.I.pdfStyle == o.style ? PillTone.maroon : PillTone.plain,
+                    onTap: () => UiPrefs.I.pdfStyle = o.style,
+                  ),
+              ]),
+              _block('लेआउट', [
+                for (final n in [1, 2])
+                  Pill(key: ValueKey('set-layout-$n'), direct: true, label: '$n×$n', tone: UiPrefs.I.uiCols == n ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.setLayout(n)),
+              ]),
+              // ---- Extra settings (not in the web app), same pills and headings ----
+              _block('अक्षर का आकार', [
+                for (final (id, title) in const [('small', 'छोटा'), ('normal', 'सामान्य'), ('large', 'बड़ा')])
+                  Pill(key: ValueKey('set-text-$id'), direct: true, label: title, tone: UiPrefs.I.textSize == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.textSize = id),
+              ]),
+              _block('एनिमेशन', [
+                Pill(key: const ValueKey('set-anim-on'), direct: true, label: 'चालू', tone: UiPrefs.I.animations ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.animations = true),
+                Pill(key: const ValueKey('set-anim-low'), direct: true, label: 'कम', tone: UiPrefs.I.animations ? PillTone.plain : PillTone.maroon, onTap: () => UiPrefs.I.animations = false),
+              ]),
+              _section('downloads', 'डाउनलोड और सिंक', 'folder-down'),
+              _toggle('auto-sync', 'अपने-आप सिंक (हर 2 मिनट)', UiPrefs.I.autoSync, (v) => UiPrefs.I.autoSync = v),
+              _toggle('auto-download', 'अपने-आप डाउनलोड (बंद हो तो सिर्फ़ टैप पर)', UiPrefs.I.autoDownload, (v) => UiPrefs.I.autoDownload = v),
+              _toggle('wifi-only', 'पेज डाउनलोड सिर्फ़ WiFi पर', UiPrefs.I.wifiOnly, (v) => UiPrefs.I.wifiOnly = v),
+              _toggle('keep-awake', 'पढ़ते समय स्क्रीन चालू रखें', UiPrefs.I.keepAwake, (v) => UiPrefs.I.keepAwake = v),
+              const _StorageBlock(),
+              _section('notify', 'सूचनाएँ (नोटिफ़िकेशन)', 'bell'),
+              if (!RemoteConfig.I.notificationsEnabled)
+                Padding(
+                  key: const ValueKey('set-push-off'),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text('सूचनाएँ अभी बंद हैं (एडमिन)।', style: GText.sans(size: 14, color: GColors.muted)),
+                )
+              else
+                for (final (t, title) in const [(PushTopics.daily, 'आज का प्रमाण'), (PushTopics.newPraman, 'नए प्रमाण'), (PushTopics.newTopic, 'नए विषय'), (PushTopics.trending, 'चर्चित विषय')])
+                  _toggle('push-$t', title, FirebaseBridge.I.subscribed(t), (v) => FirebaseBridge.I.setTopic(t, v)),
+              _block('फ़ोन की सूचना सेटिंग', [Pill(key: const ValueKey('set-notify-system'), direct: true, icon: 'settings', label: 'सूचना सेटिंग खोलें', onTap: () => PdfNotify.I.openSettings())]),
+              _section('account', 'अकाउंट', 'user'),
+              _block(FirebaseBridge.I.account?.email ?? 'लॉगिन नहीं है (ज़रूरी नहीं)', [
+                Pill(key: const ValueKey('set-account'), direct: true, icon: 'user', label: FirebaseBridge.I.signedIn ? 'मेरा अकाउंट' : 'Google से लॉगिन', onTap: () => AppNav.I.openLink('#/account')),
+                if (RemoteConfig.I.supportEnabled) Pill(key: const ValueKey('set-support'), direct: true, icon: 'message-circle', label: 'सहायता / टिकट', onTap: () => AppNav.I.openLink('#/support')),
+              ]),
+              _section('ai', 'तत्त्व AI', 'sparkles'),
+              _block(RemoteConfig.I.aiEnabled ? 'AI चालू है' : 'AI अभी बंद है (एडमिन)', [
+                if (RemoteConfig.I.aiEnabled) Pill(key: const ValueKey('set-ai-open'), direct: true, icon: 'sparkles', label: 'तत्त्व AI से पूछें', onTap: () => AppNav.I.openLink('#/ai')),
+              ]),
+              _section('about', 'जानकारी', 'info'),
+              _block('कानूनी और नीतियाँ', [
+                Pill(key: const ValueKey('set-privacy'), direct: true, icon: 'shield', label: 'गोपनीयता नीति', onTap: () => _openLegal(context, '#/legal?p=privacy')),
+                Pill(key: const ValueKey('set-legal'), direct: true, icon: 'file-text', label: 'सभी नीतियाँ और शर्तें', onTap: () => _openLegal(context, '#/legal')),
+                ListenableBuilder(
+                  listenable: RemoteConfig.I,
+                  builder: (context, _) =>
+                      Pill(key: const ValueKey('set-contacts'), direct: true, icon: 'users', label: RemoteConfig.I.contactsTitle, onTap: () => _openLegal(context, '#/legal?p=contacts')),
+                ),
+              ]),
+              _block('ऐप के बारे में', [
+                Pill(
+                  key: const ValueKey('set-share-app'),
+                  direct: true,
+                  icon: 'share-2',
+                  label: 'ऐप शेयर करें',
+                  onTap: () => FileActions.shareText('ग्रंथ प्रबंधन — सत ग्रंथों के प्रमाण', kPlayStoreUrl),
+                ),
+                Pill(key: const ValueKey('set-reset'), direct: true, label: 'सेटिंग रीसेट करें', onTap: () => _reset(context)),
+              ]),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TapTarget(
+                  key: const ValueKey('set-version'),
+                  onTap: () => setState(() {
+                    _taps++;
+                    if (_taps >= 5) _looks = true;
+                  }),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 8),
+                    child: Text('Version $_version', style: GText.sans(size: 12, color: GColors.muted)),
+                  ),
+                ),
               ),
-            ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 280),
+                curve: kRise,
+                child: _looks
+                    ? _block('कार्ड स्टाइल', [
+                        for (final (id, title) in cardLooks)
+                          Pill(key: ValueKey('set-look-$id'), direct: true, label: title, tone: UiPrefs.I.look == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.look = id),
+                      ])
+                    : const SizedBox(width: double.infinity),
+              ),
+            ],
           ),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 280),
-            curve: kRise,
-            child: _looks
-                ? _block('कार्ड स्टाइल', [
-                    for (final (id, title) in cardLooks)
-                      Pill(key: ValueKey('set-look-$id'), direct: true, label: title, tone: UiPrefs.I.look == id ? PillTone.maroon : PillTone.plain, onTap: () => UiPrefs.I.look = id),
-                  ])
-                : const SizedBox(width: double.infinity),
-          ),
-        ]),
-      );
+        ),
+      ),
+    ),
+  );
 }
 
 /// Settings → स्टोरेज: saved pages n / total, space used, and the सिंक button's check +
@@ -628,24 +778,32 @@ class _StorageBlockState extends State<_StorageBlock> {
 
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<ImageProgress>(
-        valueListenable: CatalogStore.I.progress,
-        builder: (context, p, _) {
-          final s = CatalogStore.I;
-          final total = s.allPages;
-          final done = s.savedPages;
-          final busy = p.running && p.manual;
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('स्टोरेज', style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.maroon)),
-              const SizedBox(height: 6),
-              Text(
-                key: const ValueKey('set-storage-text'),
-                total > 0 ? 'सेव पेज $done / $total · ${_bytes == null ? '…' : mb(_bytes!)}' : 'पेज की सूची अभी नहीं आई',
-                style: GText.sans(size: 14, color: GColors.brown),
-              ),
-              const SizedBox(height: 8),
-              Wrap(spacing: 8, runSpacing: 8, children: [
+    valueListenable: CatalogStore.I.progress,
+    builder: (context, p, _) {
+      final s = CatalogStore.I;
+      final total = s.allPages;
+      final done = s.savedPages;
+      final busy = p.running && p.manual;
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'स्टोरेज',
+              style: GText.sans(size: 16, weight: FontWeight.w700, color: GColors.maroon),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              key: const ValueKey('set-storage-text'),
+              total > 0 ? 'सेव पेज $done / $total · ${_bytes == null ? '…' : mb(_bytes!)}' : 'पेज की सूची अभी नहीं आई',
+              style: GText.sans(size: 14, color: GColors.brown),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
                 Pill(
                   key: const ValueKey('set-repair'),
                   direct: true,
@@ -659,11 +817,13 @@ class _StorageBlockState extends State<_StorageBlock> {
                           _measure();
                         },
                 ),
-              ]),
-            ]),
-          );
-        },
+              ],
+            ),
+          ],
+        ),
       );
+    },
+  );
 }
 
 /// Exit confirmation (`.exit-card`).
@@ -680,17 +840,27 @@ Future<bool> openExit(BuildContext context) async {
           borderRadius: BorderRadius.circular(22),
           boxShadow: [BoxShadow(color: GColors.shadow(0.32), blurRadius: 50, offset: const Offset(0, 22))],
         ),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('क्या आप बाहर निकलना चाहते हैं?', style: GText.display(size: 30, color: GColors.maroon, height: 1.3)),
-          const SizedBox(height: 8),
-          Text('ऐप बंद होगा। सेव किए हुए ग्रंथ और PDF फ़ोन पर रहेंगे।', style: GText.sans(size: 16, color: GColors.brown)),
-          const SizedBox(height: 16),
-          Row(children: [
-            Expanded(child: SheetButton(label: 'हाँ, बाहर जाएँ', primary: true, onTap: () => Navigator.pop(ctx, true))),
-            const SizedBox(width: 10),
-            Expanded(child: SheetButton(label: 'नहीं, यहीं रहें', onTap: () => Navigator.pop(ctx, false))),
-          ]),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('क्या आप बाहर निकलना चाहते हैं?', style: GText.display(size: 30, color: GColors.maroon, height: 1.3)),
+            const SizedBox(height: 8),
+            Text('ऐप बंद होगा। सेव किए हुए ग्रंथ और PDF फ़ोन पर रहेंगे।', style: GText.sans(size: 16, color: GColors.brown)),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: SheetButton(label: 'हाँ, बाहर जाएँ', primary: true, onTap: () => Navigator.pop(ctx, true)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SheetButton(label: 'नहीं, यहीं रहें', onTap: () => Navigator.pop(ctx, false)),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     ),
   );

@@ -124,6 +124,13 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         // Channels must exist before anything is posted.
         PdfService.ensureChannels(applicationContext)
+        // CONTRACT §6.3: FCM topic notifications post to channel `granth_updates`.
+        if (Build.VERSION.SDK_INT >= 26) {
+            try {
+                val nm = getSystemService(android.app.NotificationManager::class.java)
+                nm.createNotificationChannel(android.app.NotificationChannel("granth_updates", "नए प्रमाण और सूचनाएँ", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+            } catch (_: Exception) {}
+        }
         PageSyncService.ensureChannel(applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {

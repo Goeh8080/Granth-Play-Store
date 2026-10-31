@@ -59,13 +59,22 @@ class AiFeedback extends ChangeNotifier {
   List<Map<String, dynamic>> get queue {
     try {
       final j = jsonDecode(Store.I.getString(kQueue) ?? '');
-      if (j is List) return [for (final e in j) if (e is Map<String, dynamic>) e];
+      if (j is List) {
+        return [
+          for (final e in j)
+            if (e is Map<String, dynamic>) e,
+        ];
+      }
     } catch (_) {}
     return [];
   }
 
   /// 1, -1 or 0 (no vote).
-  int vote(String key) => switch (_map(kVotes)[key]) { 1 => 1, -1 => -1, _ => 0 };
+  int vote(String key) => switch (_map(kVotes)[key]) {
+    1 => 1,
+    -1 => -1,
+    _ => 0,
+  };
 
   void up(String key) => _setVote(key, vote(key) == 1 ? 0 : 1);
 
@@ -89,14 +98,7 @@ class AiFeedback extends ChangeNotifier {
     _setVote(key, -1);
     final q = queue
       ..removeWhere((e) => e['key'] == key)
-      ..add({
-        'key': key,
-        'question': _cut(question, 500),
-        'answer': _cut(answer, 2000),
-        'reason': _cut(reason.trim(), 300),
-        'chat': chat,
-        'at': DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
-      });
+      ..add({'key': key, 'question': _cut(question, 500), 'answer': _cut(answer, 2000), 'reason': _cut(reason.trim(), 300), 'chat': chat, 'at': DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000});
     while (q.length > kMaxQueue) {
       q.removeAt(0);
     }
@@ -118,13 +120,8 @@ class AiFeedback extends ChangeNotifier {
         try {
           final r = await _dio.post<String>(
             '$base/ai/flags',
-            data: jsonEncode({'iid': iid, 'kind': 'thumbs_down', 'lang': 'hi', ...item}..remove('key')),
-            options: Options(
-              contentType: 'application/json',
-              headers: {if (appKey.isNotEmpty) 'X-App-Key': appKey},
-              responseType: ResponseType.plain,
-              validateStatus: (s) => s != null && s < 600,
-            ),
+            data: jsonEncode({'iid': iid, 'kind': 'thumbs_down', 'lang': 'hi', 'app_version': kAppVersion, ...item}..remove('key')),
+            options: Options(contentType: 'application/json', headers: {if (appKey.isNotEmpty) 'X-App-Key': appKey}, responseType: ResponseType.plain, validateStatus: (s) => s != null && s < 600),
           );
           status = r.statusCode;
         } catch (_) {

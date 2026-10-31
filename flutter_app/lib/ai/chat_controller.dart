@@ -37,13 +37,7 @@ class AdminOffer {
 /// "ज्ञान चर्चा": a question taken from the admin's notes (or a praman's topic), its answer and the
 /// pramans — revealed on a tap.
 class GyanCard {
-  GyanCard({
-    required this.convId,
-    required this.question,
-    required this.answer,
-    required this.cited,
-    this.fromNote = false,
-  });
+  GyanCard({required this.convId, required this.question, required this.answer, required this.cited, this.fromNote = false});
   final String convId;
   final String question;
   final String answer;
@@ -123,9 +117,7 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
     // Build the retrieval index in the background so the first question is quick.
     if (pramans.isNotEmpty) Retriever.I.ensure(pramans, version).ignore();
-    unawaited(
-      knowledge.loadCached(),
-    ); // the admin's notes (disk copy) are ready for the first question
+    unawaited(knowledge.loadCached()); // the admin's notes (disk copy) are ready for the first question
   }
 
   /// Starts an empty chat (the old one stays in the history).
@@ -232,25 +224,20 @@ class ChatController extends ChangeNotifier {
       c.messages.add(ChatMsg(role: 'assistant', text: text.length > kMaxMessageChars ? text.substring(0, kMaxMessageChars) : text, cited: known, at: now));
       c.updated = now;
       sending = false;
-      offer =
-          aiCannotAnswer(
-            answer: text,
-            cited: a.cited,
-            isPraman: (id) => Retriever.I.praman(id) != null,
-          )
-          ? AdminOffer(c.id, question)
-          : null;
+      offer = aiCannotAnswer(answer: text, cited: a.cited, isPraman: (id) => Retriever.I.praman(id) != null) ? AdminOffer(c.id, question) : null;
       tick++;
       Analytics.I.aiAnswered();
       notifyListeners();
       await _persist(c);
     } on AiException catch (e) {
       if (run != _run) return;
+      Analytics.I.aiFailed(question, e.kind.name);
       error = e;
       sending = false;
       notifyListeners();
     } catch (_) {
       if (run != _run) return;
+      Analytics.I.aiFailed(question, 'error');
       error = const AiException(AiFailure.unavailable, 'कुछ गड़बड़ हो गई। कृपया फिर कोशिश करें।');
       sending = false;
       notifyListeners();
@@ -300,9 +287,7 @@ class ChatController extends ChangeNotifier {
         if (identical(c, current)) tick++;
         await _persist(c);
       }
-      unawaited(
-        PdfNotify.I.ensurePermission(),
-      ); // so the "उत्तर आ गया" notification can be seen
+      unawaited(PdfNotify.I.ensurePermission()); // so the "उत्तर आ गया" notification can be seen
     } else {
       o.message = r.message;
       o.canRetry = r.canRetry;
@@ -331,25 +316,12 @@ class ChatController extends ChangeNotifier {
       if (c == null) {
         // The chat is gone (deleted) or unknown: a chat of its own, so nothing is lost.
         final now = DateTime.now().millisecondsSinceEpoch;
-        c = Conversation(
-          id: newChatId(),
-          title: 'admin का उत्तर',
-          created: now,
-          updated: now,
-        );
+        c = Conversation(id: newChatId(), title: 'admin का उत्तर', created: now, updated: now);
       }
       if (c.messages.any((m) => m.ref == ref)) return true;
       final now = DateTime.now().millisecondsSinceEpoch;
       c.messages.add(
-        ChatMsg(
-          role: 'admin',
-          text: a.answer.length > kMaxMessageChars
-              ? a.answer.substring(0, kMaxMessageChars)
-              : a.answer,
-          at: now,
-          ref: ref,
-          ask: a.question.isEmpty ? null : a.question,
-        ),
+        ChatMsg(role: 'admin', text: a.answer.length > kMaxMessageChars ? a.answer.substring(0, kMaxMessageChars) : a.answer, at: now, ref: ref, ask: a.question.isEmpty ? null : a.question),
       );
       c.updated = now;
       chats = await store.save(c);
@@ -377,29 +349,17 @@ class ChatController extends ChangeNotifier {
       final n = notes[rng.nextInt(notes.length)];
       var cited = <int>[];
       if (ps.isNotEmpty) {
-        final cs = await Retriever.I.candidates(
-          ps,
-          version,
-          '${n.question} ${n.tags.join(' ')}',
-          k: 3,
-        );
+        final cs = await Retriever.I.candidates(ps, version, '${n.question} ${n.tags.join(' ')}', k: 3);
         cited = [
           for (final c in cs)
             if (Retriever.I.praman(c.id) != null) c.id,
         ];
       }
-      card = GyanCard(
-        convId: id,
-        question: n.question,
-        answer: n.answer,
-        cited: cited,
-        fromNote: true,
-      );
+      card = GyanCard(convId: id, question: n.question, answer: n.answer, cited: cited, fromNote: true);
     } else {
       final withTopic = [
         for (final p in ps)
-          if (p.topicTitle.trim().isNotEmpty && p.granthTitle.trim().isNotEmpty)
-            p,
+          if (p.topicTitle.trim().isNotEmpty && p.granthTitle.trim().isNotEmpty) p,
       ];
       if (withTopic.isEmpty) return false;
       final p = withTopic[rng.nextInt(withTopic.length)];
@@ -412,29 +372,14 @@ class ChatController extends ChangeNotifier {
       final names = {for (final x in all) x.granthTitle}.join(', ');
       card = GyanCard(
         convId: id,
-        question:
-            'इस बात का प्रमाण किस ग्रंथ में है — “${p.topicTitle.trim()}”?',
+        question: 'इस बात का प्रमाण किस ग्रंथ में है — “${p.topicTitle.trim()}”?',
         answer: 'इसका प्रमाण **$names** में मिलता है।',
-        cited: [
-          for (final x in all) int.tryParse(x.id) ?? -1,
-        ].where((e) => e > 0).toList(),
+        cited: [for (final x in all) int.tryParse(x.id) ?? -1].where((e) => e > 0).toList(),
       );
     }
     final now = DateTime.now().millisecondsSinceEpoch;
-    final c = current ??= Conversation(
-      id: id,
-      title: 'ज्ञान चर्चा',
-      created: now,
-      updated: now,
-    );
-    c.messages.add(
-      ChatMsg(
-        role: 'assistant',
-        text:
-            '**ज्ञान चर्चा**\n\n❓ ${card.question}\n\nपहले खुद सोचिए, फिर “उत्तर और प्रमाण देखें” दबाइए।',
-        at: now,
-      ),
-    );
+    final c = current ??= Conversation(id: id, title: 'ज्ञान चर्चा', created: now, updated: now);
+    c.messages.add(ChatMsg(role: 'assistant', text: '**ज्ञान चर्चा**\n\n❓ ${card.question}\n\nपहले खुद सोचिए, फिर “उत्तर और प्रमाण देखें” दबाइए।', at: now));
     c.updated = now;
     offer = null;
     gyan = card;
@@ -456,17 +401,8 @@ class ChatController extends ChangeNotifier {
       return;
     }
     final now = DateTime.now().millisecondsSinceEpoch;
-    final tail = g.cited.isEmpty
-        ? '\n\n_इस उत्तर का प्रमाण अभी ऐप में नहीं मिला।_'
-        : '';
-    c.messages.add(
-      ChatMsg(
-        role: 'assistant',
-        text: '${g.answer}$tail${g.fromNote ? '\n\n_(admin का नोट)_' : ''}',
-        cited: g.cited,
-        at: now,
-      ),
-    );
+    final tail = g.cited.isEmpty ? '\n\n_इस उत्तर का प्रमाण अभी ऐप में नहीं मिला।_' : '';
+    c.messages.add(ChatMsg(role: 'assistant', text: '${g.answer}$tail${g.fromNote ? '\n\n_(admin का नोट)_' : ''}', cited: g.cited, at: now));
     c.updated = now;
     if (identical(c, current)) tick++;
     notifyListeners();

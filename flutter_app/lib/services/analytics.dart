@@ -28,12 +28,12 @@ import 'storage.dart';
 /// inside `analytics_sample`.
 class Analytics with WidgetsBindingObserver {
   Analytics({Dio? dio, DateTime Function()? now, RemoteConfig Function()? config, String? url, bool? enabled, String? appKey})
-      : _dio = dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 8), sendTimeout: const Duration(seconds: 8), receiveTimeout: const Duration(seconds: 8))),
-        _now = now ?? DateTime.now,
-        _cfg = config ?? (() => RemoteConfig.I),
-        url = url ?? kEventsUrl,
-        appKey = (appKey ?? kAppKey).trim(),
-        enabledByBuild = enabled ?? !Platform.environment.containsKey('FLUTTER_TEST');
+    : _dio = dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 8), sendTimeout: const Duration(seconds: 8), receiveTimeout: const Duration(seconds: 8))),
+      _now = now ?? DateTime.now,
+      _cfg = config ?? (() => RemoteConfig.I),
+      url = url ?? kEventsUrl,
+      appKey = (appKey ?? kAppKey).trim(),
+      enabledByBuild = enabled ?? !Platform.environment.containsKey('FLUTTER_TEST');
 
   static Analytics I = Analytics();
 
@@ -68,6 +68,38 @@ class Analytics with WidgetsBindingObserver {
   final Map<String, int> _watchG = {}, _watchF = {}, _watchScr = {}; // milliseconds
   int _syncOk = 0, _syncFail = 0, _pdfOk = 0, _pdfFail = 0, _aiAsked = 0, _aiAnswered = 0, _aiCite = 0;
   final Map<String, int> _syncKinds = {}, _pdfKinds = {};
+  // Named events (CONTRACT §5.4): "name|ref" → count, plus up to 3 ai_fail texts per batch.
+  final Map<String, int> _named = {};
+  final List<Map<String, dynamic>> _fails = [];
+
+  /// Also forwarded here (Firebase Analytics), fire-and-forget; never throws into the app.
+  static void Function(String name, Map<String, Object> params)? forward;
+  static const namedEvents = {'folder_open', 'granth_open', 'ai_answer', 'ai_fail', 'pdf_download', 'app_open'};
+
+  /// Firebase param name for an event's id: folder_id / granth_id / praman_id (string values).
+  static String? firebaseIdParam(String name) => switch (name) {
+    'folder_open' => 'folder_id',
+    'granth_open' || 'pdf_download' => 'granth_id',
+    'ai_answer' || 'ai_fail' => 'praman_id',
+    _ => null,
+  };
+
+  /// Counts a named event for `/events` and forwards it to Firebase Analytics.
+  void named(String name, {String? id, String? text, String? reason}) {
+    try {
+      // Firebase Analytics is primary; app_open is logged automatically there.
+      if (name != 'app_open') forward?.call(name, {?firebaseIdParam(name): ?id, 'reason': ?reason});
+    } catch (_) {}
+    if (!enabled) return;
+    _rollDay();
+    final k = '$name|${id ?? ''}';
+    if (_named.containsKey(k) || _named.length < 50) _named[k] = math.min(1000, (_named[k] ?? 0) + 1);
+    if (name == 'ai_fail' && text != null && _fails.length < 3) {
+      _fails.add({'name': 'ai_fail', 'text': _cut(text, 500), if (reason != null) 'reason': _cut(reason, 120)});
+    }
+  }
+
+  static String _cut(String s, int n) => s.runes.length <= n ? s : String.fromCharCodes(s.runes.take(n));
 
   // ---- the segment being timed (foreground only) ----
   DateTime? _segStart;
@@ -166,6 +198,8 @@ class Analytics with WidgetsBindingObserver {
       _rollDay();
       if (r.granthId != null) _bump(_openG, r.granthId!);
       if (_segFolder != null) _bump(_openF, _segFolder!);
+      if (r.granthId != null) named('granth_open', id: r.granthId);
+      if (_segFolder != null && r.granthId == null) named('folder_open', id: _segFolder);
       if (r.topicId != null) _bump(_openT, 't');
       if (r.pramanId != null) _bump(_openP, 'p');
       if (_segStart == null && _foreground) _segStart = _now();
@@ -175,14 +209,15 @@ class Analytics with WidgetsBindingObserver {
   }
 
   static String screenName(GRoute r) => switch (r.panel) {
-        Panel.dashboard => 'home',
-        Panel.topics => 'topics',
-        Panel.granths => r.religionId == null ? (r.flat ? 'granths' : 'folders') : 'folder',
-        Panel.pramans => (r.granthId != null || r.pramanId != null) ? 'reader' : 'pramans',
-        Panel.gallery => 'gallery',
-        Panel.ai => 'ai',
-        Panel.legal => r.legalPage == 'contacts' ? 'contacts' : 'legal',
-      };
+    Panel.dashboard => 'home',
+    Panel.topics => 'topics',
+    Panel.granths => r.religionId == null ? (r.flat ? 'granths' : 'folders') : 'folder',
+    Panel.pramans => (r.granthId != null || r.pramanId != null) ? 'reader' : 'pramans',
+    Panel.gallery => 'gallery',
+    Panel.ai => 'ai',
+    Panel.legal => r.legalPage == 'contacts' ? 'contacts' : 'legal',
+    Panel.page => r.legalPage ?? 'page',
+  };
 
   /// Counts are clamped at 5000 (the server's limit); time maps hold milliseconds and are clamped
   /// at 2 h (the server's 7200 s) via [cap].
@@ -231,7 +266,10 @@ class Analytics with WidgetsBindingObserver {
 
   void aiAnswered() {
     if (enabled) _aiAnswered = math.min(5000, _aiAnswered + 1);
+    named('ai_answer');
   }
+
+  void aiFailed(String question, String reason) => named('ai_fail', text: question, reason: reason);
 
   void aiCiteTap() {
     if (enabled) _aiCite = math.min(5000, _aiCite + 1);
@@ -281,7 +319,14 @@ class Analytics with WidgetsBindingObserver {
     }
   }
 
-  bool get _hasData => _fgMs >= 1000 || _openG.isNotEmpty || _openF.isNotEmpty || _openT.isNotEmpty || _openP.isNotEmpty || _syncOk + _syncFail + _pdfOk + _pdfFail + _aiAsked + _aiAnswered + _aiCite > 0;
+  bool get _hasData =>
+      _fgMs >= 1000 ||
+      _openG.isNotEmpty ||
+      _openF.isNotEmpty ||
+      _openT.isNotEmpty ||
+      _openP.isNotEmpty ||
+      _syncOk + _syncFail + _pdfOk + _pdfFail + _aiAsked + _aiAnswered + _aiCite > 0 ||
+      _named.isNotEmpty;
 
   Map<String, int> _secs(Map<String, int> ms) {
     final e = ms.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
@@ -297,28 +342,35 @@ class Analytics with WidgetsBindingObserver {
   }
 
   Map<String, dynamic> _build() => {
-        'v': 1,
-        'batch_id': _hex(16),
-        'iid': iid,
-        'app': kAppFull,
-        'app_version': kAppVersion,
-        'build': kBuildNumber,
-        'os': 'android',
-        'sdk': DeviceProfile.I.sdk.clamp(0, 99),
-        'cfg': _cfg().cfgVersion,
-        'day': _day,
-        'fg_s': math.min(21600, (_fgMs / 1000).round()),
-        'sessions': math.min(5000, _sessions),
-        'open': {'g': _top(_openG), 'f': _top(_openF), 't': _top(_openT), 'p': _top(_openP)},
-        'watch_s': {'g': _secs(_watchG), 'f': _secs(_watchF), 'scr': _secs(_watchScr)},
-        'sync': {'ok': _syncOk, 'fail': _syncFail, 'kinds': _top(_syncKinds)},
-        'pdf': {'ok': _pdfOk, 'fail': _pdfFail, 'kinds': _top(_pdfKinds)},
-        'ai': {'asked': _aiAsked, 'answered': _aiAnswered, 'cite_tap': _aiCite},
-      };
+    'v': 1,
+    'batch_id': _hex(16),
+    'iid': iid,
+    'app': kAppFull,
+    'app_version': kAppVersion,
+    'build': kBuildNumber,
+    'os': 'android',
+    'sdk': DeviceProfile.I.sdk.clamp(0, 99),
+    'cfg': _cfg().cfgVersion,
+    'day': _day,
+    'fg_s': math.min(21600, (_fgMs / 1000).round()),
+    'sessions': math.min(5000, _sessions),
+    'open': {'g': _top(_openG), 'f': _top(_openF), 't': _top(_openT), 'p': _top(_openP)},
+    'watch_s': {'g': _secs(_watchG), 'f': _secs(_watchF), 'scr': _secs(_watchScr)},
+    'sync': {'ok': _syncOk, 'fail': _syncFail, 'kinds': _top(_syncKinds)},
+    'pdf': {'ok': _pdfOk, 'fail': _pdfFail, 'kinds': _top(_pdfKinds)},
+    'ai': {'asked': _aiAsked, 'answered': _aiAnswered, 'cite_tap': _aiCite},
+    if (_named.isNotEmpty || _fails.isNotEmpty)
+      'events': [
+        for (final e in _named.entries) {'name': e.key.split('|').first, if (e.key.split('|').last.isNotEmpty) 'id': e.key.substring(e.key.indexOf('|') + 1), 'n': e.value},
+        ..._fails,
+      ],
+  };
 
   void _resetAcc() {
     _sessions = 0;
     _fgMs = 0;
+    _named.clear();
+    _fails.clear();
     for (final m in [_openG, _openF, _openT, _openP, _watchG, _watchF, _watchScr, _syncKinds, _pdfKinds]) {
       m.clear();
     }
@@ -359,7 +411,14 @@ class Analytics with WidgetsBindingObserver {
       final t = await Store.I.readText(queueFile);
       if (t != null) {
         final l = jsonDecode(t);
-        if (l is List) _queue = [for (final e in l) if (e is Map) e.cast<String, dynamic>()] + _queue;
+        if (l is List) {
+          _queue =
+              [
+                for (final e in l)
+                  if (e is Map) e.cast<String, dynamic>(),
+              ] +
+              _queue;
+        }
       }
     } catch (_) {}
   }

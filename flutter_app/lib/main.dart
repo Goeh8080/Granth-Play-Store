@@ -11,6 +11,7 @@ import 'services/catalog_store.dart';
 import 'services/device_profile.dart';
 import 'services/file_actions.dart';
 import 'services/analytics.dart';
+import 'services/firebase_bridge.dart';
 import 'services/remote_config.dart';
 import 'services/shelves.dart';
 import 'services/events.dart';
@@ -22,58 +23,64 @@ import 'widgets/zoom.dart';
 import 'widgets/bounded_scroll.dart';
 
 void main() {
-  runZonedGuarded<Future<void>>(() async {
-    WidgetsFlutterBinding.ensureInitialized();
-    _installErrorHandlers();
-    Future<void> boot = Future<void>.value();
-    // Every init step is guarded: an exception or a hang here must never stop runApp,
-    // otherwise the phone stays on the native launch screen forever.
-    try {
-      await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]).timeout(const Duration(seconds: 2));
-    } catch (e) {
-      debugPrint('init: orientation: $e');
-    }
-    try {
-      await Store.I.init().timeout(const Duration(seconds: 6));
-    } catch (e) {
-      debugPrint('init: store: $e');
-    }
-    // Not awaited for long: both only tune / tidy, the app works without them.
-    try {
-      await Future.wait([DeviceProfile.load(), FileActions.cleanupPartials()]).timeout(const Duration(seconds: 2));
-    } catch (e) {
-      debugPrint('init: profile/cleanup: $e');
-    }
-    try {
-      await Shelves.load().timeout(const Duration(seconds: 2));
-    } catch (e) {
-      debugPrint('init: structure: $e');
-    }
-    try {
-      await RemoteConfig.I.load().timeout(const Duration(seconds: 2));
-    } catch (e) {
-      debugPrint('init: remote config: $e');
-    }
-    try {
-      AppNav.I.restore();
-    } catch (e) {
-      debugPrint('init: restore: $e');
-    }
-    try {
-      EventLog.I.log('app_open', 'app');
-    } catch (_) {}
-    try {
-      // The catalog loads in the background; the splash never waits for the network.
-      boot = CatalogStore.I.boot().catchError((Object e, StackTrace st) => debugPrint('boot: $e\n$st'));
-    } catch (e) {
-      debugPrint('init: boot: $e');
-    }
-    runApp(GranthApp(ready: boot));
-    // Anonymous usage counts start after the first frame; they never delay the app.
-    WidgetsBinding.instance.addPostFrameCallback((_) => Analytics.I.start());
-  }, (error, stack) {
-    debugPrint('Uncaught: $error\n$stack');
-  });
+  runZonedGuarded<Future<void>>(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      _installErrorHandlers();
+      Future<void> boot = Future<void>.value();
+      // Every init step is guarded: an exception or a hang here must never stop runApp,
+      // otherwise the phone stays on the native launch screen forever.
+      try {
+        await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]).timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('init: orientation: $e');
+      }
+      try {
+        await Store.I.init().timeout(const Duration(seconds: 6));
+      } catch (e) {
+        debugPrint('init: store: $e');
+      }
+      // Not awaited for long: both only tune / tidy, the app works without them.
+      try {
+        await Future.wait([DeviceProfile.load(), FileActions.cleanupPartials()]).timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('init: profile/cleanup: $e');
+      }
+      try {
+        await Shelves.load().timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('init: structure: $e');
+      }
+      try {
+        await RemoteConfig.I.load().timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('init: remote config: $e');
+      }
+      try {
+        AppNav.I.restore();
+      } catch (e) {
+        debugPrint('init: restore: $e');
+      }
+      try {
+        EventLog.I.log('app_open', 'app');
+      } catch (_) {}
+      try {
+        // The catalog loads in the background; the splash never waits for the network.
+        boot = CatalogStore.I.boot().catchError((Object e, StackTrace st) => debugPrint('boot: $e\n$st'));
+      } catch (e) {
+        debugPrint('init: boot: $e');
+      }
+      // Firebase (analytics, crashlytics, optional login, push topics): never blocks the app.
+      Analytics.I.named('app_open'); // CONTRACT §6.2: once per cold start, to /events (Firebase logs app_open itself)
+      unawaited(FirebaseBridge.I.init().catchError((Object e) => debugPrint('init: firebase: $e')));
+      runApp(GranthApp(ready: boot));
+      // Anonymous usage counts start after the first frame; they never delay the app.
+      WidgetsBinding.instance.addPostFrameCallback((_) => Analytics.I.start());
+    },
+    (error, stack) {
+      debugPrint('Uncaught: $error\n$stack');
+    },
+  );
 }
 
 void _installErrorHandlers() {
@@ -131,9 +138,11 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
     }
     try {
       final first = widget.initialLink ?? AppLinks().getInitialLink();
-      first.then((u) {
-        if (u != null) _safeOpen(u);
-      }).catchError((Object e) => debugPrint('links: initial: $e'));
+      first
+          .then((u) {
+            if (u != null) _safeOpen(u);
+          })
+          .catchError((Object e) => debugPrint('links: initial: $e'));
     } catch (e) {
       debugPrint('links: initial: $e');
     }
@@ -182,21 +191,24 @@ class _GranthAppState extends State<GranthApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'ग्रंथ प्रबंधन',
-        debugShowCheckedModeBanner: false,
-        scrollBehavior: const BoundedScrollBehavior(),
-        theme: buildTheme(),
-        builder: (context, child) => ValueListenableBuilder<double>(
-          // Settings → अक्षर का आकार: a factor on the phone's own text size, same 1.3 cap.
-          valueListenable: UiPrefs.I.textFactor,
-          builder: (context, f, zoomed) {
-            final phone = MediaQuery.textScalerOf(context);
-            final scaler = f == 1.0 ? phone.clamp(maxScaleFactor: 1.3) : TextScaler.linear(phone.scale(100) / 100 * f).clamp(minScaleFactor: 0.8, maxScaleFactor: 1.3);
-            return MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: scaler), child: zoomed!);
-          },
-          // Whole-app pinch zoom like the original WebView (viewport maximum-scale=5).
-          child: AppZoom(child: child!),
-        ),
-        home: widget.splash ? AnimatedSplash(ready: widget.ready, child: const HomeShell()) : const HomeShell(),
-      );
+    title: 'ग्रंथ प्रबंधन',
+    debugShowCheckedModeBanner: false,
+    scrollBehavior: const BoundedScrollBehavior(),
+    theme: buildTheme(),
+    builder: (context, child) => ValueListenableBuilder<double>(
+      // Settings → अक्षर का आकार: a factor on the phone's own text size, same 1.3 cap.
+      valueListenable: UiPrefs.I.textFactor,
+      builder: (context, f, zoomed) {
+        final phone = MediaQuery.textScalerOf(context);
+        final scaler = f == 1.0 ? phone.clamp(maxScaleFactor: 1.3) : TextScaler.linear(phone.scale(100) / 100 * f).clamp(minScaleFactor: 0.8, maxScaleFactor: 1.3);
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: scaler),
+          child: zoomed!,
+        );
+      },
+      // Whole-app pinch zoom like the original WebView (viewport maximum-scale=5).
+      child: AppZoom(child: child!),
+    ),
+    home: widget.splash ? AnimatedSplash(ready: widget.ready, child: const HomeShell()) : const HomeShell(),
+  );
 }

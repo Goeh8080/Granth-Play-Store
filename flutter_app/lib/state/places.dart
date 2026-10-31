@@ -12,18 +12,19 @@ class Places {
 
   /// Storage key of the list a route shows (null: a single item, nothing to restore).
   static String? keyFor(GRoute r) => switch (r.panel) {
-        Panel.dashboard => 'dashboard-place',
-        Panel.topics => 'topic-list-place',
-        Panel.granths when r.flat => 'granth-list-place',
-        Panel.granths when r.religionId == null => 'religions-place',
-        Panel.granths when r.groupId == null => 'religion-list:${r.religionId}',
-        Panel.granths => 'group-list:${[r.religionId, r.groupId, r.subId].whereType<String>().join(':')}',
-        Panel.gallery => 'gallery-list-place',
-        Panel.ai => 'ai-place',
-        Panel.legal => 'legal-place:${r.legalPage ?? ''}',
-        Panel.pramans when r.pramanId == null => 'praman-list:${r.granthId ?? ''}:${r.topicId ?? ''}',
-        _ => null,
-      };
+    Panel.dashboard => 'dashboard-place',
+    Panel.topics => 'topic-list-place',
+    Panel.granths when r.flat => 'granth-list-place',
+    Panel.granths when r.religionId == null => 'religions-place',
+    Panel.granths when r.groupId == null => 'religion-list:${r.religionId}',
+    Panel.granths => 'group-list:${[r.religionId, r.groupId, r.subId].whereType<String>().join(':')}',
+    Panel.gallery => 'gallery-list-place',
+    Panel.ai => 'ai-place',
+    Panel.legal => 'legal-place:${r.legalPage ?? ''}',
+    Panel.page => 'page-place:${r.legalPage ?? ''}',
+    Panel.pramans when r.pramanId == null => 'praman-list:${r.granthId ?? ''}:${r.topicId ?? ''}',
+    _ => null,
+  };
 
   static Map<String, dynamic>? _read(String key) {
     try {

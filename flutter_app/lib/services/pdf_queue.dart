@@ -59,8 +59,19 @@ bool _isNoSpace(Object e) {
 typedef PdfRun = Future<String> Function(PdfJob job, void Function(PdfPhase, int, int) report);
 
 class PdfJob {
-  PdfJob({required this.id, required this.title, required this.fileName, required this.galleryId, this.topic = '', this.granth = '', this.granthId = '', this.text = '', this.weight = 1, this.pages = 1, String? dedupeKey})
-      : dedupeKey = dedupeKey ?? galleryId;
+  PdfJob({
+    required this.id,
+    required this.title,
+    required this.fileName,
+    required this.galleryId,
+    this.topic = '',
+    this.granth = '',
+    this.granthId = '',
+    this.text = '',
+    this.weight = 1,
+    this.pages = 1,
+    String? dedupeKey,
+  }) : dedupeKey = dedupeKey ?? galleryId;
   final String id;
   final String title;
   final String fileName;
@@ -270,10 +281,12 @@ class PdfQueue extends ChangeNotifier {
       _waiting.removeAt(0);
       if (next.cancelled) continue;
       _busy += w;
-      unawaited(_runJob(next).whenComplete(() {
-        _busy -= w;
-        _pump();
-      }));
+      unawaited(
+        _runJob(next).whenComplete(() {
+          _busy -= w;
+          _pump();
+        }),
+      );
     }
   }
 
@@ -329,6 +342,7 @@ class PdfQueue extends ChangeNotifier {
         notifyListeners();
         finished.value = job;
         Analytics.I.pdfResult(true);
+        Analytics.I.named('pdf_download', id: job.granthId.isNotEmpty ? job.granthId : null);
         try {
           EventLog.I.log('pdf_download', job.granthId.isNotEmpty ? job.granthId : job.id, job.fileName);
         } catch (_) {}
@@ -456,25 +470,18 @@ class PdfQueue extends ChangeNotifier {
   // ---------- spec builders (Nh / Ph / Fh) ----------
 
   static PdfSpec pramanSpec(Praman e) => PdfSpec(
-        title: e.title,
-        subtitle: e.topicTitle,
-        body: e.description.isNotEmpty ? e.description : (e.topicTitle.isNotEmpty ? e.topicTitle : e.title),
-        meta: [e.granthTitle, e.granthAuthor].where((x) => x.isNotEmpty).join(' · '),
-        path: e.imagePath,
-      );
+    title: e.title,
+    subtitle: e.topicTitle,
+    body: e.description.isNotEmpty ? e.description : (e.topicTitle.isNotEmpty ? e.topicTitle : e.title),
+    meta: [e.granthTitle, e.granthAuthor].where((x) => x.isNotEmpty).join(' · '),
+    path: e.imagePath,
+  );
 
   static List<PdfSpec> granthSpecs(Granth e) => [
-        PdfSpec(title: e.title, subtitle: e.author, body: e.description.isNotEmpty ? e.description : e.title, path: e.imagePath, cover: true),
-        if (mediaPath(e.editorImagePath) != null)
-          PdfSpec(
-            title: e.title,
-            subtitle: 'प्रकाशन',
-            body: e.author.isNotEmpty ? 'प्रकाशन · ${e.author}' : 'प्रकाशन विवरण',
-            meta: 'प्रकाशन विवरण',
-            path: e.editorImagePath,
-            cover: true,
-          ),
-      ];
+    PdfSpec(title: e.title, subtitle: e.author, body: e.description.isNotEmpty ? e.description : e.title, path: e.imagePath, cover: true),
+    if (mediaPath(e.editorImagePath) != null)
+      PdfSpec(title: e.title, subtitle: 'प्रकाशन', body: e.author.isNotEmpty ? 'प्रकाशन · ${e.author}' : 'प्रकाशन विवरण', meta: 'प्रकाशन विवरण', path: e.editorImagePath, cover: true),
+  ];
 
   static ({List<Praman> proofs, List<PdfSpec> specs, List<String> granthIds}) topicSpecs(Topic t) {
     final store = CatalogStore.I;
@@ -662,11 +669,14 @@ class PdfQueue extends ChangeNotifier {
     start(job, (job, report) async {
       final built = await _assemble(specs, style, job, report);
       report(PdfPhase.save, specs.length, specs.length);
-      await _toGallery(job, built,
-          id: 'pdf-topics-${DateTime.now().millisecondsSinceEpoch}',
-          title: title,
-          text: topics.map((e) => e.description).where((e) => e.isNotEmpty).join('\n'),
-          topic: topics.map((e) => e.title).join(' · '));
+      await _toGallery(
+        job,
+        built,
+        id: 'pdf-topics-${DateTime.now().millisecondsSinceEpoch}',
+        title: title,
+        text: topics.map((e) => e.description).where((e) => e.isNotEmpty).join('\n'),
+        topic: topics.map((e) => e.title).join(' · '),
+      );
       CatalogStore.I.markOffline(ids);
       return built;
     });
@@ -728,8 +738,9 @@ String etaText(int? e, PdfPhase t) {
 String jobLine(PdfJob e, int now) {
   final end = e.finishedAt ?? now;
   final took = formatDuration(math.max(0, end - e.startedAt));
-  final first =
-      (e.phase == PdfPhase.pages || e.phase == PdfPhase.done) ? '${e.phase == PdfPhase.done ? e.total : e.done}/${e.total} पृष्ठ' : (e.phase == PdfPhase.images ? '${e.done}/${e.total} चित्र' : '');
+  final first = (e.phase == PdfPhase.pages || e.phase == PdfPhase.done)
+      ? '${e.phase == PdfPhase.done ? e.total : e.done}/${e.total} पृष्ठ'
+      : (e.phase == PdfPhase.images ? '${e.done}/${e.total} चित्र' : '');
   return [first, '$took लगे', etaText(e.etaMs, e.phase)].where((s) => s.isNotEmpty).join(' · ');
 }
 

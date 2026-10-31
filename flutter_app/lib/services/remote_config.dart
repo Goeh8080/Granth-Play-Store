@@ -56,6 +56,12 @@ class ParsedConfig {
     required this.hidden,
     required this.announcement,
     required this.aiEnabled,
+    this.bhaktIdEnabled = false,
+    this.supportEnabled = true,
+    this.trendingEnabled = true,
+    this.dailyEnabled = true,
+    this.notificationsEnabled = true,
+    this.aiFlagsEnabled = true,
     required this.analyticsEnabled,
     required this.analyticsSample,
     required this.aiEndpoint,
@@ -71,6 +77,10 @@ class ParsedConfig {
   final Set<String> hidden;
   final Announcement? announcement;
   final bool aiEnabled;
+
+  /// CONTRACT §6.1 feature switches: a missing switch means on; `false` hides the feature.
+  /// `bhakt_id_enabled` is app-side only (not in the contract yet): off unless set true.
+  final bool bhaktIdEnabled, supportEnabled, trendingEnabled, dailyEnabled, notificationsEnabled, aiFlagsEnabled;
   final bool analyticsEnabled;
   final double analyticsSample;
   final String? aiEndpoint;
@@ -122,8 +132,24 @@ DailyPick? _parseDaily(Map<String, dynamic>? d) {
 
 const _religionIcons = {'om', 'crescent', 'khanda', 'cross', 'dharma', 'jain', 'kabir', 'misc'};
 const _groupIcons = {
-  'scroll', 'book-red', 'book-green', 'book-blue', 'book-orange', 'swords', 'books', 'quran', 'hadees',
-  'granth-sahib', 'dasam', 'bible', 'tripitak', 'dhammapad', 'kabir-sagar', 'bijak', 'shabdavali', 'misc',
+  'scroll',
+  'book-red',
+  'book-green',
+  'book-blue',
+  'book-orange',
+  'swords',
+  'books',
+  'quran',
+  'hadees',
+  'granth-sahib',
+  'dasam',
+  'bible',
+  'tripitak',
+  'dhammapad',
+  'kabir-sagar',
+  'bijak',
+  'shabdavali',
+  'misc',
 };
 final _slug = RegExp(r'^[a-z0-9][a-z0-9_-]{0,39}$');
 final _gid = RegExp(r'^[0-9]{1,8}$');
@@ -156,8 +182,14 @@ ShelfGroup? _group(Object? raw, {required bool allowSub}) {
       if (g != null && seen.add(g.id)) subs.add(g);
     }
   }
-  List<String> ids(Object? v) => [for (final e in (v is List ? v : const [])) if (e is String && _gid.hasMatch(e)) e];
-  List<String> words(Object? v) => [for (final e in (v is List ? v : const [])) if (e is String && e.trim().isNotEmpty) e];
+  List<String> ids(Object? v) => [
+    for (final e in (v is List ? v : const []))
+      if (e is String && _gid.hasMatch(e)) e,
+  ];
+  List<String> words(Object? v) => [
+    for (final e in (v is List ? v : const []))
+      if (e is String && e.trim().isNotEmpty) e,
+  ];
   return ShelfGroup(
     id: id,
     title: title,
@@ -190,15 +222,17 @@ Structure? parseStructure(Object? raw) {
       if (p != null && gseen.add(p.id)) groups.add(p);
     }
     final tone = '${m['tone']}';
-    religions.add(ShelfReligion(
-      id: id,
-      title: title,
-      tone: const {'saffron', 'maroon', 'gold'}.contains(tone) ? tone : 'saffron',
-      icon: religionIconKey(m['icon']),
-      groups: groups,
-      visible: m['visible'] != false,
-      comingSoon: _title(m['coming_soon']),
-    ));
+    religions.add(
+      ShelfReligion(
+        id: id,
+        title: title,
+        tone: const {'saffron', 'maroon', 'gold'}.contains(tone) ? tone : 'saffron',
+        icon: religionIconKey(m['icon']),
+        groups: groups,
+        visible: m['visible'] != false,
+        comingSoon: _title(m['coming_soon']),
+      ),
+    );
   }
   if (religions.isEmpty) return null;
   final o = _map(j['other']);
@@ -208,7 +242,10 @@ Structure? parseStructure(Object? raw) {
           id: kOtherId,
           title: _title(o['title']).isEmpty ? 'अन्य' : _title(o['title']),
           icon: religionIconKey(o['icon']),
-          granthIds: [for (final e in (o['forceIds'] is List ? o['forceIds'] as List : const [])) if (e is String && _gid.hasMatch(e)) e],
+          granthIds: [
+            for (final e in (o['forceIds'] is List ? o['forceIds'] as List : const []))
+              if (e is String && _gid.hasMatch(e)) e,
+          ],
           comingSoon: _title(o['coming_soon']),
         );
   return Structure(religions: religions, other: other);
@@ -279,7 +316,8 @@ ParsedConfig? parseConfig(String text, {int cachedVersion = 0, int appBuild = kB
       });
     }
     final hidden = <String>{
-      for (final e in (j['hidden_granth_ids'] is List ? j['hidden_granth_ids'] as List : const [])) if (e is String && _gid.hasMatch(e)) e,
+      for (final e in (j['hidden_granth_ids'] is List ? j['hidden_granth_ids'] as List : const []))
+        if (e is String && _gid.hasMatch(e)) e,
     };
     Announcement? ann;
     final a = _map(j['announcement']);
@@ -314,6 +352,12 @@ ParsedConfig? parseConfig(String text, {int cachedVersion = 0, int appBuild = kB
       hidden: hidden,
       announcement: ann,
       aiEnabled: f['ai_enabled'] != false,
+      bhaktIdEnabled: f['bhakt_id_enabled'] == true,
+      supportEnabled: f['support_enabled'] != false,
+      trendingEnabled: f['trending_enabled'] != false,
+      dailyEnabled: f['daily_enabled'] != false,
+      notificationsEnabled: f['notifications_enabled'] != false,
+      aiFlagsEnabled: f['ai_flags_enabled'] != false,
       analyticsEnabled: f['analytics_enabled'] != false,
       analyticsSample: sample is num ? sample.toDouble().clamp(0.0, 1.0) : 1.0,
       aiEndpoint: ai,
@@ -345,7 +389,7 @@ String _normEtag(String? e) => (e ?? '').trim().replaceFirst(RegExp(r'^W/'), '')
 /// shows nothing. Fetched on every catalog sync with a conditional GET (ETag).
 class RemoteConfig extends ChangeNotifier {
   RemoteConfig({Dio? dio, this.url = kConfigUrl, this.build = kBuildNumber, this.publicKey})
-      : _dio = dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 8), receiveTimeout: const Duration(seconds: 8)));
+    : _dio = dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 8), receiveTimeout: const Duration(seconds: 8)));
   static RemoteConfig I = RemoteConfig();
 
   static const fileName = 'remote_config.json';
@@ -366,6 +410,7 @@ class RemoteConfig extends ChangeNotifier {
   Set<String> hidden = const {};
   Announcement? announcement;
   bool aiEnabled = true;
+  bool bhaktIdEnabled = false, supportEnabled = true, trendingEnabled = true, dailyEnabled = true, notificationsEnabled = true, aiFlagsEnabled = true;
   bool analyticsEnabled = true;
   double analyticsSample = 1.0;
   String? aiEndpoint;
@@ -429,11 +474,7 @@ class RemoteConfig extends ChangeNotifier {
       final etag = Store.I.getString(kEtag);
       final res = await _dio.get<String>(
         url,
-        options: Options(
-          responseType: ResponseType.plain,
-          headers: {if (etag != null && etag.isNotEmpty && version > 0) 'If-None-Match': etag},
-          validateStatus: (s) => s == 200 || s == 304,
-        ),
+        options: Options(responseType: ResponseType.plain, headers: {if (etag != null && etag.isNotEmpty && version > 0) 'If-None-Match': etag}, validateStatus: (s) => s == 200 || s == 304),
       );
       if (res.statusCode == 304) {
         lastResult = 'unchanged';
@@ -473,6 +514,12 @@ class RemoteConfig extends ChangeNotifier {
     hidden = p.hidden;
     announcement = p.announcement;
     aiEnabled = p.aiEnabled;
+    bhaktIdEnabled = p.bhaktIdEnabled;
+    supportEnabled = p.supportEnabled;
+    trendingEnabled = p.trendingEnabled;
+    dailyEnabled = p.dailyEnabled;
+    notificationsEnabled = p.notificationsEnabled;
+    aiFlagsEnabled = p.aiFlagsEnabled;
     analyticsEnabled = p.analyticsEnabled;
     analyticsSample = p.analyticsSample;
     aiEndpoint = p.aiEndpoint;
@@ -499,6 +546,12 @@ class RemoteConfig extends ChangeNotifier {
     hidden = const {};
     announcement = null;
     aiEnabled = true;
+    bhaktIdEnabled = false;
+    supportEnabled = true;
+    trendingEnabled = true;
+    dailyEnabled = true;
+    notificationsEnabled = true;
+    aiFlagsEnabled = true;
     analyticsEnabled = true;
     analyticsSample = 1.0;
     aiEndpoint = null;

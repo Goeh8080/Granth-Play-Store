@@ -5,7 +5,8 @@ import 'package:flutter/foundation.dart';
 import '../services/events.dart';
 import '../services/storage.dart';
 
-enum Panel { dashboard, topics, granths, pramans, gallery, ai, legal }
+/// [Panel.page]: a full page named by [GRoute.legalPage] (`settings`, `account`, `support`).
+enum Panel { dashboard, topics, granths, pramans, gallery, ai, legal, page }
 
 /// `ig()` — the parsed hash route of the web app (`#/pramans?topic=…`).
 @immutable
@@ -36,6 +37,9 @@ class GRoute {
     if (path.startsWith('/gallery')) return const GRoute(Panel.gallery);
     if (path.startsWith('/ai')) return const GRoute(Panel.ai);
     if (path.startsWith('/legal')) return GRoute(Panel.legal, legalPage: v('p'));
+    for (final p in const ['settings', 'account', 'support']) {
+      if (path.startsWith('/$p')) return GRoute(Panel.page, legalPage: p);
+    }
     if (path.startsWith('/topics')) return const GRoute(Panel.topics);
     if (path.startsWith('/granths')) {
       if (v('all') == '1') return const GRoute(Panel.granths, flat: true);
@@ -55,8 +59,8 @@ class GRoute {
   String _folderKey() => flat
       ? '|all'
       : religionId == null
-          ? ''
-          : '|${[religionId, groupId, subId].nonNulls.join('/')}';
+      ? ''
+      : '|${[religionId, groupId, subId].nonNulls.join('/')}';
 
   /// `#/granths?r=…&g=…&s=…` for a folder level.
   static String folderHash({String? religion, String? group, String? sub}) {
@@ -109,7 +113,12 @@ class AppNav extends ChangeNotifier {
       final raw = Store.I.getString('granth-nav');
       if (raw != null) {
         final j = jsonDecode(raw);
-        if (j is List) stack = [for (final e in j) if (e is String && e.startsWith('#/') && e != saved) e];
+        if (j is List) {
+          stack = [
+            for (final e in j)
+              if (e is String && e.startsWith('#/') && e != saved) e,
+          ];
+        }
       }
     } catch (_) {}
     // A stack that does not start at the dashboard cannot be trusted to lead anywhere sane.
