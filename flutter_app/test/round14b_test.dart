@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:granthprabandhan/ai/retriever.dart';
+import 'package:granthprabandhan/ai/sanitize.dart';
 import 'package:granthprabandhan/main.dart';
 import 'package:granthprabandhan/services/analytics.dart';
 import 'package:granthprabandhan/services/firebase_bridge.dart';
@@ -106,7 +108,7 @@ void main() {
     });
   });
 
-  test('Firebase events carry folder_id / granth_id / praman_id as strings; app_open is not double-logged', () {
+  test('Firebase events carry folder_id / granth_id / praman_id as strings; ai_fail carries question + reason', () {
     final got = <(String, Map<String, Object>)>[];
     final old = Analytics.forward;
     Analytics.forward = (n, p) => got.add((n, p));
@@ -114,10 +116,48 @@ void main() {
     Analytics.I.named('folder_open', id: '7');
     Analytics.I.named('granth_open', id: '44');
     Analytics.I.named('pdf_download', id: '44');
-    Analytics.I.named('app_open');
-    expect(got.map((e) => e.$1), ['folder_open', 'granth_open', 'pdf_download']);
+    Analytics.I.named('ai_fail', text: 'प्र' * 150, reason: 'timeout');
+    Analytics.I.syncResult(false, 'Timeout!');
+    Analytics.I.fb('pdf_generate', {'granth_id': '44'});
+    expect(got.map((e) => e.$1), ['folder_open', 'granth_open', 'pdf_download', 'ai_fail', 'sync_fail', 'pdf_generate']);
+    expect(got[3].$2['reason'], 'timeout');
+    expect((got[3].$2['question']! as String).length, 100);
+    expect(got[4].$2, {'reason': 'timeout_'});
+    expect(got[5].$2, {'granth_id': '44'});
     expect(got[0].$2, {'folder_id': '7'});
     expect(got[1].$2, {'granth_id': '44'});
+  });
+
+  group('AI text', () {
+    String? n(int i) => {759: 'जीव हमारी जाति है', 12: 'गीता 7:18'}[i];
+    test('every leaked id form becomes the praman name or vanishes', () {
+      expect(sanitizeAiText('देखें (id = 759) में।', n), 'देखें (“जीव हमारी जाति है”) में।');
+      expect(sanitizeAiText('प्रमाण id: 759 है', n), 'प्रमाण “जीव हमारी जाति है” है');
+      expect(sanitizeAiText('ID-759 और id 12', n), '“जीव हमारी जाति है”, “गीता 7:18”');
+      expect(sanitizeAiText('(IDs 759, 12)', n), '(“जीव हमारी जाति है”, “गीता 7:18”)');
+      expect(sanitizeAiText('Id#759.', n), '“जीव हमारी जाति है”.');
+      expect(sanitizeAiText('आईडी 12 देखें', n), '“गीता 7:18” देखें');
+      expect(sanitizeAiText('यह (ID: 999) है', n), 'यह है');
+      expect(sanitizeAiText('Kabir valid 759 बार; video 12', n), 'Kabir valid 759 बार; video 12');
+    });
+    test('numbered sources [1..n] map to the candidates in order', () {
+      String? src(int i) => i == 1 ? 'गीता 7:18' : (i == 2 ? 'कबीर सागर' : null);
+      expect(sanitizeAiText('मांस पाप है [1]। और भी [1, 2]', (_) => null, sourceName: src), 'मांस पाप है (“गीता 7:18”)। और भी (“गीता 7:18”, “कबीर सागर”)');
+      expect(sanitizeAiText('देखें [7]', (_) => null, sourceName: src), 'देखें');
+    });
+    test('retriever synonyms: shiv / mrityu / janm / tatvdarshi find the Hindi pramans', () {
+      final ix = buildIndex([
+        ['1', 'शिव जी की उत्पत्ति', '', '', '', ''],
+        ['2', 'तीनों देवताओं की मृत्यु होती है', '', '', '', ''],
+        ['3', 'पूर्ण संत की पहचान', '', '', '', ''],
+        ['4', 'मांस खाना पाप', '', '', '', ''],
+      ]);
+      expect(searchIndex(ix, 'shiv').first.id, 1);
+      expect(searchIndex(ix, 'mahadev').first.id, 1);
+      expect(searchIndex(ix, 'mrityu').first.id, 2);
+      expect(searchIndex(ix, 'janm').first.id, 1);
+      expect(searchIndex(ix, 'tatvdarshi sant').first.id, 3);
+    });
   });
 
   group('FCM (CONTRACT §6.3)', () {

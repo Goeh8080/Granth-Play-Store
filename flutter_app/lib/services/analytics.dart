@@ -74,13 +74,25 @@ class Analytics with WidgetsBindingObserver {
 
   /// Also forwarded here (Firebase Analytics), fire-and-forget; never throws into the app.
   static void Function(String name, Map<String, Object> params)? forward;
+
+  /// Firebase `logScreenView(screenName)` (GA4 screen_view).
+  static void Function(String screen)? screenForward;
   static const namedEvents = {'folder_open', 'granth_open', 'ai_answer', 'ai_fail', 'pdf_download', 'app_open'};
+
+  /// Firebase Analytics only (primary source): mirrors every /events counter as an event.
+  /// String values only; never throws into the app.
+  void fb(String name, [Map<String, String?> params = const {}]) {
+    try {
+      forward?.call(name, {for (final e in params.entries) if (e.value != null) e.key: _cutP(e.value!)});
+    } catch (_) {}
+  }
+
+  static String _cutP(String v) => v.length > 100 ? v.substring(0, 100) : v;
 
   /// Firebase param name for an event's id: folder_id / granth_id / praman_id (string values).
   static String? firebaseIdParam(String name) => switch (name) {
     'folder_open' => 'folder_id',
     'granth_open' || 'pdf_download' => 'granth_id',
-    'ai_answer' || 'ai_fail' => 'praman_id',
     _ => null,
   };
 
@@ -88,7 +100,7 @@ class Analytics with WidgetsBindingObserver {
   void named(String name, {String? id, String? text, String? reason}) {
     try {
       // Firebase Analytics is primary; app_open is logged automatically there.
-      if (name != 'app_open') forward?.call(name, {?firebaseIdParam(name): ?id, 'reason': ?reason});
+      fb(name, {?firebaseIdParam(name): id, if (name == 'ai_fail') 'question': text, 'reason': reason});
     } catch (_) {}
     if (!enabled) return;
     _rollDay();
@@ -202,6 +214,11 @@ class Analytics with WidgetsBindingObserver {
       if (_segFolder != null && r.granthId == null) named('folder_open', id: _segFolder);
       if (r.topicId != null) _bump(_openT, 't');
       if (r.pramanId != null) _bump(_openP, 'p');
+      try {
+        screenForward?.call(_scr);
+      } catch (_) {}
+      if (r.topicId != null) fb('topic_open', {'topic_id': r.topicId});
+      if (r.pramanId != null) fb('praman_open', {'granth_id': r.granthId, 'praman_id': r.pramanId});
       if (_segStart == null && _foreground) _segStart = _now();
     } catch (e) {
       debugPrint('analytics: nav: $e');
@@ -235,12 +252,14 @@ class Analytics with WidgetsBindingObserver {
     final c = math.min(ms, 7200000);
     _rollDay();
     _fgMs += c;
+    fb('watch_time', {'screen': _scr, 'granth_id': _segGranth, 'folder_id': _segFolder, 'seconds': '${(c / 1000).round()}'});
     _bump(_watchScr, _scr, c, 7200000);
     if (_segGranth != null) _bump(_watchG, _segGranth!, c, 7200000);
     if (_segFolder != null) _bump(_watchF, _segFolder!, c, 7200000);
   }
 
   void syncResult(bool ok, [String kind = 'other']) {
+    fb(ok ? 'sync_ok' : 'sync_fail', {if (!ok) 'reason': _kind(kind)});
     if (!enabled) return;
     if (ok) {
       _syncOk = math.min(5000, _syncOk + 1);
@@ -251,6 +270,7 @@ class Analytics with WidgetsBindingObserver {
   }
 
   void pdfResult(bool ok, [String kind = 'other']) {
+    if (!ok) fb('pdf_fail', {'reason': _kind(kind)});
     if (!enabled) return;
     if (ok) {
       _pdfOk = math.min(5000, _pdfOk + 1);
@@ -261,6 +281,7 @@ class Analytics with WidgetsBindingObserver {
   }
 
   void aiAsked() {
+    fb('ai_ask');
     if (enabled) _aiAsked = math.min(5000, _aiAsked + 1);
   }
 
@@ -271,7 +292,8 @@ class Analytics with WidgetsBindingObserver {
 
   void aiFailed(String question, String reason) => named('ai_fail', text: question, reason: reason);
 
-  void aiCiteTap() {
+  void aiCiteTap([String? granthId]) {
+    fb('cite_tap', {'granth_id': granthId});
     if (enabled) _aiCite = math.min(5000, _aiCite + 1);
   }
 

@@ -71,8 +71,8 @@ void main() {
         debugPrint('init: boot: $e');
       }
       // Firebase (analytics, crashlytics, optional login, push topics): never blocks the app.
-      Analytics.I.named('app_open'); // CONTRACT §6.2: once per cold start, to /events (Firebase logs app_open itself)
-      unawaited(FirebaseBridge.I.init().catchError((Object e) => debugPrint('init: firebase: $e')));
+      Analytics.I.named('app_open'); // CONTRACT §6.2: once per cold start, to /events and, once Firebase is up, as the optional GA4 app_open
+      unawaited(FirebaseBridge.I.init().then((_) => Analytics.forward?.call('app_open', const {})).catchError((Object e) => debugPrint('init: firebase: $e')));
       runApp(GranthApp(ready: boot));
       // Anonymous usage counts start after the first frame; they never delay the app.
       WidgetsBinding.instance.addPostFrameCallback((_) => Analytics.I.start());

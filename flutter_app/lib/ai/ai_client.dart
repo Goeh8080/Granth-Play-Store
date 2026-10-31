@@ -128,7 +128,9 @@ class AiClient {
     try {
       return await _once(body);
     } on AiException catch (e) {
-      if (!e.retryable) rethrow;
+      // A timeout already waited the full [timeout]: no silent second wait (up to ~90 s of spinner).
+      // The user gets the error with a Retry button instead.
+      if (!e.retryable || e.kind == AiFailure.timeout) rethrow;
       await Future<void>.delayed(e.kind == AiFailure.rateLimited ? backoff * 2 : backoff);
       return _once(body);
     }

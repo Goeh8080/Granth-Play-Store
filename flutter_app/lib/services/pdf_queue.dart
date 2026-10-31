@@ -194,6 +194,7 @@ class PdfQueue extends ChangeNotifier {
     final now = DateTime.now().millisecondsSinceEpoch;
     final same = jobs.where((j) => j.active && j.dedupeKey == job.dedupeKey && now - j.startedAt < doubleTapWindowMs).firstOrNull;
     if (same != null) return same;
+    Analytics.I.fb('pdf_generate', {'granth_id': ?(job.granthId.isNotEmpty ? job.granthId : null)});
     job.run = run;
     jobs.insert(0, job);
     _trim();

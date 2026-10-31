@@ -573,7 +573,7 @@ class CardPdfChoice extends StatelessWidget {
 }
 
 void openPraman(Praman p) {
-  Analytics.I.aiCiteTap();
+  Analytics.I.aiCiteTap(p.granthId.isEmpty ? null : p.granthId);
   AppNav.I.openLink('#/pramans?id=${Uri.encodeComponent(p.id)}');
 }
 

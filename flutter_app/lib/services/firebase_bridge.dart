@@ -93,6 +93,7 @@ class FirebaseBridge extends ChangeNotifier {
     } catch (e) {
       debugPrint('firebase: crashlytics: $e');
     }
+    Analytics.screenForward = (screen) => unawaited(FirebaseAnalytics.instance.logScreenView(screenName: screen).catchError((_) {}));
     Analytics.forward = (name, params) => unawaited(FirebaseAnalytics.instance.logEvent(name: name, parameters: params).catchError((_) {}));
     // The signed-in Firebase user wins over the cache (e.g. revoked on another device).
     try {

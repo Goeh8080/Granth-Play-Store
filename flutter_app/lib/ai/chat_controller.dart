@@ -219,7 +219,11 @@ class ChatController extends ChangeNotifier {
       final now = DateTime.now().millisecondsSinceEpoch;
       // Never show raw candidate ids ("id-467"): the praman / note / topic name instead.
       final names = {for (final x in cands) x.id: x.granth.isEmpty ? x.title : '${x.title} (${x.granth})'};
-      var text = sanitizeAiText(a.answer, (id) => names[id]);
+      var text = sanitizeAiText(
+        a.answer,
+        (id) => names[id],
+        sourceName: (n) => n >= 1 && n <= cands.length ? names[cands[n - 1].id] : null,
+      );
       if (text.isEmpty) text = kEmptyAnswer;
       c.messages.add(ChatMsg(role: 'assistant', text: text.length > kMaxMessageChars ? text.substring(0, kMaxMessageChars) : text, cited: known, at: now));
       c.updated = now;
