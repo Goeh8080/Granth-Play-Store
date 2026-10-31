@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:io';
 
 import '../services/storage.dart';
+import 'ai_client.dart' show BookSource, parseSources;
 
 const int kMaxChats = 50;
 const int kMaxMessages = 60;
@@ -15,7 +16,10 @@ const int kMaxMessageChars = 8000;
 const int kTitleChars = 48;
 
 class ChatMsg {
-  const ChatMsg({required this.role, required this.text, this.cited = const [], this.at = 0, this.ref, this.ask});
+  const ChatMsg({required this.role, required this.text, this.cited = const [], this.at = 0, this.ref, this.ask, this.sources = const []});
+
+  /// SRJM book citations (assistant messages only).
+  final List<BookSource> sources;
 
   /// 'user' | 'assistant' | 'admin' (a reply from the admin; never sent to the AI as history).
   final String role;
@@ -34,7 +38,15 @@ class ChatMsg {
   bool get isUser => role == 'user';
   bool get isAdmin => role == 'admin';
 
-  Map<String, Object> toJson() => {'role': role, 'text': text, if (cited.isNotEmpty) 'cited': cited, 'at': at, 'ref': ?ref, 'ask': ?ask};
+  Map<String, Object> toJson() => {
+    'role': role,
+    'text': text,
+    if (cited.isNotEmpty) 'cited': cited,
+    'at': at,
+    'ref': ?ref,
+    'ask': ?ask,
+    if (sources.isNotEmpty) 'sources': [for (final s in sources) s.toJson()],
+  };
 
   static ChatMsg? fromJson(Object? j) {
     if (j is! Map) return null;
@@ -45,9 +57,14 @@ class ChatMsg {
     return ChatMsg(
       role: role as String,
       text: text.length > kMaxMessageChars ? text.substring(0, kMaxMessageChars) : text,
-      cited: [if (c is List) for (final e in c) if (e is int) e],
+      cited: [
+        if (c is List)
+          for (final e in c)
+            if (e is int) e,
+      ],
       at: j['at'] is int ? j['at'] as int : 0,
       ref: j['ref'] is String ? j['ref'] as String : null,
+      sources: parseSources(j['sources']),
       ask: j['ask'] is String ? j['ask'] as String : null,
     );
   }
@@ -64,7 +81,13 @@ class Conversation {
   /// The last message is a question that has no answer yet (the answer failed or the app was closed).
   bool get pending => messages.isNotEmpty && messages.last.isUser;
 
-  Map<String, Object> toJson() => {'id': id, 'title': title, 'created': created, 'updated': updated, 'messages': [for (final m in messages) m.toJson()]};
+  Map<String, Object> toJson() => {
+    'id': id,
+    'title': title,
+    'created': created,
+    'updated': updated,
+    'messages': [for (final m in messages) m.toJson()],
+  };
 
   static Conversation? fromJson(Object? j) {
     if (j is! Map) return null;
@@ -72,8 +95,7 @@ class Conversation {
     if (id is! String || !_validId(id)) return null;
     final msgs = <ChatMsg>[
       if (j['messages'] is List)
-        for (final e in j['messages'] as List)
-          ?ChatMsg.fromJson(e),
+        for (final e in j['messages'] as List) ?ChatMsg.fromJson(e),
     ];
     return Conversation(
       id: id,
@@ -161,10 +183,7 @@ class ChatStore {
     final j = await Store.I.readJson(_index);
     List<ConversationInfo>? out;
     if (j is List) {
-      out = [
-        for (final e in j)
-          ?ConversationInfo.fromJson(e),
-      ];
+      out = [for (final e in j) ?ConversationInfo.fromJson(e)];
     }
     if (out == null) {
       out = [];
@@ -192,19 +211,19 @@ class ChatStore {
 
   /// Saves [c] (trimmed to the caps) and returns the new list. Old conversations beyond [kMaxChats] go.
   Future<List<ConversationInfo>> save(Conversation c) => _queue(() async {
-        if (!Store.I.ready) return <ConversationInfo>[];
-        await _ensureDir();
-        if (c.messages.length > kMaxMessages) c.messages.removeRange(0, c.messages.length - kMaxMessages);
-        await Store.I.writeJson(_file(c.id), c.toJson());
-        final all = (await _list()).where((e) => e.id != c.id).toList()..add(c.info);
-        all.sort((a, b) => b.updated.compareTo(a.updated));
-        for (final old in all.skip(kMaxChats).toList()) {
-          await _remove(old.id);
-        }
-        final kept = all.take(kMaxChats).toList();
-        await Store.I.writeJson(_index, [for (final e in kept) e.toJson()]);
-        return kept;
-      });
+    if (!Store.I.ready) return <ConversationInfo>[];
+    await _ensureDir();
+    if (c.messages.length > kMaxMessages) c.messages.removeRange(0, c.messages.length - kMaxMessages);
+    await Store.I.writeJson(_file(c.id), c.toJson());
+    final all = (await _list()).where((e) => e.id != c.id).toList()..add(c.info);
+    all.sort((a, b) => b.updated.compareTo(a.updated));
+    for (final old in all.skip(kMaxChats).toList()) {
+      await _remove(old.id);
+    }
+    final kept = all.take(kMaxChats).toList();
+    await Store.I.writeJson(_index, [for (final e in kept) e.toJson()]);
+    return kept;
+  });
 
   Future<void> _remove(String id) async {
     try {
@@ -214,34 +233,34 @@ class ChatStore {
   }
 
   Future<List<ConversationInfo>> delete(String id) => _queue(() async {
-        if (!Store.I.ready || !_validId(id)) return <ConversationInfo>[];
-        await _remove(id);
-        final left = (await _list()).where((e) => e.id != id).toList();
-        await _ensureDir();
-        await Store.I.writeJson(_index, [for (final e in left) e.toJson()]);
-        return left;
-      });
+    if (!Store.I.ready || !_validId(id)) return <ConversationInfo>[];
+    await _remove(id);
+    final left = (await _list()).where((e) => e.id != id).toList();
+    await _ensureDir();
+    await Store.I.writeJson(_index, [for (final e in left) e.toJson()]);
+    return left;
+  });
 
   /// "चैट इतिहास मिटाएँ": every conversation file and the index.
   Future<void> clearAll() => _queue(() async {
-        if (!Store.I.ready) return;
-        try {
-          if (await _dir.exists()) await _dir.delete(recursive: true);
-        } catch (_) {}
-      });
+    if (!Store.I.ready) return;
+    try {
+      if (await _dir.exists()) await _dir.delete(recursive: true);
+    } catch (_) {}
+  });
 
   /// How much room the history takes (shown next to the clear button).
   Future<int> bytes() => _queue(() async {
-        var n = 0;
-        try {
-          if (await _dir.exists()) {
-            for (final f in _dir.listSync()) {
-              if (f is File) n += f.lengthSync();
-            }
-          }
-        } catch (_) {}
-        return n;
-      });
+    var n = 0;
+    try {
+      if (await _dir.exists()) {
+        for (final f in _dir.listSync()) {
+          if (f is File) n += f.lengthSync();
+        }
+      }
+    } catch (_) {}
+    return n;
+  });
 }
 
 /// A fresh id: time + counter, lower-case letters and digits only (it becomes a file name).

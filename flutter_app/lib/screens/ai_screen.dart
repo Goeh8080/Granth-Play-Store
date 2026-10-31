@@ -137,7 +137,8 @@ class _AiPanelState extends State<AiPanel> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(listenable: RemoteConfig.I, builder: (context, _) => RemoteConfig.I.aiEnabled ? _chat(context) : const _AiOff());
+  Widget build(BuildContext context) =>
+      ListenableBuilder(listenable: RemoteConfig.I, builder: (context, _) => RemoteConfig.I.aiEnabled ? _chat(context) : const _AiOff());
 
   Widget _chat(BuildContext context) {
     final dx = panelDx();
@@ -213,7 +214,13 @@ class _AiPanelState extends State<AiPanel> {
                         ? UserBubble(m.text)
                         : m.isAdmin
                         ? AdminBubble(m)
-                        : AnswerBubble(key: i == lastAi ? _lastAnswer : ValueKey('ans-${c.current?.id}-$i'), msg: m, question: i > 0 ? msgs[i - 1].text : '', find: _find, chatId: c.current?.id ?? ''),
+                        : AnswerBubble(
+                            key: i == lastAi ? _lastAnswer : ValueKey('ans-${c.current?.id}-$i'),
+                            msg: m,
+                            question: i > 0 ? msgs[i - 1].text : '',
+                            find: _find,
+                            chatId: c.current?.id ?? '',
+                          ),
                   );
                 },
               ),
@@ -306,7 +313,14 @@ class _Intro extends StatelessWidget {
           runSpacing: 8,
           children: [
             for (final s in kAiSuggestions)
-              Pill(key: ValueKey('ai-sug-$s'), label: s, tone: PillTone.topic, fontSize: 14, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9), onTap: () => onAsk(s)),
+              Pill(
+                key: ValueKey('ai-sug-$s'),
+                label: s,
+                tone: PillTone.topic,
+                fontSize: 14,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                onTap: () => onAsk(s),
+              ),
           ],
         ),
         const SizedBox(height: 14),
@@ -352,7 +366,12 @@ class UserBubble extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: const BoxDecoration(
           gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [GColors.maroonLight, GColors.maroon]),
-          borderRadius: BorderRadius.only(topLeft: Radius.circular(18), topRight: Radius.circular(18), bottomLeft: Radius.circular(18), bottomRight: Radius.circular(5)),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(18),
+            topRight: Radius.circular(18),
+            bottomLeft: Radius.circular(18),
+            bottomRight: Radius.circular(5),
+          ),
         ),
         child: SelectableText(text, style: GText.sans(size: 16, color: GColors.paper, height: 1.55)),
       ),
@@ -463,6 +482,7 @@ class _AnswerBubbleState extends State<AnswerBubble> {
                     _Citations(cited),
                     for (final p in cited.take(2)) Padding(padding: const EdgeInsets.only(top: 8), child: PramanPreview(p)),
                   ],
+                  if (msg.sources.isNotEmpty) ...[const SizedBox(height: 10), BookSourceLinks(msg.sources)],
                   const SizedBox(height: 8),
                   ListenableBuilder(
                     listenable: AiFeedback.I,
@@ -472,9 +492,21 @@ class _AnswerBubbleState extends State<AnswerBubble> {
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          Pill(key: const ValueKey('ai-up'), icon: 'thumbs-up', label: v == 1 ? 'पसंद ✓' : 'पसंद', tone: v == 1 ? PillTone.topic : PillTone.plain, onTap: _up),
+                          Pill(
+                            key: const ValueKey('ai-up'),
+                            icon: 'thumbs-up',
+                            label: v == 1 ? 'पसंद ✓' : 'पसंद',
+                            tone: v == 1 ? PillTone.topic : PillTone.plain,
+                            onTap: _up,
+                          ),
                           if (RemoteConfig.I.aiFlagsEnabled)
-                            Pill(key: const ValueKey('ai-down'), icon: 'thumbs-down', label: v == -1 ? 'भेजा ✓' : 'गलत', tone: v == -1 ? PillTone.topic : PillTone.plain, onTap: _down),
+                            Pill(
+                              key: const ValueKey('ai-down'),
+                              icon: 'thumbs-down',
+                              label: v == -1 ? 'भेजा ✓' : 'गलत',
+                              tone: v == -1 ? PillTone.topic : PillTone.plain,
+                              onTap: _down,
+                            ),
                           Pill(key: const ValueKey('ai-share'), icon: 'share-2', label: 'शेयर', onTap: _share),
                           Pill(key: const ValueKey('ai-copy'), icon: 'copy', label: 'कॉपी', onTap: _copy),
                           Pill(key: const ValueKey('ai-card-pdf'), icon: 'file-text', label: _busy ? 'बन रही…' : 'कार्ड PDF', onTap: _cardPdf),
@@ -787,7 +819,7 @@ class AskAdminCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'क्या आप यह प्रश्न admin को भेजना चाहेंगे?',
+          'प्रश्न एडमिन को भेजें?',
           style: GText.sans(size: 15, weight: FontWeight.w600, color: GColors.brown, height: 1.5),
         ),
         if (offer.message != null) ...[const SizedBox(height: 6), Text(offer.message!, style: GText.sans(size: 13, color: GColors.muted, height: 1.5))],
@@ -796,7 +828,15 @@ class AskAdminCard extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            if (offer.canRetry) SheetButton(key: const ValueKey('ask-admin-yes'), label: offer.sending ? 'भेज रहे हैं…' : 'हाँ', icon: 'send', primary: true, enabled: !offer.sending, onTap: onYes),
+            if (offer.canRetry)
+              SheetButton(
+                key: const ValueKey('ask-admin-yes'),
+                label: offer.sending ? 'भेज रहे हैं…' : 'हाँ',
+                icon: 'send',
+                primary: true,
+                enabled: !offer.sending,
+                onTap: onYes,
+              ),
             SheetButton(key: const ValueKey('ask-admin-no'), label: 'नहीं', icon: 'x', onTap: onNo),
           ],
         ),
@@ -1073,5 +1113,40 @@ class _AiOff extends StatelessWidget {
       actionLabel: 'होम पर जाएँ',
       onAction: () => AppNav.I.go('#/dashboard'),
     ),
+  );
+}
+
+/// SRJM book citations under an answer: small links; a tap opens the url outside the app.
+class BookSourceLinks extends StatelessWidget {
+  const BookSourceLinks(this.sources, {super.key});
+  final List<BookSource> sources;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    key: const ValueKey('ai-book-sources'),
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        'पुस्तक स्रोत',
+        style: GText.sans(size: 12.5, weight: FontWeight.w700, color: GColors.brown),
+      ),
+      const SizedBox(height: 4),
+      for (final (i, s) in sources.indexed)
+        InkWell(
+          key: ValueKey('ai-book-src-$i'),
+          onTap: s.hasLink ? () => FileActions.openUrl(s.url) : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Text(
+              '📖 ${s.label}',
+              style: GText.sans(
+                size: 12.5,
+                color: s.hasLink ? GColors.maroon : GColors.muted,
+                height: 1.4,
+              ).copyWith(decoration: s.hasLink ? TextDecoration.underline : null),
+            ),
+          ),
+        ),
+    ],
   );
 }

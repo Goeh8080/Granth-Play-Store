@@ -847,7 +847,7 @@ void main() {
         }
         await settle(t, 6);
         expect(find.byKey(const ValueKey('ask-admin')), findsOneWidget);
-        expect(find.text('क्या आप यह प्रश्न admin को भेजना चाहेंगे?'), findsOneWidget);
+        expect(find.text('प्रश्न एडमिन को भेजें?'), findsOneWidget);
         await t.ensureVisible(find.byKey(const ValueKey('ask-admin-yes')));
         await t.tap(find.byKey(const ValueKey('ask-admin-yes')));
         for (var i = 0; i < 100 && ChatController.I.offer != null; i++) {
@@ -917,6 +917,6 @@ void main() {
     );
     await t.pump();
     expect(t.takeException(), isNull);
-    expect(find.text('क्या आप यह प्रश्न admin को भेजना चाहेंगे?'), findsOneWidget);
+    expect(find.text('प्रश्न एडमिन को भेजें?'), findsOneWidget);
   });
 }

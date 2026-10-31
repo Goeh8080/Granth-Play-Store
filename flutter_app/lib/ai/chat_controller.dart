@@ -24,7 +24,10 @@ import 'retriever.dart';
 const kEmptyAnswer = 'क्षमा करें, इस प्रश्न का सीधा उत्तर नहीं मिला।';
 
 class AdminOffer {
-  AdminOffer(this.convId, this.question);
+  AdminOffer(this.convId, this.question, {this.reason});
+
+  /// The worker's not-found `reason`, sent as `context: "ai_not_found:<reason>"`.
+  final String? reason;
   final String convId;
   final String question;
   bool sending = false;
@@ -219,16 +222,23 @@ class ChatController extends ChangeNotifier {
       final now = DateTime.now().millisecondsSinceEpoch;
       // Never show raw candidate ids ("id-467"): the praman / note / topic name instead.
       final names = {for (final x in cands) x.id: x.granth.isEmpty ? x.title : '${x.title} (${x.granth})'};
-      var text = sanitizeAiText(
-        a.answer,
-        (id) => names[id],
-        sourceName: (n) => n >= 1 && n <= cands.length ? names[cands[n - 1].id] : null,
-      );
+      var text = sanitizeAiText(a.answer, (id) => names[id], sourceName: (n) => n >= 1 && n <= cands.length ? names[cands[n - 1].id] : null);
       if (text.isEmpty) text = kEmptyAnswer;
-      c.messages.add(ChatMsg(role: 'assistant', text: text.length > kMaxMessageChars ? text.substring(0, kMaxMessageChars) : text, cited: known, at: now));
+      c.messages.add(
+        ChatMsg(
+          role: 'assistant',
+          text: text.length > kMaxMessageChars ? text.substring(0, kMaxMessageChars) : text,
+          cited: known,
+          at: now,
+          sources: a.sources,
+        ),
+      );
       c.updated = now;
       sending = false;
-      offer = aiCannotAnswer(answer: text, cited: a.cited, isPraman: (id) => Retriever.I.praman(id) != null, notFound: a.notFound) ? AdminOffer(c.id, question) : null;
+      offer = aiCannotAnswer(answer: text, cited: a.cited, isPraman: (id) => Retriever.I.praman(id) != null, notFound: a.offerAdmin)
+          ? AdminOffer(c.id, question, reason: a.found == false ? (a.reason ?? 'no_source') : null)
+          : null;
+      if (a.found == false) Analytics.I.aiFailed(question, a.reason ?? 'no_source');
       tick++;
       Analytics.I.aiAnswered();
       notifyListeners();
@@ -279,7 +289,7 @@ class ChatController extends ChangeNotifier {
     o.sending = true;
     o.message = null;
     notifyListeners();
-    final r = await admin.sendQuestion(o.question, convId: o.convId);
+    final r = await admin.sendQuestion(o.question, convId: o.convId, context: o.reason == null ? null : 'ai_not_found:${o.reason}');
     o.sending = false;
     if (r.ok) {
       if (identical(offer, o)) offer = null;
@@ -325,7 +335,13 @@ class ChatController extends ChangeNotifier {
       if (c.messages.any((m) => m.ref == ref)) return true;
       final now = DateTime.now().millisecondsSinceEpoch;
       c.messages.add(
-        ChatMsg(role: 'admin', text: a.answer.length > kMaxMessageChars ? a.answer.substring(0, kMaxMessageChars) : a.answer, at: now, ref: ref, ask: a.question.isEmpty ? null : a.question),
+        ChatMsg(
+          role: 'admin',
+          text: a.answer.length > kMaxMessageChars ? a.answer.substring(0, kMaxMessageChars) : a.answer,
+          at: now,
+          ref: ref,
+          ask: a.question.isEmpty ? null : a.question,
+        ),
       );
       c.updated = now;
       chats = await store.save(c);

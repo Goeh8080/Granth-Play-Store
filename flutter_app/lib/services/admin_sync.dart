@@ -25,15 +25,7 @@ import 'storage.dart';
 const int kDailyQuestions = 5;
 const String kAnswerNoticeTitle = 'आपका उत्तर आ गया है';
 
-enum AskResult {
-  sent,
-  duplicate,
-  dailyLimit,
-  rateLimited,
-  offline,
-  invalid,
-  unavailable,
-}
+enum AskResult { sent, duplicate, dailyLimit, rateLimited, offline, invalid, unavailable }
 
 class AskOutcome {
   const AskOutcome(this.result, this.message, {this.id});
@@ -45,35 +37,20 @@ class AskOutcome {
   bool get ok => result == AskResult.sent || result == AskResult.duplicate;
 
   /// Trying again later can work (so the Yes button stays).
-  bool get canRetry =>
-      result == AskResult.offline ||
-      result == AskResult.unavailable ||
-      result == AskResult.rateLimited;
+  bool get canRetry => result == AskResult.offline || result == AskResult.unavailable || result == AskResult.rateLimited;
 }
 
-const _msgSent =
-    'आपका प्रश्न admin को भेज दिया गया है। उत्तर आते ही वह यहीं इस चैट में दिखेगा, और सूचना भी आएगी।';
-const _msgDup =
-    'यह प्रश्न admin को पहले ही भेजा जा चुका है। उत्तर आते ही वह यहीं दिखेगा।';
-const _msgDaily =
-    'आज आप $kDailyQuestions प्रश्न भेज चुके हैं। कृपया कल फिर भेजिए।';
-const _msgRate =
-    'अभी admin तक प्रश्न नहीं पहुँच पाया — कुछ देर बाद फिर कोशिश कीजिए। (आज की सीमा पूरी हो चुकी हो सकती है।)';
-const _msgOffline =
-    'इंटरनेट नहीं मिला, इसलिए प्रश्न नहीं भेजा जा सका। नेट चालू करके फिर कोशिश कीजिए।';
-const _msgInvalid =
-    'यह प्रश्न भेजा नहीं जा सका। कृपया उसे छोटा और साफ़ करके लिखिए।';
-const _msgDown =
-    'admin की सेवा अभी तैयार नहीं है। कुछ देर बाद फिर कोशिश कीजिए।';
+const _msgSent = 'आपका प्रश्न admin को भेज दिया गया है। उत्तर आते ही वह यहीं इस चैट में दिखेगा, और सूचना भी आएगी।';
+const _msgDup = 'यह प्रश्न admin को पहले ही भेजा जा चुका है। उत्तर आते ही वह यहीं दिखेगा।';
+const _msgDaily = 'आज आप $kDailyQuestions प्रश्न भेज चुके हैं। कृपया कल फिर भेजिए।';
+const _msgRate = 'अभी admin तक प्रश्न नहीं पहुँच पाया — कुछ देर बाद फिर कोशिश कीजिए। (आज की सीमा पूरी हो चुकी हो सकती है।)';
+const _msgOffline = 'इंटरनेट नहीं मिला, इसलिए प्रश्न नहीं भेजा जा सका। नेट चालू करके फिर कोशिश कीजिए।';
+const _msgInvalid = 'यह प्रश्न भेजा नहीं जा सका। कृपया उसे छोटा और साफ़ करके लिखिए।';
+const _msgDown = 'admin की सेवा अभी तैयार नहीं है। कुछ देर बाद फिर कोशिश कीजिए।';
 
 /// One answer from the server.
 class AdminAnswer {
-  const AdminAnswer({
-    required this.id,
-    required this.question,
-    required this.answer,
-    required this.answeredAt,
-  });
+  const AdminAnswer({required this.id, required this.question, required this.answer, required this.answeredAt});
   final int id;
   final String question;
   final String answer;
@@ -130,10 +107,8 @@ class AdminSync {
        _notify = notify;
   static AdminSync I = AdminSync();
 
-  static const kDay =
-      'granth-ai-qday'; // "YYYY-MM-DD:n" (UTC day, like the server's)
-  static const kAsked =
-      'granth-ai-asked'; // '1' once a question was sent: only then is the server polled
+  static const kDay = 'granth-ai-qday'; // "YYYY-MM-DD:n" (UTC day, like the server's)
+  static const kAsked = 'granth-ai-asked'; // '1' once a question was sent: only then is the server polled
   static const kDone = 'granth-ai-ans-done'; // answer refs already stored
   static const kConvMap = 'granth-ai-qconv'; // {"<question id>": "<chat id>"}
 
@@ -181,7 +156,7 @@ class AdminSync {
   Future<void> _setToday(int n) => Store.I.setString(kDay, '${_today()}:$n');
 
   /// Sends [question] to the admin ([convId]: the chat the answer should come back to).
-  Future<AskOutcome> sendQuestion(String question, {String? convId}) async {
+  Future<AskOutcome> sendQuestion(String question, {String? convId, String? context}) async {
     final q = question.trim();
     if (q.runes.length < 3) {
       return const AskOutcome(AskResult.invalid, _msgInvalid);
@@ -193,6 +168,7 @@ class AdminSync {
         'iid': iid,
         'question': String.fromCharCodes(q.runes.take(500)),
         'lang': 'hi',
+        if (context != null && context.isNotEmpty) 'context': context.length > 300 ? context.substring(0, 300) : context,
       };
       final r = await _dio.post<String>(
         '$base/ai/questions',
@@ -212,11 +188,7 @@ class AdminSync {
         if (!dup) await _setToday(sentToday + 1);
         await Store.I.setString(kAsked, '1');
         if (id != null && convId != null) await _rememberConv(id, convId);
-        return AskOutcome(
-          dup ? AskResult.duplicate : AskResult.sent,
-          dup ? _msgDup : _msgSent,
-          id: id,
-        );
+        return AskOutcome(dup ? AskResult.duplicate : AskResult.sent, dup ? _msgDup : _msgSent, id: id);
       }
       if (s == 429) return const AskOutcome(AskResult.rateLimited, _msgRate);
       if (s == 400 || s == 413 || s == 422) {
@@ -230,10 +202,7 @@ class AdminSync {
           e.type == DioExceptionType.sendTimeout ||
           e.type == DioExceptionType.receiveTimeout ||
           e.error != null && e.response == null;
-      return AskOutcome(
-        offline ? AskResult.offline : AskResult.unavailable,
-        offline ? _msgOffline : _msgDown,
-      );
+      return AskOutcome(offline ? AskResult.offline : AskResult.unavailable, offline ? _msgOffline : _msgDown);
     } catch (_) {
       return const AskOutcome(AskResult.unavailable, _msgDown);
     }
@@ -252,8 +221,7 @@ class AdminSync {
     return j is Map
         ? {
             for (final e in j.entries)
-              if (e.key is String && e.value is String)
-                e.key as String: e.value as String,
+              if (e.key is String && e.value is String) e.key as String: e.value as String,
           }
         : {};
   }
@@ -370,18 +338,12 @@ class AdminSync {
     }
   }
 
-  Future<bool> _defaultDeliver(AdminAnswer a, String? convId) =>
-      ChatController.I.deliverAdminAnswer(a, convId);
+  Future<bool> _defaultDeliver(AdminAnswer a, String? convId) => ChatController.I.deliverAdminAnswer(a, convId);
 
   Future<void> _defaultNotify(int count, String text) {
     final one = text.replaceAll(RegExp(r'\s+'), ' ').trim();
-    final body = count > 1
-        ? 'admin के $count संदेश आए हैं — ऐप खोलकर देखें'
-        : (one.length > 90 ? '${one.substring(0, 89)}…' : one);
-    return NativeBridge.pdfNotice('answerNotice', {
-      'title': kAnswerNoticeTitle,
-      'text': body.isEmpty ? 'admin का संदेश आया है' : body,
-    });
+    final body = count > 1 ? 'admin के $count संदेश आए हैं — ऐप खोलकर देखें' : (one.length > 90 ? '${one.substring(0, 89)}…' : one);
+    return NativeBridge.pdfNotice('answerNotice', {'title': kAnswerNoticeTitle, 'text': body.isEmpty ? 'admin का संदेश आया है' : body});
   }
 
   @visibleForTesting

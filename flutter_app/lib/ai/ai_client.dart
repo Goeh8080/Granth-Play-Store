@@ -20,14 +20,59 @@ class AiTurn {
 
 /// What the Worker answered.
 class AiAnswer {
-  const AiAnswer({required this.answer, required this.cited, required this.provider, this.notFound});
+  const AiAnswer({
+    required this.answer,
+    required this.cited,
+    required this.provider,
+    this.notFound,
+    this.found,
+    this.reason,
+    this.askAdmin,
+    this.sources = const [],
+  });
   final String answer;
   final List<int> cited;
   final String provider;
 
   /// Explicit server "not found" signal; null when the Worker did not send one.
   final bool? notFound;
+
+  /// CONTRACT "AI not-found signal": `found`, `reason` (no_source|out_of_scope|low_confidence), `ask_admin`.
+  final bool? found;
+  final String? reason;
+  final bool? askAdmin;
+
+  /// SRJM book citations `sources:[{book,chapter,url}]`.
+  final List<BookSource> sources;
+
+  /// Whether to offer "प्रश्न एडमिन को भेजें?": `ask_admin:true`, else `found` alone decides; null → heuristic.
+  bool? get offerAdmin => askAdmin == true ? true : (found != null ? !found! : notFound);
 }
+
+/// One SRJM book citation under an answer.
+class BookSource {
+  const BookSource({required this.book, this.chapter = '', this.url = ''});
+  final String book, chapter, url;
+  String get label => chapter.isEmpty ? book : '$book · $chapter';
+  bool get hasLink {
+    final u = Uri.tryParse(url);
+    return u != null && (u.scheme == 'https' || u.scheme == 'http') && u.host.isNotEmpty;
+  }
+
+  Map<String, String> toJson() => {'book': book, if (chapter.isNotEmpty) 'chapter': chapter, if (url.isNotEmpty) 'url': url};
+  static BookSource? fromJson(Object? j) {
+    if (j is! Map) return null;
+    String s(Object? v, int max) => v is String ? (v.trim().length > max ? v.trim().substring(0, max) : v.trim()) : (v is num ? '$v' : '');
+    final b = s(j['book'], 120);
+    if (b.isEmpty) return null;
+    return BookSource(book: b, chapter: s(j['chapter'], 120), url: s(j['url'], 500));
+  }
+}
+
+List<BookSource> parseSources(Object? v) => [
+  if (v is List)
+    for (final e in v.take(10)) ?BookSource.fromJson(e),
+];
 
 /// Reads the Worker's explicit not-found signal (format still TBD, so several shapes are accepted):
 /// `not_found: true`, `found: false`, `answer_found: false`, `cannot_answer: true`,
@@ -92,14 +137,14 @@ List<int> parseCited(Object? raw) {
 }
 
 String _messageFor(AiFailure k) => switch (k) {
-      AiFailure.offline => 'इंटरनेट से जुड़ नहीं पाया। कनेक्शन जाँचकर फिर कोशिश करें।',
-      AiFailure.timeout => 'उत्तर आने में बहुत समय लग रहा है। कृपया फिर कोशिश करें।',
-      AiFailure.rateLimited => 'अभी बहुत प्रश्न आ रहे हैं। थोड़ी देर बाद फिर कोशिश करें।',
-      AiFailure.unavailable => 'AI सेवा अभी उपलब्ध नहीं है। थोड़ी देर बाद फिर कोशिश करें।',
-      AiFailure.rejected => 'यह प्रश्न स्वीकार नहीं हुआ। कृपया इसे छोटा या अलग तरह से लिखें।',
-      AiFailure.tooLarge => 'प्रश्न बहुत बड़ा है। कृपया इसे छोटा करके पूछें।',
-      AiFailure.badReply => 'AI से समझ न आने वाला उत्तर मिला। कृपया फिर कोशिश करें।',
-    };
+  AiFailure.offline => 'इंटरनेट से जुड़ नहीं पाया। कनेक्शन जाँचकर फिर कोशिश करें।',
+  AiFailure.timeout => 'उत्तर आने में बहुत समय लग रहा है। कृपया फिर कोशिश करें।',
+  AiFailure.rateLimited => 'अभी बहुत प्रश्न आ रहे हैं। थोड़ी देर बाद फिर कोशिश करें।',
+  AiFailure.unavailable => 'AI सेवा अभी उपलब्ध नहीं है। थोड़ी देर बाद फिर कोशिश करें।',
+  AiFailure.rejected => 'यह प्रश्न स्वीकार नहीं हुआ। कृपया इसे छोटा या अलग तरह से लिखें।',
+  AiFailure.tooLarge => 'प्रश्न बहुत बड़ा है। कृपया इसे छोटा करके पूछें।',
+  AiFailure.badReply => 'AI से समझ न आने वाला उत्तर मिला। कृपया फिर कोशिश करें।',
+};
 
 /// Turns an HTTP status + body into an answer or an [AiException]. Pure, so it is unit-tested.
 AiAnswer parseAskResponse(int status, String body) {
@@ -114,7 +159,16 @@ AiAnswer parseAskResponse(int status, String body) {
       final a = json['answer'];
       if (a is String && a.trim().isNotEmpty) {
         final p = json['provider'];
-        return AiAnswer(answer: a.trim(), cited: parseCited(json['cited']), provider: p is String ? p : '', notFound: parseNotFound(json));
+        return AiAnswer(
+          answer: a.trim(),
+          cited: parseCited(json['cited']),
+          provider: p is String ? p : '',
+          notFound: parseNotFound(json),
+          found: json['found'] is bool ? json['found'] as bool : null,
+          reason: json['reason'] is String && (json['reason'] as String).isNotEmpty ? json['reason'] as String : null,
+          askAdmin: json['ask_admin'] is bool ? json['ask_admin'] as bool : null,
+          sources: parseSources(json['sources']),
+        );
       }
     }
     throw AiException(AiFailure.badReply, _messageFor(AiFailure.badReply), status: status);
@@ -129,12 +183,8 @@ AiAnswer parseAskResponse(int status, String body) {
 }
 
 class AiClient {
-  AiClient({
-    String? endpoint,
-    this.timeout = const Duration(seconds: 45),
-    this.backoff = const Duration(milliseconds: 1500),
-    this.header = kAiClientHeader,
-  }) : endpoint = (endpoint ?? RemoteConfig.I.aiEndpoint ?? kAiEndpoint).replaceAll(RegExp(r'/+$'), '');
+  AiClient({String? endpoint, this.timeout = const Duration(seconds: 45), this.backoff = const Duration(milliseconds: 1500), this.header = kAiClientHeader})
+    : endpoint = (endpoint ?? RemoteConfig.I.aiEndpoint ?? kAiEndpoint).replaceAll(RegExp(r'/+$'), '');
 
   final String endpoint;
   final Duration timeout;
