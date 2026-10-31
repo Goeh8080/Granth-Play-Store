@@ -228,7 +228,7 @@ class ChatController extends ChangeNotifier {
       c.messages.add(ChatMsg(role: 'assistant', text: text.length > kMaxMessageChars ? text.substring(0, kMaxMessageChars) : text, cited: known, at: now));
       c.updated = now;
       sending = false;
-      offer = aiCannotAnswer(answer: text, cited: a.cited, isPraman: (id) => Retriever.I.praman(id) != null) ? AdminOffer(c.id, question) : null;
+      offer = aiCannotAnswer(answer: text, cited: a.cited, isPraman: (id) => Retriever.I.praman(id) != null, notFound: a.notFound) ? AdminOffer(c.id, question) : null;
       tick++;
       Analytics.I.aiAnswered();
       notifyListeners();

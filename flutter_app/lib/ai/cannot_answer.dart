@@ -25,7 +25,10 @@ bool aiCannotAnswer({
   required String answer,
   required List<int> cited,
   required bool Function(int id) isPraman,
+  bool? notFound,
 }) {
+  if (notFound != null) return notFound; // explicit server signal wins; heuristic is the fallback
+
   final real = [
     for (final id in cited)
       if (isPraman(id) || isNoteId(id) || isTopicId(id)) id,

@@ -20,10 +20,29 @@ class AiTurn {
 
 /// What the Worker answered.
 class AiAnswer {
-  const AiAnswer({required this.answer, required this.cited, required this.provider});
+  const AiAnswer({required this.answer, required this.cited, required this.provider, this.notFound});
   final String answer;
   final List<int> cited;
   final String provider;
+
+  /// Explicit server "not found" signal; null when the Worker did not send one.
+  final bool? notFound;
+}
+
+/// Reads the Worker's explicit not-found signal (format still TBD, so several shapes are accepted):
+/// `not_found: true`, `found: false`, `answer_found: false`, `cannot_answer: true`,
+/// `status`/`result: "not_found"`. Returns null when absent so the heuristic decides.
+bool? parseNotFound(Map json) {
+  bool? b(Object? v) => v is bool ? v : (v == 'true' ? true : (v == 'false' ? false : null));
+  final nf = b(json['not_found']) ?? b(json['notFound']) ?? b(json['cannot_answer']);
+  if (nf != null) return nf;
+  final f = b(json['found']) ?? b(json['answer_found']);
+  if (f != null) return !f;
+  for (final k in const ['status', 'result']) {
+    final v = json[k];
+    if (v is String && v.toLowerCase().replaceAll('-', '_') == 'not_found') return true;
+  }
+  return null;
 }
 
 enum AiFailure { offline, timeout, rateLimited, unavailable, rejected, tooLarge, badReply }
@@ -95,7 +114,7 @@ AiAnswer parseAskResponse(int status, String body) {
       final a = json['answer'];
       if (a is String && a.trim().isNotEmpty) {
         final p = json['provider'];
-        return AiAnswer(answer: a.trim(), cited: parseCited(json['cited']), provider: p is String ? p : '');
+        return AiAnswer(answer: a.trim(), cited: parseCited(json['cited']), provider: p is String ? p : '', notFound: parseNotFound(json));
       }
     }
     throw AiException(AiFailure.badReply, _messageFor(AiFailure.badReply), status: status);
