@@ -22,7 +22,7 @@ import 'remote_config.dart';
 import 'storage.dart';
 
 /// Optional Web OAuth client id (when google-services.json carries none).
-const String kGoogleWebClientId = String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
+const String kGoogleWebClientId = String.fromEnvironment('GOOGLE_WEB_CLIENT_ID', defaultValue: '386256348529-55gsprsn906i00e6726tu1gdo253kipv.apps.googleusercontent.com');
 
 /// FCM topics (provisional until CONTRACT.md names them; see round14_backend_needs.md).
 /// CONTRACT §6.3 FCM topics. `all` is always on (unless `flags.notifications_enabled` is false).
